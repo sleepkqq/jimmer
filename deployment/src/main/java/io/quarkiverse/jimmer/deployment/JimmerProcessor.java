@@ -1020,6 +1020,16 @@ final class JimmerProcessor {
                         .build());
     }
 
+    @BuildStep
+    void registerPostgreSqlExceptionReflection(BuildProducer<ReflectiveClassBuildItem> reflectiveClass) {
+        if (!QuarkusClassLoader.isClassPresentAtRuntime("org.postgresql.util.PSQLException")) {
+            return;
+        }
+        reflectiveClass.produce(ReflectiveClassBuildItem.builder(
+                "org.postgresql.util.PSQLException",
+                "org.postgresql.util.ServerErrorMessage").constructors(false).methods().build());
+    }
+
     /**
      * Cache subsystem reflection. Without this on native image, FilterManager.onInitialized
      * triggers PropCacheInvalidators.isGetAffectedSourceIdsOverridden0 which does
