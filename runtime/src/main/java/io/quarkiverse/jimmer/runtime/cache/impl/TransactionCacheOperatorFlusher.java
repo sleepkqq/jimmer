@@ -6,8 +6,16 @@ import java.util.List;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
-import jakarta.enterprise.event.TransactionPhase;
+import jakarta.transaction.RollbackException;
+import jakarta.transaction.Status;
+import jakarta.transaction.Synchronization;
+import jakarta.transaction.SystemException;
+import jakarta.transaction.Transaction;
+import jakarta.transaction.TransactionManager;
+import jakarta.transaction.TransactionSynchronizationRegistry;
 
+import org.babyfish.jimmer.sql.JSqlClient;
+import org.babyfish.jimmer.sql.cache.CachesImpl;
 import org.babyfish.jimmer.sql.cache.TransactionCacheOperator;
 import org.babyfish.jimmer.sql.event.DatabaseEvent;
 import org.babyfish.jimmer.sql.kt.KSqlClient;
@@ -23,6 +31,7 @@ import io.quarkus.arc.All;
 import io.quarkus.arc.Arc;
 import io.quarkus.arc.InstanceHandle;
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import io.quarkus.scheduler.Scheduled;
 
 @ApplicationScoped
@@ -32,23 +41,58 @@ public class TransactionCacheOperatorFlusher {
 
     private final List<InstanceHandle<TransactionCacheOperator>> operatorHandles;
 
-    private final ThreadLocal<Boolean> dirtyLocal = new ThreadLocal<>();
+    private final Object completionKey = new Object();
+    private final TransactionManager transactionManager;
+    private final TransactionSynchronizationRegistry registry;
 
-    public TransactionCacheOperatorFlusher(@All List<InstanceHandle<TransactionCacheOperator>> operatorHandles) {
+    public TransactionCacheOperatorFlusher(@All List<InstanceHandle<TransactionCacheOperator>> operatorHandles,
+            TransactionManager transactionManager, TransactionSynchronizationRegistry registry) {
         if (operatorHandles.isEmpty()) {
             throw new IllegalArgumentException("`operators` cannot be empty");
         }
         this.operatorHandles = operatorHandles;
+        this.transactionManager = transactionManager;
+        this.registry = registry;
     }
 
-    public void beforeCommit(@Observes(during = TransactionPhase.IN_PROGRESS) DatabaseEvent e) {
-        dirtyLocal.set(Boolean.TRUE);
-    }
+    public void onDatabaseEvent(@Observes DatabaseEvent e) {
+        if (registry.getTransactionStatus() == Status.STATUS_NO_TRANSACTION) {
+            retry();
+            return;
+        }
+        if (registry.getTransactionStatus() != Status.STATUS_ACTIVE || registry.getResource(completionKey) != null) {
+            return;
+        }
+        try {
+            Transaction transaction = transactionManager.getTransaction();
+            synchronized (transaction) {
+                if (registry.getResource(completionKey) != null) {
+                    return;
+                }
+                // Normal synchronizations run after Agroal's interposed connection cleanup.
+                transaction.registerSynchronization(new Synchronization() {
+                    @Override
+                    public void beforeCompletion() {
+                    }
 
-    public void afterCommit(@Observes(during = TransactionPhase.AFTER_COMPLETION) DatabaseEvent e) {
-        if (dirtyLocal.get() != null) {
-            dirtyLocal.remove();
-            flush(resolveOperators(false));
+                    @Override
+                    public void afterCompletion(int status) {
+                        if (status == Status.STATUS_COMMITTED) {
+                            try {
+                                QuarkusTransaction.suspendingExisting().run(TransactionCacheOperatorFlusher.this::retry);
+                            } catch (RuntimeException ex) {
+                                LOGGER.warn("Failed to flush committed cache invalidations; pending operations remain available for retry",
+                                        ex);
+                            }
+                        }
+                    }
+                });
+                registry.putResource(completionKey, Boolean.TRUE);
+            }
+        } catch (RollbackException ignored) {
+            // A transaction marked for rollback has no committed invalidations to flush.
+        } catch (SystemException ex) {
+            throw new IllegalStateException("Cannot register transaction cache completion", ex);
         }
     }
 
@@ -62,13 +106,13 @@ public class TransactionCacheOperatorFlusher {
      */
     @Scheduled(every = "${quarkus.jimmer.transaction-cache-operator-fixed-delay}", identity = "jimmer.transaction-cache-operator-job")
     public void retry() {
-        flush(resolveOperators(true));
+        flush(resolveOperators());
     }
 
-    private List<TransactionCacheOperator> resolveOperators(boolean onlyInitializedSqlClients) {
+    private List<TransactionCacheOperator> resolveOperators() {
         List<TransactionCacheOperator> operators = new ArrayList<>(operatorHandles.size());
         for (InstanceHandle<TransactionCacheOperator> operatorHandle : operatorHandles) {
-            if (onlyInitializedSqlClients && !isSqlClientInitialized(dataSourceNameOf(operatorHandle))) {
+            if (!hasInitializedCaches(dataSourceNameOf(operatorHandle))) {
                 continue;
             }
             operators.add(operatorHandle.get());
@@ -85,25 +129,26 @@ public class TransactionCacheOperatorFlusher {
         return DataSourceUtil.DEFAULT_DATASOURCE_NAME;
     }
 
-    private static boolean isSqlClientInitialized(String dataSourceName) {
+    private static boolean hasInitializedCaches(String dataSourceName) {
         Annotation qualifier = QuarkusSqlClientContainerUtil.getQuarkusSqlClientContainerQualifier(dataSourceName);
         InstanceHandle<QuarkusJSqlClientContainer> jContainer = Arc.container()
                 .instance(QuarkusJSqlClientContainer.class, qualifier);
         if (jContainer.isAvailable()) {
-            return isInitialized(jContainer.get().getjSqlClient());
+            return hasInitializedCaches(jContainer.get().getjSqlClient());
         }
         InstanceHandle<QuarkusKSqlClientContainer> kContainer = Arc.container()
                 .instance(QuarkusKSqlClientContainer.class, qualifier);
         if (kContainer.isAvailable()) {
             KSqlClient kSqlClient = kContainer.get().getKSqlClient();
-            return kSqlClient == null || isInitialized(kSqlClient.getJavaClient());
+            return kSqlClient != null && hasInitializedCaches(kSqlClient.getJavaClient());
         }
         return true;
     }
 
-    private static boolean isInitialized(Object sqlClient) {
-        return !(sqlClient instanceof SqlClientInitializationAware)
-                || ((SqlClientInitializationAware) sqlClient).isSqlClientInitialized();
+    private static boolean hasInitializedCaches(JSqlClient sqlClient) {
+        return (!(sqlClient instanceof SqlClientInitializationAware)
+                || ((SqlClientInitializationAware) sqlClient).isSqlClientInitialized())
+                && !CachesImpl.isEmpty(sqlClient.getCaches());
     }
 
     private void flush(List<TransactionCacheOperator> operators) {
