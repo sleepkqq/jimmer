@@ -37,7 +37,7 @@ configuration that makes it work:
 <!-- versions:start -->
 | Extension | Quarkus  | Jimmer    | Kotlin  | JDK  |
 |-----------|----------|-----------|---------|------|
-| `1.5.1`   | `3.36.3` | `0.10.11` | `2.4.0` | `21` |
+| `1.13.7`   | `3.39.2` | `0.12.1` | `2.4.10` | `21` |
 <!-- versions:end -->
 
 > The table and the version numbers in the snippets below are kept in sync with
@@ -57,12 +57,12 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.5.1")
+    implementation("com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.13.7")
 
     // Java projects
-    annotationProcessor("org.babyfish.jimmer:jimmer-apt:0.10.11")
+    annotationProcessor("org.babyfish.jimmer:jimmer-apt:0.12.1")
     // Kotlin projects (KSP)
-    // ksp("org.babyfish.jimmer:jimmer-ksp:0.10.11")
+    // ksp("org.babyfish.jimmer:jimmer-ksp:0.12.1")
 }
 ```
 
@@ -74,8 +74,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.5.1'
-    annotationProcessor 'org.babyfish.jimmer:jimmer-apt:0.10.11'
+    implementation 'com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.13.7'
+    annotationProcessor 'org.babyfish.jimmer:jimmer-apt:0.12.1'
 }
 ```
 
