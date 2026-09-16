@@ -73,6 +73,8 @@ import org.babyfish.jimmer.sql.event.AssociationEvent;
 import org.babyfish.jimmer.sql.event.EntityEvent;
 import org.babyfish.jimmer.sql.event.TriggerType;
 import org.babyfish.jimmer.sql.filter.CacheableFilter;
+import org.babyfish.jimmer.sql.filter.AssociationIntegrityAssuranceFilter;
+import org.babyfish.jimmer.sql.filter.impl.FilterWrapper;
 import org.babyfish.jimmer.sql.filter.Filter;
 import org.babyfish.jimmer.sql.filter.ShardingCacheableFilter;
 import org.babyfish.jimmer.sql.filter.ShardingFilter;
@@ -81,6 +83,9 @@ import org.babyfish.jimmer.sql.kt.KSqlClient;
 import org.babyfish.jimmer.sql.kt.cfg.KCustomizer;
 import org.babyfish.jimmer.sql.kt.cfg.KInitializer;
 import org.babyfish.jimmer.sql.kt.filter.KFilter;
+import org.babyfish.jimmer.sql.kt.filter.KCacheableFilter;
+import org.babyfish.jimmer.sql.kt.filter.KShardingFilter;
+import org.babyfish.jimmer.sql.kt.filter.KAssociationIntegrityAssuranceFilter;
 import org.jboss.jandex.*;
 import org.jboss.logging.Logger;
 
@@ -127,6 +132,7 @@ import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.*;
 import io.quarkus.deployment.builditem.nativeimage.LambdaCapturingTypeBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.NativeImageResourceBuildItem;
+import io.quarkus.deployment.builditem.nativeimage.NativeImageProxyDefinitionBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveClassBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.ReflectiveHierarchyIgnoreWarningBuildItem;
 import io.quarkus.deployment.builditem.nativeimage.RuntimeInitializedClassBuildItem;
@@ -1028,6 +1034,27 @@ final class JimmerProcessor {
         reflectiveClass.produce(ReflectiveClassBuildItem.builder(
                 "org.postgresql.util.PSQLException",
                 "org.postgresql.util.ServerErrorMessage").constructors(false).methods().build());
+    }
+
+    @BuildStep
+    void registerKotlinFilterProxies(BuildProducer<NativeImageProxyDefinitionBuildItem> proxies) {
+        for (List<Class<?>> markers : List.of(
+                List.<Class<?>>of(CacheableFilter.class, ShardingFilter.class, AssociationIntegrityAssuranceFilter.class),
+                List.<Class<?>>of(KCacheableFilter.class, KShardingFilter.class, KAssociationIntegrityAssuranceFilter.class))) {
+            for (boolean cacheable : List.of(false, true)) {
+                for (var scope : List.of(
+                        List.of(markers.get(1)), List.of(markers.get(2)), markers.subList(1, 3))) {
+                    List<String> interfaces = new ArrayList<>();
+                    interfaces.add(FilterWrapper.class.getName());
+                    interfaces.add(Filter.class.getName());
+                    if (cacheable) {
+                        interfaces.add(markers.get(0).getName());
+                    }
+                    scope.forEach(type -> interfaces.add(type.getName()));
+                    proxies.produce(new NativeImageProxyDefinitionBuildItem(interfaces));
+                }
+            }
+        }
     }
 
     /**
