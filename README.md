@@ -324,6 +324,32 @@ public class CatalogCustomizer implements Customizer {
 For more on entities, fetchers, save commands and the query DSL, see the
 [Jimmer documentation](https://babyfish-ct.github.io/jimmer-doc/).
 
+## Redis cache timeouts
+
+The CDI cache factory uses `quarkus.redis.timeout` (default `10s`) for each pipelined
+Redis operation, including connection acquisition and waiting for its response.
+Value writes, hash reads/writes and bulk deletes remain batched; the deadline is per
+batch, not per key. Startup PING and Pub/Sub use the blocking datasource's timeout.
+
+```properties
+quarkus.redis.timeout=2s
+```
+
+Programmatically constructed `RedisCacheCreator` instances expose
+`withTimeout(Duration)`, binder builders expose `timeout(Duration)`, and
+`JimmerRedisCacheFactory` has an overload taking a final `Duration` argument.
+Their default batch timeout is 10 seconds. Pass the selected client's timeout explicitly
+when constructing them yourself, including for a named Redis datasource. Ordinary
+blocking datasource operations (such as value reads and PING) still use that
+datasource's own timeout. These operation deadlines are independent of entry TTLs
+and must be positive.
+
+Timeouts propagate to callers; failed invalidation is not treated as success. A CDC
+consumer must not acknowledge the record on failure. A timeout does **not** roll back
+Redis commands already sent: their outcome may be unknown and they may complete later.
+Invalidation can be retried; this change does not provide durable Pub/Sub replay or
+resolve stale in-flight cache-fill races.
+
 ## Native image
 
 ```bash

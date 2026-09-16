@@ -1,5 +1,6 @@
 package io.quarkiverse.jimmer.runtime.cache;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +16,6 @@ import org.slf4j.LoggerFactory;
 
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
 import io.quarkus.redis.datasource.RedisDataSource;
-import io.vertx.mutiny.redis.client.Command;
-import io.vertx.mutiny.redis.client.Request;
 
 /**
  * {@link CacheFactory} building per-entity chain caches from {@link JimmerCacheConfig}:
@@ -36,12 +35,23 @@ public class JimmerRedisCacheFactory implements CacheFactory {
     private final Map<String, JimmerCacheConfig.EntityCacheConfig> configByType;
     private final SchemaRemoteKeyPrefixProvider keyPrefixProvider;
     private final boolean operationLog;
+    private final Duration timeout;
 
     public JimmerRedisCacheFactory(
             RedisDataSource redisDataSource,
             JimmerCacheConfig config,
             String defaultSchema,
             CacheTracker tracker) {
+        this(redisDataSource, config, defaultSchema, tracker, RedisCacheCreator.DEFAULT_TIMEOUT);
+    }
+
+    public JimmerRedisCacheFactory(
+            RedisDataSource redisDataSource,
+            JimmerCacheConfig config,
+            String defaultSchema,
+            CacheTracker tracker,
+            Duration timeout) {
+        this.timeout = RedisCacheCreator.requireTimeout(timeout);
         this.redisDataSource = redisDataSource;
         this.tracker = tracker;
         this.keyPrefixProvider = new SchemaRemoteKeyPrefixProvider(defaultSchema);
@@ -68,8 +78,7 @@ public class JimmerRedisCacheFactory implements CacheFactory {
      * setup (~400ms observed) inside a user request. Also fails the start fast when Redis is down.
      */
     private void warmUpConnection() {
-        redisDataSource.getReactive().getRedis()
-                .sendAndAwait(Request.cmd(Command.PING));
+        redisDataSource.execute("PING");
     }
 
     @Override
@@ -113,6 +122,7 @@ public class JimmerRedisCacheFactory implements CacheFactory {
 
     private CacheCreator creator(JimmerCacheConfig.EntityCacheConfig config) {
         RedisCacheCreator redisCreator = new RedisCacheCreator(redisDataSource)
+                .withTimeout(timeout)
                 .withKeyPrefixProvider(keyPrefixProvider);
         if (operationLog) {
             redisCreator = redisCreator.withOperationLog();

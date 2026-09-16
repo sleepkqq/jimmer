@@ -33,6 +33,7 @@ import io.vertx.mutiny.redis.client.Response;
 public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
 
     private final Redis redis;
+    private final Duration timeout;
 
     protected RedisHashBinder(
             @Nullable ImmutableType type,
@@ -43,8 +44,17 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
             @NotNull Duration duration,
             int randomPercent,
             @NotNull RedisDataSource redisDataSource) {
+        this(type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent, redisDataSource,
+                RedisCacheCreator.DEFAULT_TIMEOUT);
+    }
+
+    private RedisHashBinder(
+            ImmutableType type, ImmutableProp prop, CacheTracker tracker, JsonCodec<?> jsonCodec,
+            RemoteKeyPrefixProvider keyPrefixProvider, Duration duration, int randomPercent,
+            RedisDataSource redisDataSource, Duration timeout) {
         super(type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent);
         this.redis = redisDataSource.getReactive().getRedis();
+        this.timeout = RedisCacheCreator.requireTimeout(timeout);
     }
 
     @Override
@@ -56,7 +66,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         for (String key : keys) {
             requests.add(Request.cmd(Command.HGET).arg(key).arg(hashKey));
         }
-        List<Response> responses = redis.batchAndAwait(requests);
+        List<Response> responses = redis.batch(requests).await().atMost(timeout);
         List<byte[]> list = new ArrayList<>(responses.size());
         for (Response response : responses) {
             list.add(response == null ? null : response.toBytes());
@@ -76,7 +86,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         for (String key : map.keySet()) {
             requests.add(Request.cmd(Command.PEXPIRE).arg(key).arg(nextExpireMillis()));
         }
-        redis.batchAndAwait(requests);
+        redis.batch(requests).await().atMost(timeout);
     }
 
     @Override
@@ -88,7 +98,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         for (String key : serializedKeys) {
             del.arg(key);
         }
-        redis.sendAndAwait(del);
+        redis.send(del).await().atMost(timeout);
     }
 
     @Override
@@ -104,6 +114,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
     public static class Builder<K, V> extends AbstractBuilder<K, V, Builder<K, V>> {
 
         private RedisDataSource redisDataSource;
+        private Duration timeout = RedisCacheCreator.DEFAULT_TIMEOUT;
 
         protected Builder(ImmutableType type, ImmutableProp prop, JsonCodec<?> jsonCodec) {
             super(type, prop, jsonCodec);
@@ -119,7 +130,13 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
                 throw new IllegalStateException("RedisDataSource has not been specified");
             }
             return new RedisHashBinder<>(
-                    type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent, redisDataSource);
+                    type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent, redisDataSource, timeout);
+        }
+
+        /** Deadline for a pipelined Redis operation, independent of entry TTL. Defaults to 10 seconds. */
+        public Builder<K, V> timeout(Duration timeout) {
+            this.timeout = RedisCacheCreator.requireTimeout(timeout);
+            return this;
         }
     }
 }

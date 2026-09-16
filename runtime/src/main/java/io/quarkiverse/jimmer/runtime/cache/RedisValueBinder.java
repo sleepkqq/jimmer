@@ -36,6 +36,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
     private final ValueCommands<String, byte[]> operations;
 
     private final Redis redis;
+    private final Duration timeout;
 
     protected RedisValueBinder(
             @Nullable ImmutableType type,
@@ -46,9 +47,18 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
             @NotNull Duration duration,
             int randomPercent,
             @NotNull RedisDataSource redisDataSource) {
+        this(type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent, redisDataSource,
+                RedisCacheCreator.DEFAULT_TIMEOUT);
+    }
+
+    private RedisValueBinder(
+            ImmutableType type, ImmutableProp prop, CacheTracker tracker, JsonCodec<?> jsonCodec,
+            RemoteKeyPrefixProvider keyPrefixProvider, Duration duration, int randomPercent,
+            RedisDataSource redisDataSource, Duration timeout) {
         super(type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent);
         this.operations = redisDataSource.value(byte[].class);
         this.redis = redisDataSource.getReactive().getRedis();
+        this.timeout = RedisCacheCreator.requireTimeout(timeout);
     }
 
     @Override
@@ -73,7 +83,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
                     .arg("PX")
                     .arg(nextExpireMillis()));
         }
-        redis.batchAndAwait(requests);
+        redis.batch(requests).await().atMost(timeout);
     }
 
     @Override
@@ -85,7 +95,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
         for (String key : serializedKeys) {
             del.arg(key);
         }
-        redis.sendAndAwait(del);
+        redis.send(del).await().atMost(timeout);
     }
 
     @Override
@@ -106,6 +116,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
     public static class Builder<K, V> extends AbstractBuilder<K, V, Builder<K, V>> {
 
         private RedisDataSource redisDataSource;
+        private Duration timeout = RedisCacheCreator.DEFAULT_TIMEOUT;
 
         protected Builder(ImmutableType type, ImmutableProp prop, JsonCodec<?> jsonCodec) {
             super(type, prop, jsonCodec);
@@ -121,7 +132,13 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
                 throw new IllegalStateException("RedisDataSource has not been specified");
             }
             return new RedisValueBinder<>(
-                    type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent, redisDataSource);
+                    type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent, redisDataSource, timeout);
+        }
+
+        /** Deadline for a pipelined Redis operation, independent of entry TTL. Defaults to 10 seconds. */
+        public Builder<K, V> timeout(Duration timeout) {
+            this.timeout = RedisCacheCreator.requireTimeout(timeout);
+            return this;
         }
     }
 }

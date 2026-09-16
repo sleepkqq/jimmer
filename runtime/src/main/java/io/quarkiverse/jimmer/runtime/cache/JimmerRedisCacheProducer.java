@@ -1,11 +1,14 @@
 package io.quarkiverse.jimmer.runtime.cache;
 
+import java.time.Duration;
+
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
 
 import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.babyfish.jimmer.sql.cache.CacheTracker;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerRuntimeConfig;
@@ -33,7 +36,8 @@ public class JimmerRedisCacheProducer {
             RedisDataSource redisDataSource,
             JimmerCacheConfig config,
             JimmerRuntimeConfig runtimeConfig,
-            Instance<CacheTracker> tracker) {
+            Instance<CacheTracker> tracker,
+            @ConfigProperty(name = "quarkus.redis.timeout", defaultValue = "10s") Duration timeout) {
         String defaultSchema = runtimeConfig.dataSources()
                 .get(DataSourceUtil.DEFAULT_DATASOURCE_NAME)
                 .defaultSchema()
@@ -42,6 +46,7 @@ public class JimmerRedisCacheProducer {
                 redisDataSource,
                 config,
                 defaultSchema,
-                tracker.isResolvable() ? tracker.get() : null);
+                tracker.isResolvable() ? tracker.get() : null,
+                timeout);
     }
 }

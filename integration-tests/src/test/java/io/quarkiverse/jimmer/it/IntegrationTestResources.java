@@ -46,4 +46,10 @@ public class IntegrationTestResources implements QuarkusTestResourceLifecycleMan
 		postgres2.stop();
 		redis.stop();
 	}
+
+	@Override
+	public void inject(TestInjector testInjector) {
+		testInjector.injectIntoFields(redis, field -> field.getName().equals("redisContainer")
+				&& field.getType().equals(GenericContainer.class));
+	}
 }

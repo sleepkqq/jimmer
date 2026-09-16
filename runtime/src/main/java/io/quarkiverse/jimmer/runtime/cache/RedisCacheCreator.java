@@ -1,5 +1,6 @@
 package io.quarkiverse.jimmer.runtime.cache;
 
+import java.time.Duration;
 import java.util.Objects;
 
 import org.babyfish.jimmer.jackson.codec.JsonCodec;
@@ -25,6 +26,8 @@ import io.quarkus.redis.datasource.RedisDataSource;
  * cache wiring is the extension's responsibility.
  */
 public class RedisCacheCreator extends AbstractCacheCreator {
+
+    static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 
     public RedisCacheCreator(RedisDataSource redisDataSource) {
         this(redisDataSource, JsonCodec.jsonCodec());
@@ -74,6 +77,19 @@ public class RedisCacheCreator extends AbstractCacheCreator {
      */
     public RedisCacheCreator withOperationLog() {
         return (RedisCacheCreator) newCacheCreator(new OperationLogCfg(cfg));
+    }
+
+    /** Sets the Redis batch deadline, not the cache-entry TTL. Defaults to 10 seconds. */
+    public RedisCacheCreator withTimeout(Duration timeout) {
+        return (RedisCacheCreator) newCacheCreator(new TimeoutCfg(cfg, requireTimeout(timeout)));
+    }
+
+    static Duration requireTimeout(Duration timeout) {
+        Objects.requireNonNull(timeout, "timeout cannot be null");
+        if (timeout.isZero() || timeout.isNegative()) {
+            throw new IllegalArgumentException("timeout must be positive");
+        }
+        return timeout;
     }
 
     @Override
@@ -137,6 +153,7 @@ public class RedisCacheCreator extends AbstractCacheCreator {
                 .duration(args.duration)
                 .randomPercent(args.randomDurationPercent)
                 .redis(args.redisDataSource)
+                .timeout(args.timeout)
                 .build()
                 .lock(args.locker, args.lockWaitDuration, args.lockLeaseDuration);
         return args.operationLog ? LoggingBinder.wrap(binder) : binder;
@@ -151,6 +168,7 @@ public class RedisCacheCreator extends AbstractCacheCreator {
                 .duration(args.duration)
                 .randomPercent(args.randomDurationPercent)
                 .redis(args.redisDataSource)
+                .timeout(args.timeout)
                 .build()
                 .lock(args.locker, args.lockWaitDuration, args.lockLeaseDuration);
         return args.operationLog ? LoggingBinder.wrap(binder) : binder;
@@ -165,6 +183,7 @@ public class RedisCacheCreator extends AbstractCacheCreator {
                 .duration(args.multiVewDuration)
                 .randomPercent(args.randomDurationPercent)
                 .redis(args.redisDataSource)
+                .timeout(args.timeout)
                 .build()
                 .lock(args.locker, args.lockWaitDuration, args.lockLeaseDuration);
         return args.operationLog ? LoggingBinder.wrap(binder) : binder;
@@ -200,6 +219,15 @@ public class RedisCacheCreator extends AbstractCacheCreator {
         }
     }
 
+    private static class TimeoutCfg extends Cfg {
+        final Duration timeout;
+
+        TimeoutCfg(Cfg prev, Duration timeout) {
+            super(prev);
+            this.timeout = timeout;
+        }
+    }
+
     static class Args extends AbstractCacheCreator.Args {
 
         final RedisDataSource redisDataSource;
@@ -209,6 +237,7 @@ public class RedisCacheCreator extends AbstractCacheCreator {
         final RemoteKeyPrefixProvider effectiveKeyPrefixProvider;
 
         final boolean operationLog;
+        final Duration timeout;
 
         Args(Cfg cfg) {
             super(cfg);
@@ -218,6 +247,8 @@ public class RedisCacheCreator extends AbstractCacheCreator {
             KeyPrefixProviderCfg prefixCfg = cfg.as(KeyPrefixProviderCfg.class);
             this.effectiveKeyPrefixProvider = prefixCfg != null ? prefixCfg.keyPrefixProvider : this.keyPrefixProvider;
             this.operationLog = cfg.as(OperationLogCfg.class) != null;
+            TimeoutCfg timeoutCfg = cfg.as(TimeoutCfg.class);
+            this.timeout = timeoutCfg != null ? timeoutCfg.timeout : DEFAULT_TIMEOUT;
         }
     }
 }
