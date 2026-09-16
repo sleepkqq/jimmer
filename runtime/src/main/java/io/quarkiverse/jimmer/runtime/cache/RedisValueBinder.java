@@ -68,6 +68,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
         if (keys.isEmpty()) {
             return Collections.emptyList();
         }
+        if (CacheLoadScope.current() != null) return RedisLoadFence.read(redis, timeout, keys, null);
         Map<String, byte[]> values = operations.mget(keys.toArray(new String[0]));
         return new ArrayList<>(values.values());
     }
@@ -75,6 +76,10 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
     @Override
     protected void write(Map<String, byte[]> map) {
         if (map.isEmpty() || tracker instanceof QuarkusRedisCacheTracker managed && !managed.isReady()) {
+            return;
+        }
+        if (CacheLoadScope.current() != null) {
+            RedisLoadFence.write(redis, timeout, map, null, this::nextExpireMillis);
             return;
         }
         List<Request> requests = new ArrayList<>(map.size());
@@ -93,11 +98,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
         if (serializedKeys.isEmpty()) {
             return;
         }
-        Request del = Request.cmd(Command.DEL);
-        for (String key : serializedKeys) {
-            del.arg(key);
-        }
-        redis.send(del).await().atMost(timeout);
+        RedisLoadFence.delete(redis, timeout, serializedKeys);
     }
 
     @Override

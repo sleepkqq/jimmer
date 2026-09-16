@@ -340,15 +340,14 @@ Programmatically constructed `RedisCacheCreator` instances expose
 `JimmerRedisCacheFactory` has an overload taking a final `Duration` argument.
 Their default batch timeout is 10 seconds. Pass the selected client's timeout explicitly
 when constructing them yourself, including for a named Redis datasource. Ordinary
-blocking datasource operations (such as value reads and PING) still use that
+blocking datasource operations (such as standalone binder MGET and PING) still use that
 datasource's own timeout. These operation deadlines are independent of entry TTLs
 and must be positive.
 
 Timeouts propagate to callers; failed invalidation is not treated as success. A CDC
 consumer must not acknowledge the record on failure. A timeout does **not** roll back
 Redis commands already sent: their outcome may be unknown and they may complete later.
-Invalidation can be retried; this change does not provide durable Pub/Sub replay or
-resolve stale in-flight cache-fill races.
+Invalidation can be retried; deadlines themselves do not provide durable Pub/Sub replay.
 
 ## Redis subscription recovery
 
@@ -378,8 +377,8 @@ The CDI `CacheTracker` is a `QuarkusRedisCacheTracker`; its public `isReady()` r
 global cache consistency. Custom hand-built chains must respect that signal themselves.
 Transport loss is observable only when the Redis client reports it. A stale read may
 already be in flight before detection; an already-sent Redis command cannot be rolled
-back by disconnect/timeout. This is not durable Pub/Sub replay or a solution to the
-ordinary cross-instance load-versus-invalidation race while subscriptions stay healthy.
+back by disconnect/timeout. This is not durable Pub/Sub replay. Healthy-connection
+load-versus-invalidation races are fenced separately as described below.
 Applications still own CDC readiness, retention/slot-loss recovery and cache-generation
 coordination; a generic Redis PING health check does not establish those guarantees.
 
@@ -387,6 +386,31 @@ Real PostgreSQL/Redis regressions cover repeated disconnects, DB bypass without 
 fresh invalidation after resubscription, disposal, parameterized cache compatibility,
 and a DB load held across a missed invalidation/reconnect. Disabling the reconnect reset
 makes the last scenario fail with the stale value; it does not pass through TTL expiry.
+
+## In-flight cache fills
+
+Creator/factory-built Redis chains now fence fills with a per-key token. A Lua read
+atomically obtains the data and token; a conditional Lua fill succeeds only while that
+token is unchanged. Invalidation atomically replaces the token and deletes the value.
+Tokens expire after 60 seconds; missing/evicted tokens reject an old fill rather than
+reusing a zero/default version. A slow load can return its DB result without caching it.
+Tracked L1 calls also remember matching invalidations and clear affected keys again
+after a late load completes. Nested fetches restore their caller's load scope; no map
+of all historical entity IDs is retained in the application.
+
+This covers object, association and parameterized hash caches for committed/read-committed
+loaders. Tests hold a real DB read across healthy cross-client invalidation and verify
+both L1 and L2, including token eviction and a filtered association. Disabling the Lua
+token check makes the association test fail. It is not a promise of linearizable reads,
+nor cache support for a deliberately older repeatable-read database snapshot.
+
+Redis must allow EVAL. Metadata keys use the reserved `_quarkus_jimmer_:fence:` prefix
+and a bounded TTL; one batch is retained, with one atomic script per key. No data value
+format changes. Redis Cluster requires a common hash tag in each data/fence key pair;
+use a key-prefix provider containing that tag (chat uses its generation UUID). Tests
+run against standalone Redis. Deploy compatible writers together or use a fresh cache
+namespace: older writers without this fence cannot provide its guarantee. Raw binder
+get/set calls outside a creator-built load scope retain their low-level semantics.
 
 ## Native image
 

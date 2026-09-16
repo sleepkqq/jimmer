@@ -25,6 +25,8 @@ import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheEnvironment;
 import org.babyfish.jimmer.jackson.codec.JsonCodec;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.GenericContainer;
 
 import io.quarkiverse.jimmer.it.entity.BookStore;
@@ -201,6 +203,112 @@ class RedisCacheReconnectTest {
         return new RedisCacheCreator(redis).withTimeout(Duration.ofSeconds(1))
                 .withLocalCache(32, Duration.ofMinutes(5)).withTracking(tracker)
                 .createForObject(ImmutableType.get(BookStore.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void healthyInvalidationCannotBeUndoneByAnOlderLoad(boolean expireToken) throws Exception {
+        try (QuarkusRedisCacheTracker reader = new QuarkusRedisCacheTracker(redis);
+                QuarkusRedisCacheTracker writer = new QuarkusRedisCacheTracker(redis);
+                Connection con = dataSource.getConnection()) {
+            Cache<Long, BookStore> cache = cache(reader);
+            Cache<Long, BookStore> writerCache = cache(writer);
+            long id = anyId();
+            var env = environment(con, new AtomicInteger(), null, null);
+            String previous = cache.get(id, env).name();
+            cache.deleteAll(List.of(id));
+            CountDownLatch loaded = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch invalidated = new CountDownLatch(1);
+            reader.addInvalidateListener(event -> invalidated.countDown());
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                var oldRead = executor.submit(() -> {
+                    try (Connection worker = dataSource.getConnection()) {
+                        return cache.get(id, environment(worker, new AtomicInteger(), loaded, release));
+                    }
+                });
+                try {
+                    assertTrue(loaded.await(5, TimeUnit.SECONDS));
+                    String changed = "healthy-race-" + UUID.randomUUID();
+                    update(id, changed);
+                    writerCache.deleteAll(List.of(id));
+                    assertTrue(invalidated.await(5, TimeUnit.SECONDS));
+                    assertTrue(reader.isReady());
+                    if (expireToken) {
+                        var raw = RedisValueBinder.<Long, BookStore>forObject(ImmutableType.get(BookStore.class), JsonCodec.jsonCodec())
+                                .redis(redis).build();
+                        redis.execute("DEL", "_quarkus_jimmer_:fence:" + raw.keyPrefix() + id);
+                    }
+                    release.countDown();
+                    assertEquals(previous, oldRead.get(5, TimeUnit.SECONDS).name());
+                    assertEquals(changed, cache.get(id, env).name(), "L1 must not resurrect the invalidated value");
+                    var remote = RedisValueBinder.<Long, BookStore>forObject(ImmutableType.get(BookStore.class), JsonCodec.jsonCodec())
+                            .redis(redis).build();
+                    var remoteValue = remote.getAll(List.of(id)).get(id);
+                    assertTrue(remoteValue == null || changed.equals(remoteValue.name()), "L2 must not resurrect the invalidated value");
+                } finally {
+                    release.countDown();
+                    oldRead.get(5, TimeUnit.SECONDS);
+                    update(id, previous);
+                    cache.deleteAll(List.of(id));
+                }
+            }
+        }
+    }
+
+    @Test
+    void healthyInvalidationFencesParameterizedHashFills() throws Exception {
+        try (QuarkusRedisCacheTracker reader = new QuarkusRedisCacheTracker(redis);
+                QuarkusRedisCacheTracker writer = new QuarkusRedisCacheTracker(redis);
+                Connection con = dataSource.getConnection()) {
+            var prop = ImmutableType.get(BookStore.class).getProp("books");
+            Cache.Parameterized<Long, List<Long>> cache = (Cache.Parameterized<Long, List<Long>>)
+                    new RedisCacheCreator(redis).withMultiViewProperties(32, Duration.ofMinutes(5)).withTracking(reader)
+                            .<Long, List<Long>>createForProp(prop, true);
+            Cache<Long, List<Long>> publisher = new RedisCacheCreator(redis).withTracking(writer).createForProp(prop, true);
+            long id = anyId();
+            String previous = sql.createQuery(BookStoreTable.$).where(BookStoreTable.$.id().eq(id))
+                    .select(BookStoreTable.$.name()).execute(con).getFirst();
+            var parameters = new TreeMap<String, Object>(Map.of("storeName", previous));
+            CountDownLatch loaded = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch invalidated = new CountDownLatch(1);
+            reader.addInvalidateListener(event -> invalidated.countDown());
+            cache.deleteAll(List.of(id));
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                var oldRead = executor.submit(() -> {
+                    try (Connection worker = dataSource.getConnection()) {
+                        return cache.get(id, parameters, new CacheEnvironment<>(sql, worker, keys -> {
+                            var rows = sql.createQuery(BookTable.$).where(BookTable.$.store().id().eq(id),
+                                    BookTable.$.store().name().eq(previous)).select(BookTable.$.id()).execute(worker);
+                            loaded.countDown();
+                            awaitLatch(release);
+                            return Map.of(id, rows);
+                        }, false));
+                    }
+                });
+                try {
+                    assertTrue(loaded.await(5, TimeUnit.SECONDS));
+                    update(id, "hash-race-" + UUID.randomUUID());
+                    publisher.deleteAll(List.of(id));
+                    assertTrue(invalidated.await(5, TimeUnit.SECONDS));
+                    release.countDown();
+                    assertFalse(oldRead.get(5, TimeUnit.SECONDS).isEmpty());
+                    var current = cache.get(id, parameters, new CacheEnvironment<>(sql, con, keys -> Map.of(id,
+                            sql.createQuery(BookTable.$).where(BookTable.$.store().id().eq(id), BookTable.$.store().name().eq(previous))
+                                    .select(BookTable.$.id()).execute(con)), false));
+                    assertTrue(current.isEmpty());
+                    var raw = RedisHashBinder.<Long, List<Long>>forProp(prop, JsonCodec.jsonCodec()).redis(redis).build();
+                    var remoteValue = raw.getAll(List.of(id), parameters).get(id);
+                    assertTrue(remoteValue == null || remoteValue.isEmpty(), "A skipped fill is allowed; the old list is not");
+                } finally {
+                    release.countDown();
+                    oldRead.get(5, TimeUnit.SECONDS);
+                    update(id, previous);
+                    cache.deleteAll(List.of(id));
+                }
+            }
+        }
     }
 
     private CacheEnvironment<Long, BookStore> environment(Connection con, AtomicInteger loads,

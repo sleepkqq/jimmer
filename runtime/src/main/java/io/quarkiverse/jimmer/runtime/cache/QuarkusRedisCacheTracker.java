@@ -3,6 +3,8 @@ package io.quarkiverse.jimmer.runtime.cache;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -63,6 +65,7 @@ public class QuarkusRedisCacheTracker extends AbstractCacheTracker implements Au
     private volatile boolean ready;
     private boolean closed;
     private long generation;
+    private final Set<CacheLoadScope> activeLoads = new HashSet<>();
 
     public QuarkusRedisCacheTracker(RedisDataSource redisDataSource) {
         this(redisDataSource, RedisCacheCreator.DEFAULT_TIMEOUT);
@@ -85,17 +88,24 @@ public class QuarkusRedisCacheTracker extends AbstractCacheTracker implements Au
         return ready;
     }
 
-    <T> T read(Supplier<T> cached, Supplier<T> database) {
+    <T> T read(CacheLoadScope scope, Supplier<T> cached, Supplier<T> database) {
         if (!ready) {
             return database.get();
         }
         loads.readLock().lock();
+        synchronized (activeLoads) { activeLoads.add(scope); }
         try {
             if (ready) {
                 return cached.get();
             }
         } finally {
-            loads.readLock().unlock();
+            try {
+                synchronized (activeLoads) { activeLoads.remove(scope); }
+                // A notification can precede the late L1 fill. Clear these keys once more after that load finishes.
+                if (scope.invalidated) firer().invalidate(scope.interest);
+            } finally {
+                loads.readLock().unlock();
+            }
         }
         return database.get();
     }
@@ -123,6 +133,7 @@ public class QuarkusRedisCacheTracker extends AbstractCacheTracker implements Au
                         InvalidationMessage msg = Json.decodeValue(response.get(2).toString(), InvalidationMessage.class);
                         CacheTracker.InvalidateEvent event = trackerId.equals(msg.trackerId) ? null : msg.toEvent(classLoader);
                         if (event != null) {
+                            invalidateLoads(event);
                             firer().invalidate(event);
                         }
                     }
@@ -226,7 +237,15 @@ public class QuarkusRedisCacheTracker extends AbstractCacheTracker implements Au
 
     @Override
     protected void publishInvalidationEvent(CacheTracker.InvalidateEvent event) {
+        invalidateLoads(event);
         pubSub.publish(CHANNEL, new InvalidationMessage(trackerId, event));
+    }
+
+    private void invalidateLoads(CacheTracker.InvalidateEvent event) {
+        // Only in-flight calls are retained. No unbounded per-entity version map or lock around I/O.
+        synchronized (activeLoads) {
+            activeLoads.forEach(scope -> scope.invalidate(event));
+        }
     }
 
     public static final class InvalidationMessage {

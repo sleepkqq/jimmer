@@ -1,8 +1,10 @@
 package io.quarkiverse.jimmer.runtime.cache;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.SortedMap;
+import java.util.function.Supplier;
 
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
@@ -21,7 +23,7 @@ class SubscriptionCache<K, V> implements Cache<K, V> {
     }
 
     static <K, V> Cache<K, V> wrap(Cache<K, V> cache, CacheTracker tracker) {
-        if (!(tracker instanceof QuarkusRedisCacheTracker managed)) return cache;
+        QuarkusRedisCacheTracker managed = tracker instanceof QuarkusRedisCacheTracker value ? value : null;
         if (cache instanceof Cache.Parameterized<K, V> parameterized) {
             return new Parameterized<>(parameterized, managed);
         }
@@ -33,7 +35,18 @@ class SubscriptionCache<K, V> implements Cache<K, V> {
 
     @Override
     public Map<K, V> getAll(Collection<K> keys, CacheEnvironment<K, V> env) {
-        return tracker.read(() -> delegate.getAll(keys, env), () -> env.getLoader().loadAll(keys));
+        return read(keys, () -> delegate.getAll(keys, env), () -> env.getLoader().loadAll(keys));
+    }
+
+    protected Map<K, V> read(Collection<K> keys, Supplier<Map<K, V>> cached, Supplier<Map<K, V>> database) {
+        if (keys.isEmpty()) return Collections.emptyMap();
+        CacheTracker.InvalidateEvent interest = prop() == null ? new CacheTracker.InvalidateEvent(type(), keys) :
+                new CacheTracker.InvalidateEvent(prop(), keys);
+        try (CacheLoadScope scope = new CacheLoadScope(interest)) {
+            if (tracker != null) return tracker.read(scope, cached, database);
+            try { return cached.get(); }
+            finally { if (scope.invalidated) delegate.deleteAll(keys); }
+        }
     }
 
     @Override
@@ -52,7 +65,7 @@ class SubscriptionCache<K, V> implements Cache<K, V> {
 
         @Override
         public Map<K, V> getAll(Collection<K> keys, SortedMap<String, Object> parameters, CacheEnvironment<K, V> env) {
-            return tracker.read(() -> parameterized.getAll(keys, parameters, env), () -> env.getLoader().loadAll(keys));
+            return read(keys, () -> parameterized.getAll(keys, parameters, env), () -> env.getLoader().loadAll(keys));
         }
     }
 }

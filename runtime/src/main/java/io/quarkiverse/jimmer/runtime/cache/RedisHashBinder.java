@@ -64,6 +64,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         if (keys.isEmpty()) {
             return null;
         }
+        if (CacheLoadScope.current() != null) return RedisLoadFence.read(redis, timeout, keys, hashKey);
         List<Request> requests = new ArrayList<>(keys.size());
         for (String key : keys) {
             requests.add(Request.cmd(Command.HGET).arg(key).arg(hashKey));
@@ -81,6 +82,10 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         if (map.isEmpty() || tracker instanceof QuarkusRedisCacheTracker managed && !managed.isReady()) {
             return;
         }
+        if (CacheLoadScope.current() != null) {
+            RedisLoadFence.write(redis, timeout, map, hashKey, this::nextExpireMillis);
+            return;
+        }
         List<Request> requests = new ArrayList<>(map.size() * 2);
         for (Map.Entry<String, byte[]> e : map.entrySet()) {
             requests.add(Request.cmd(Command.HSET).arg(e.getKey()).arg(hashKey).arg(e.getValue()));
@@ -96,11 +101,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         if (serializedKeys.isEmpty()) {
             return;
         }
-        Request del = Request.cmd(Command.DEL);
-        for (String key : serializedKeys) {
-            del.arg(key);
-        }
-        redis.send(del).await().atMost(timeout);
+        RedisLoadFence.delete(redis, timeout, serializedKeys);
     }
 
     @Override
