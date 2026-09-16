@@ -1122,7 +1122,7 @@ final class JimmerProcessor {
 
         collectAnnotatedEntities(index, classNames);
         collectImplementors(index, classNames);
-        collectEnumTypesFromEntities(index, enumClassNames);
+        collectEnumTypesFromModel(index, enumClassNames);
 
         if (!classNames.isEmpty()) {
             reflectiveClass.produce(
@@ -1148,8 +1148,10 @@ final class JimmerProcessor {
                 .build());
     }
 
-    private void collectEnumTypesFromEntities(IndexView index, Set<String> enumClassNames) {
-        for (DotName annotation : ENTITY_ANNOTATIONS) {
+    private void collectEnumTypesFromModel(IndexView index, Set<String> enumClassNames) {
+        List<DotName> enumOwners = new ArrayList<>(ENTITY_ANNOTATIONS);
+        enumOwners.add(DotName.createSimple(org.babyfish.jimmer.sql.TypedTuple.class));
+        for (DotName annotation : enumOwners) {
             for (AnnotationInstance instance : index.getAnnotations(annotation)) {
                 ClassInfo entityClass = instance.target().asClass();
                 // Jimmer entities are interfaces — properties are represented as methods
