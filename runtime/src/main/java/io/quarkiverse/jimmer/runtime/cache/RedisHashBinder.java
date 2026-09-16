@@ -34,6 +34,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
 
     private final Redis redis;
     private final Duration timeout;
+    private final CacheTracker tracker;
 
     protected RedisHashBinder(
             @Nullable ImmutableType type,
@@ -55,6 +56,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
         super(type, prop, tracker, jsonCodec, keyPrefixProvider, duration, randomPercent);
         this.redis = redisDataSource.getReactive().getRedis();
         this.timeout = RedisCacheCreator.requireTimeout(timeout);
+        this.tracker = tracker;
     }
 
     @Override
@@ -76,7 +78,7 @@ public class RedisHashBinder<K, V> extends AbstractRemoteHashBinder<K, V> {
 
     @Override
     protected void write(Map<String, byte[]> map, String hashKey) {
-        if (map.isEmpty()) {
+        if (map.isEmpty() || tracker instanceof QuarkusRedisCacheTracker managed && !managed.isReady()) {
             return;
         }
         List<Request> requests = new ArrayList<>(map.size() * 2);

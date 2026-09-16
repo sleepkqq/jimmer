@@ -37,6 +37,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
 
     private final Redis redis;
     private final Duration timeout;
+    private final CacheTracker tracker;
 
     protected RedisValueBinder(
             @Nullable ImmutableType type,
@@ -59,6 +60,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
         this.operations = redisDataSource.value(byte[].class);
         this.redis = redisDataSource.getReactive().getRedis();
         this.timeout = RedisCacheCreator.requireTimeout(timeout);
+        this.tracker = tracker;
     }
 
     @Override
@@ -72,7 +74,7 @@ public class RedisValueBinder<K, V> extends AbstractRemoteValueBinder<K, V> {
 
     @Override
     protected void write(Map<String, byte[]> map) {
-        if (map.isEmpty()) {
+        if (map.isEmpty() || tracker instanceof QuarkusRedisCacheTracker managed && !managed.isReady()) {
             return;
         }
         List<Request> requests = new ArrayList<>(map.size());

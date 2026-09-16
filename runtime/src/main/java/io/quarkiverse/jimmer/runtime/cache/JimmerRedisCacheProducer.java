@@ -3,6 +3,7 @@ package io.quarkiverse.jimmer.runtime.cache;
 import java.time.Duration;
 
 import jakarta.enterprise.inject.Instance;
+import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
 
@@ -22,11 +23,20 @@ import io.quarkus.redis.datasource.RedisDataSource;
  */
 public class JimmerRedisCacheProducer {
 
+    public CacheTracker cacheTracker(RedisDataSource redisDataSource) {
+        return new QuarkusRedisCacheTracker(redisDataSource);
+    }
+
     @Produces
     @Singleton
     @Unremovable
-    public CacheTracker cacheTracker(RedisDataSource redisDataSource) {
-        return new QuarkusRedisCacheTracker(redisDataSource);
+    public CacheTracker cacheTracker(RedisDataSource redisDataSource,
+            @ConfigProperty(name = "quarkus.redis.timeout", defaultValue = "10s") Duration timeout) {
+        return new QuarkusRedisCacheTracker(redisDataSource, timeout);
+    }
+
+    public void closeTracker(@Disposes CacheTracker tracker) {
+        if (tracker instanceof QuarkusRedisCacheTracker managed) managed.close();
     }
 
     @Produces

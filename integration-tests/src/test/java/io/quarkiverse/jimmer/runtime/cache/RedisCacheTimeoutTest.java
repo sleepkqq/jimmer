@@ -117,6 +117,7 @@ class RedisCacheTimeoutTest {
     @Test
     void startupPingAndPubSubPublicationHaveTheDatasourceDeadline() {
         assertStalledTimeout(() -> new JimmerRedisCacheFactory(redis, config, null, null));
+        assertStalledTimeout(() -> new QuarkusRedisCacheTracker(redis, Duration.ofSeconds(1)));
         CacheTracker.InvalidateEvent event = new CacheTracker.InvalidateEvent(ImmutableType.get(BookStore.class), List.of(-102L));
         assertStalledTimeout(() -> tracker.publisher().invalidate(event));
         assertDoesNotThrow(() -> tracker.publisher().invalidate(event));

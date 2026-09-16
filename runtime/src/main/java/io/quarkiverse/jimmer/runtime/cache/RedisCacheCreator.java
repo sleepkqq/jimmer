@@ -43,24 +43,24 @@ public class RedisCacheCreator extends AbstractCacheCreator {
 
     @Override
     public <K, V> Cache<K, V> createForObject(ImmutableType type) {
-        return new ChainCacheBuilder<K, V>()
+        return SubscriptionCache.wrap(new ChainCacheBuilder<K, V>()
                 .add(caffeineValueBinder(type))
                 .add(redisValueBinder(type))
-                .build();
+                .build(), args().tracker);
     }
 
     @Override
     public <K, V> Cache<K, V> createForProp(ImmutableProp prop, boolean multiView) {
         if (multiView) {
-            return new ChainCacheBuilder<K, V>()
+            return SubscriptionCache.wrap(new ChainCacheBuilder<K, V>()
                     .add(caffeineHashBinder(prop))
                     .add(redisHashBinder(prop))
-                    .build();
+                    .build(), args().tracker);
         }
-        return new ChainCacheBuilder<K, V>()
+        return SubscriptionCache.wrap(new ChainCacheBuilder<K, V>()
                 .add(caffeineValueBinder(prop))
                 .add(redisValueBinder(prop))
-                .build();
+                .build(), args().tracker);
     }
 
     /**

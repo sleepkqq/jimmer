@@ -88,7 +88,7 @@ public class JimmerRedisCacheFactory implements CacheFactory {
             return null;
         }
         if (config.mode() == CacheMode.LOCAL_ONLY) {
-            return LocalOnlyCaches.create(type, null, config, tracker, operationLog);
+            return SubscriptionCache.wrap(LocalOnlyCaches.create(type, null, config, tracker, operationLog), tracker);
         }
         return creator(config).createForObject(type);
     }
@@ -115,7 +115,7 @@ public class JimmerRedisCacheFactory implements CacheFactory {
             return null;
         }
         if (config.mode() == CacheMode.LOCAL_ONLY) {
-            return (T) LocalOnlyCaches.create(null, prop, config, tracker, operationLog);
+            return (T) SubscriptionCache.wrap(LocalOnlyCaches.create(null, prop, config, tracker, operationLog), tracker);
         }
         return (T) (Cache) creator(config).createForProp(prop, false);
     }

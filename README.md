@@ -350,6 +350,44 @@ Redis commands already sent: their outcome may be unknown and they may complete 
 Invalidation can be retried; this change does not provide durable Pub/Sub replay or
 resolve stale in-flight cache-fill races.
 
+## Redis subscription recovery
+
+`QuarkusRedisCacheTracker` observes subscription end/error and retries on a dedicated
+daemon worker, one attempt at a time with a one-second delay. Each subscription attempt
+uses `quarkus.redis.timeout` in CDI; the programmatic `(RedisDataSource, Duration)`
+constructor accepts an explicit deadline (the original constructor defaults to 10s).
+Initial subscription failure still fails startup. The tracker owns a Vert.x connection
+from the existing Quarkus client and closes it on timeout, including late connect results.
+This avoids a reproduced Quarkus Pub/Sub subscribe-timeout leak that left duplicate
+subscriptions after retry. The publication API, channel and JSON wire format are unchanged.
+Old subscription callbacks cannot change the state of a newer subscription. CDI disposes
+the tracker on shutdown; programmatic owners must call `close()` (or use try-with-resources).
+
+`JimmerRedisCacheFactory` and `RedisCacheCreator` chains using this tracker bypass **both
+cache reads and fills** while the subscription is untrusted. Invalidations still execute
+and propagate failures. On recovery the tracker waits for already-started cached reads
+to finish, invokes Jimmer's standard reconnect hook to clear L1, and only then resumes
+cache use. Reads started during the gap go straight to the supplied database loader;
+they do not hold up recovery. Redis binders skip new fills while the tracker is unready.
+Ordinary healthy reads remain concurrent; a slow old database load delays readiness,
+so database query deadlines still matter. No Redis-wide flush or new cache key format
+is introduced.
+
+The CDI `CacheTracker` is a `QuarkusRedisCacheTracker`; its public `isReady()` reports
+**local subscription readiness**, not external CDC catch-up, Kafka/source health or
+global cache consistency. Custom hand-built chains must respect that signal themselves.
+Transport loss is observable only when the Redis client reports it. A stale read may
+already be in flight before detection; an already-sent Redis command cannot be rolled
+back by disconnect/timeout. This is not durable Pub/Sub replay or a solution to the
+ordinary cross-instance load-versus-invalidation race while subscriptions stay healthy.
+Applications still own CDC readiness, retention/slot-loss recovery and cache-generation
+coordination; a generic Redis PING health check does not establish those guarantees.
+
+Real PostgreSQL/Redis regressions cover repeated disconnects, DB bypass without fills,
+fresh invalidation after resubscription, disposal, parameterized cache compatibility,
+and a DB load held across a missed invalidation/reconnect. Disabling the reconnect reset
+makes the last scenario fail with the stale value; it does not pass through TTL expiry.
+
 ## Native image
 
 ```bash
