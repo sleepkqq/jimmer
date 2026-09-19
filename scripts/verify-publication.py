@@ -33,6 +33,7 @@ for module in modules:
     pom = ET.fromstring(read(module, "pom"))
     ns = {"m": "http://maven.apache.org/POM/4.0.0"}
     assert pom.findtext("m:groupId", namespaces=ns) == group, module
+    assert pom.findtext("m:artifactId", namespaces=ns) == module, module
     assert pom.findtext("m:version", namespaces=ns) == version, module
     for dependency in pom.findall(".//m:dependency", ns):
         dependency_group = dependency.findtext("m:groupId", namespaces=ns)
@@ -41,7 +42,10 @@ for module in modules:
             assert dependency.findtext("m:version", namespaces=ns) == version, module
 
     metadata = json.loads(read(module, "module"))
-    assert metadata["component"]["group"] == group, module
+    # JitPack rewrites component identity to the repository root, preserving dependencies.
+    identity = (metadata["component"]["group"], metadata["component"]["module"])
+    expected_identity = ("com.github.sleepkqq", "jimmer") if repository.rstrip("/") == "https://jitpack.io" else (group, module)
+    assert identity == expected_identity, (module, identity)
     assert metadata["component"]["version"] == version, module
     for variant in metadata["variants"]:
         for dependency in variant.get("dependencies", []) + variant.get("dependencyConstraints", []):
