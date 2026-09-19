@@ -389,6 +389,15 @@ makes the last scenario fail with the stale value; it does not pass through TTL 
 
 ## In-flight cache fills
 
+For an additional application-owned freshness condition (for example a CDC source
+checkpoint), wrap a factory with `new GuardedCacheFactory(factory, state::ready)` or
+one cache with `GuardedCache.wrap(cache, state::ready)`. A false condition bypasses
+reads and fills through Jimmer's database loader; invalidations still execute and
+propagate failures. Parameterized caches retain their parameter-aware API. The
+condition is evaluated per read and must be thread-safe and cheap. This gate does
+not fence already-started reads, replace subscription tracking, or establish source
+freshness on its own. It adds no Kafka dependency to this extension.
+
 Creator/factory-built Redis chains now fence fills with a per-key token. A Lua read
 atomically obtains the data and token; a conditional Lua fill succeeds only while that
 token is unchanged. Invalidation atomically replaces the token and deletes the value.
