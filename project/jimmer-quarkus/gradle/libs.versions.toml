@@ -1,0 +1,70 @@
+[versions]
+kotlin = "2.4.10"
+ksp = "2.3.11" # keep in step with the kotlin version above
+quarkus = "3.39.2"
+jimmer = "0.12.2"
+testcontainers = "2.0.5"
+java-uuid-generator = "5.2.0"
+
+[libraries]
+# Quarkus BOM
+quarkus-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
+
+# Quarkus Runtime
+quarkus-arc = { module = "io.quarkus:quarkus-arc" }
+quarkus-agroal = { module = "io.quarkus:quarkus-agroal" }
+quarkus-narayana-jta = { module = "io.quarkus:quarkus-narayana-jta" }
+quarkus-quartz = { module = "io.quarkus:quarkus-quartz" }
+quarkus-rest = { module = "io.quarkus:quarkus-rest" }
+quarkus-rest-jackson = { module = "io.quarkus:quarkus-rest-jackson" }
+quarkus-rest-client-jackson = { module = "io.quarkus:quarkus-rest-client-jackson" }
+quarkus-redis-client = { module = "io.quarkus:quarkus-redis-client" }
+quarkus-caffeine = { module = "io.quarkus:quarkus-caffeine" }
+quarkus-jackson-spi = { module = "io.quarkus:quarkus-jackson-spi" }
+quarkus-config-yaml = { module = "io.quarkus:quarkus-config-yaml" }
+quarkus-vertx = { module = "io.quarkus:quarkus-vertx" }
+quarkus-jdbc-postgresql = { module = "io.quarkus:quarkus-jdbc-postgresql" }
+testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
+
+# Quarkus Deployment
+quarkus-arc-deployment = { module = "io.quarkus:quarkus-arc-deployment" }
+quarkus-agroal-deployment = { module = "io.quarkus:quarkus-agroal-deployment" }
+quarkus-narayana-jta-deployment = { module = "io.quarkus:quarkus-narayana-jta-deployment" }
+quarkus-quartz-deployment = { module = "io.quarkus:quarkus-quartz-deployment" }
+quarkus-rest-deployment = { module = "io.quarkus:quarkus-rest-deployment" }
+quarkus-rest-client-jackson-deployment = { module = "io.quarkus:quarkus-rest-client-jackson-deployment" }
+quarkus-redis-client-deployment = { module = "io.quarkus:quarkus-redis-client-deployment" }
+quarkus-caffeine-deployment = { module = "io.quarkus:quarkus-caffeine-deployment" }
+
+# Quarkus Build
+quarkus-extension-processor = { module = "io.quarkus:quarkus-extension-processor", version.ref = "quarkus" }
+
+# Kotlin
+kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
+
+# UUID
+java-uuid-generator = { module = "com.fasterxml.uuid:java-uuid-generator", version.ref = "java-uuid-generator" }
+
+# Jimmer
+jimmer-sql = { module = "org.babyfish.jimmer:jimmer-sql", version.ref = "jimmer" }
+jimmer-sql-kotlin = { module = "org.babyfish.jimmer:jimmer-sql-kotlin", version.ref = "jimmer" }
+jimmer-client = { module = "org.babyfish.jimmer:jimmer-client", version.ref = "jimmer" }
+jimmer-client-swagger = { module = "org.babyfish.jimmer:jimmer-client-swagger", version.ref = "jimmer" }
+jimmer-apt = { module = "org.babyfish.jimmer:jimmer-apt", version.ref = "jimmer" }
+jimmer-ksp = { module = "org.babyfish.jimmer:jimmer-ksp", version.ref = "jimmer" }
+
+# GraalVM
+graalvm-nativeimage = { module = "org.graalvm.sdk:nativeimage" }
+
+# Test
+quarkus-junit5 = { module = "io.quarkus:quarkus-junit5" }
+quarkus-junit5-internal = { module = "io.quarkus:quarkus-junit5-internal" }
+rest-assured = { module = "io.rest-assured:rest-assured" }
+testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+quarkus = { id = "io.quarkus", version.ref = "quarkus" }
+quarkus-extension = { id = "io.quarkus.extension", version.ref = "quarkus" }

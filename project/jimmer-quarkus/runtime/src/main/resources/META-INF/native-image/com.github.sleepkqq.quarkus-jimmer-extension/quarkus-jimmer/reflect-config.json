@@ -1,0 +1,44 @@
+[
+  {
+    "name": "org.babyfish.jimmer.sql.filter.impl.LogicalDeletedFilterProvider$DefaultFilter",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.babyfish.jimmer.sql.filter.impl.LogicalDeletedFilterProvider$IgnoredFilter",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.babyfish.jimmer.sql.filter.impl.LogicalDeletedFilterProvider$ReversedFilter",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.babyfish.jimmer.sql.filter.impl.FilterManager$ExportedCacheableFilter",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.babyfish.jimmer.sql.filter.impl.FilterManager$ExportedFilter",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  },
+  {
+    "name": "org.babyfish.jimmer.sql.cache.caffeine.CaffeineValueBinder$1",
+    "allDeclaredConstructors": true,
+    "allPublicConstructors": true,
+    "allDeclaredMethods": true,
+    "allPublicMethods": true
+  }
+]

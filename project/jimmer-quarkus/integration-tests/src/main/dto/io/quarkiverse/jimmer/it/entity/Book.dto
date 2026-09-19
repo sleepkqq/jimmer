@@ -1,0 +1,40 @@
+import org.jboss.resteasy.reactive.RestQuery
+
+BookDetailView {
+    #allScalars
+    store {
+            #allScalars
+        }
+    authors {
+            #allScalars
+        }
+}
+
+input BookInput {
+
+    #allScalars(this,TenantAware)
+
+    id(store)
+
+    authors {
+        #allScalars(Author)
+        -id
+    }
+}
+
+specification BookSpecification {
+    @RestQuery
+    like/i(name)
+    @RestQuery
+    ge(price) as minPrice
+    @RestQuery
+    le(price) as maxPrice
+    flat(store) {
+        @RestQuery
+        like/i(name) as storeName
+    }
+    flat(authors) {
+        @RestQuery
+        like/i(firstName, lastName) as authorName
+    }
+}
