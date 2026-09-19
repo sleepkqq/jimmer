@@ -2,7 +2,7 @@
 kotlin = "2.4.10"
 ksp = "2.3.11" # keep in step with the kotlin version above
 quarkus = "3.39.2"
-jimmer = "0.12.1"
+jimmer = "0.12.2"
 testcontainers = "2.0.5"
 java-uuid-generator = "5.2.0"
 

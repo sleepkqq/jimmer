@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import io.quarkiverse.jimmer.runtime.cache.GuardedCache;
 import io.quarkiverse.jimmer.runtime.cache.GuardedCacheFactory;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
+import org.babyfish.jimmer.sql.cache.AbstractCacheFactory;
+import org.babyfish.jimmer.sql.cache.FilterState;
 import io.quarkus.test.junit.QuarkusTest;
 
 @QuarkusTest
@@ -67,6 +69,20 @@ class GuardedCacheTest {
         assertNull(factory.createAssociatedIdCache(null));
         assertNull(factory.createAssociatedIdListCache(null));
         assertNull(factory.createResolverCache(null));
+    }
+
+    @Test
+    void factoryForwardsJimmerFilterState() {
+        FilterState filters = type -> true;
+        var delegate = new AbstractCacheFactory() {
+            @Override public Cache<?, ?> createObjectCache(ImmutableType type) {
+                assertSame(filters, getFilterState());
+                return null;
+            }
+        };
+        var factory = new GuardedCacheFactory(delegate, () -> true);
+        factory.setFilterState(filters);
+        assertNull(factory.createObjectCache(null));
     }
 
     private static final class RecordingCache implements Cache.Parameterized<Long, String> {

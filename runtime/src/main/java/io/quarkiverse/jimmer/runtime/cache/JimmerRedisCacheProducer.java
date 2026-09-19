@@ -12,6 +12,7 @@ import org.babyfish.jimmer.sql.cache.CacheTracker;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
+import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheGuardConfig;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerRuntimeConfig;
 import io.quarkus.arc.Unremovable;
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
@@ -47,16 +48,29 @@ public class JimmerRedisCacheProducer {
             JimmerCacheConfig config,
             JimmerRuntimeConfig runtimeConfig,
             Instance<CacheTracker> tracker,
+            JimmerCacheGuardConfig guard,
+            Instance<CacheReadiness> readiness,
             @ConfigProperty(name = "quarkus.redis.timeout", defaultValue = "10s") Duration timeout) {
         String defaultSchema = runtimeConfig.dataSources()
                 .get(DataSourceUtil.DEFAULT_DATASOURCE_NAME)
                 .defaultSchema()
                 .orElse(null);
-        return new JimmerRedisCacheFactory(
+        CacheReadiness condition = null;
+        if (guard.enabled()) {
+            if (!readiness.isResolvable()) {
+                throw new IllegalStateException("quarkus.jimmer.cache.guard requires exactly one CacheReadiness bean");
+            }
+            condition = readiness.get();
+            String namespace = condition.namespace();
+            if (namespace == null || namespace.isBlank()) throw new IllegalStateException("Cache readiness requires a namespace");
+            defaultSchema = defaultSchema == null ? namespace : defaultSchema + "-" + namespace;
+        }
+        CacheFactory factory = new JimmerRedisCacheFactory(
                 redisDataSource,
                 config,
                 defaultSchema,
                 tracker.isResolvable() ? tracker.get() : null,
                 timeout);
+        return condition == null ? factory : new GuardedCacheFactory(factory, condition::ready);
     }
 }

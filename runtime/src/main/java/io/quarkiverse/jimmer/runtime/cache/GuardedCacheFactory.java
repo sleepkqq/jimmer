@@ -8,15 +8,22 @@ import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
+import org.babyfish.jimmer.sql.cache.FilterState;
+import org.babyfish.jimmer.sql.cache.FilterStateAwareCacheFactory;
 
 /** Applies an external freshness condition to every cache supplied by a factory. */
-public class GuardedCacheFactory implements CacheFactory {
+public class GuardedCacheFactory implements FilterStateAwareCacheFactory {
     private final CacheFactory delegate;
     private final BooleanSupplier ready;
 
     public GuardedCacheFactory(CacheFactory delegate, BooleanSupplier ready) {
         this.delegate = Objects.requireNonNull(delegate);
         this.ready = Objects.requireNonNull(ready);
+    }
+
+    @Override
+    public void setFilterState(FilterState filterState) {
+        if (delegate instanceof FilterStateAwareCacheFactory aware) aware.setFilterState(filterState);
     }
 
     @Override

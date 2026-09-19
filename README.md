@@ -390,7 +390,29 @@ makes the last scenario fail with the stale value; it does not pass through TTL 
 ## In-flight cache fills
 
 For an additional application-owned freshness condition (for example a CDC source
-checkpoint), wrap a factory with `new GuardedCacheFactory(factory, state::ready)` or
+checkpoint), the built-in cache factories support a CDI `CacheReadiness` provider:
+
+```yaml
+quarkus:
+  jimmer:
+    cache:
+      guard:
+        enabled: true
+      entities:
+        - type: Book
+          mode: FULL
+```
+
+Exactly one provider must exist when the guard is enabled. Its `ready()` gates
+reads and fills; invalidations always run. Its nonblank `namespace()` is appended
+to the configured schema in Redis keys and must remain stable for the process
+lifetime. A CDC provider can use a new namespace per process so restarts begin
+with cold caches. Existing cache modes, entity settings, Redis subscription
+tracking and in-flight invalidation fences remain in the built-in factories.
+The extension has no Kafka dependency; applications or libraries own the provider.
+The guard is disabled by default.
+
+For programmatically constructed factories, use `new GuardedCacheFactory(factory, state::ready)` or
 one cache with `GuardedCache.wrap(cache, state::ready)`. A false condition bypasses
 reads and fills through Jimmer's database loader; invalidations still execute and
 propagate failures. Parameterized caches retain their parameter-aware API. The
