@@ -25,7 +25,7 @@ Extension Java/Kotlin target: JDK 21. Gradle 9.7.1.
 ## Key Versions (libs.versions.toml)
 
 - Quarkus: 3.39.2
-- Jimmer: fork 1.0.0 (upstream dev 7c1d302b0)
+- Jimmer: fork 1.0.1 (upstream dev 7c1d302b0)
 - Kotlin: 2.4.20; KSP: 2.3.12
 
 ## Deployment vs Runtime
