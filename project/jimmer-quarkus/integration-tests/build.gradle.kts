@@ -1,5 +1,5 @@
 plugins {
-	alias(libs.plugins.quarkus)
+	alias(quarkusLibs.plugins.quarkus)
 	alias(libs.plugins.ksp)
 }
 
@@ -17,27 +17,27 @@ tasks.test {
 }
 
 dependencies {
-	implementation(enforcedPlatform(libs.quarkus.bom))
+	implementation(enforcedPlatform(quarkusLibs.quarkus.bom))
 
-	implementation(libs.quarkus.rest)
-	implementation(libs.quarkus.rest.jackson)
-	implementation(libs.quarkus.config.yaml)
-	implementation(libs.quarkus.vertx)
-	implementation(libs.quarkus.redis.client)
-	implementation(libs.quarkus.caffeine)
+	implementation(quarkusLibs.quarkus.rest)
+	implementation(quarkusLibs.quarkus.rest.jackson)
+	implementation(quarkusLibs.quarkus.config.yaml)
+	implementation(quarkusLibs.quarkus.vertx)
+	implementation(quarkusLibs.quarkus.redis.client)
+	implementation(quarkusLibs.quarkus.caffeine)
 
-	implementation(project(":quarkus-jimmer"))
+	implementation(projects.jimmerQuarkus.quarkusJimmer)
 
-	runtimeOnly(libs.quarkus.jdbc.postgresql)
+	runtimeOnly(quarkusLibs.quarkus.jdbc.postgresql)
 
-	annotationProcessor(libs.jimmer.apt)
+	annotationProcessor(projects.jimmerApt)
 	// KSP is wired for the test source set only — a Kotlin entity under src/main/kotlin
 	// would compile with no Jimmer codegen.
-	kspTest(libs.jimmer.ksp)
+	kspTest(projects.jimmerKsp)
 
-	testImplementation(libs.quarkus.junit5)
-	testImplementation(libs.rest.assured)
-	testImplementation(libs.testcontainers)
-	testImplementation(libs.testcontainers.junit)
-	testImplementation(libs.testcontainers.postgresql)
+	testImplementation(quarkusLibs.quarkus.junit5)
+	testImplementation(quarkusLibs.rest.assured)
+	testImplementation(quarkusLibs.testcontainers)
+	testImplementation(quarkusLibs.testcontainers.junit)
+	testImplementation(quarkusLibs.testcontainers.postgresql)
 }

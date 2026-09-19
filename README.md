@@ -2,6 +2,30 @@
 
 # The most advanced ORM of JVM, for both java & kotlin.
 
+## sleepkqq fork
+
+This fork includes the full Jimmer ORM and [Quarkus integration](project/jimmer-quarkus/README.md)
+in one Gradle build. Version **1.0.0** is based on upstream `dev` at
+[`7c1d302b0`](https://github.com/babyfish-ct/jimmer/commit/7c1d302b0), including belovaf's fixes.
+All modules are published anonymously through [JitPack](https://jitpack.io/#sleepkqq/jimmer)
+under `com.github.sleepkqq.jimmer`, with a single shared version.
+
+```kotlin
+repositories {
+    mavenCentral()
+    maven("https://jitpack.io")
+}
+dependencies {
+    implementation("com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.0")
+    annotationProcessor("com.github.sleepkqq.jimmer:jimmer-apt:1.0.0")
+    // Kotlin: ksp("com.github.sleepkqq.jimmer:jimmer-ksp:1.0.0")
+}
+```
+
+Use this group for **all** Jimmer dependencies, including BOM, processors and Spring Boot
+starter. Java/Kotlin packages are unchanged. Do not mix fork and upstream artifacts.
+See [migration, upstream updates and releases](FORK.md).
+
 ## Switch Langue 
 
 English | [中文](./README_zh_CN.md)

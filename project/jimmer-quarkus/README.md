@@ -1,8 +1,7 @@
 # Quarkus Jimmer Extension
 
-[![CI](https://github.com/sleepkqq/quarkus-jimmer-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/sleepkqq/quarkus-jimmer-extension/actions/workflows/ci.yml)
-[![Release](https://github.com/sleepkqq/quarkus-jimmer-extension/actions/workflows/release.yml/badge.svg)](https://github.com/sleepkqq/quarkus-jimmer-extension/actions/workflows/release.yml)
-[![JitPack](https://jitpack.io/v/sleepkqq/quarkus-jimmer-extension.svg)](https://jitpack.io/#sleepkqq/quarkus-jimmer-extension)
+[![CI](https://github.com/sleepkqq/jimmer/actions/workflows/ci.yml/badge.svg)](https://github.com/sleepkqq/jimmer/actions/workflows/ci.yml)
+[![JitPack](https://jitpack.io/v/sleepkqq/jimmer.svg)](https://jitpack.io/#sleepkqq/jimmer)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 A [Quarkus](https://quarkus.io) extension for the [Jimmer](https://github.com/babyfish-ct/jimmer)
@@ -37,16 +36,15 @@ configuration that makes it work:
 <!-- versions:start -->
 | Extension | Quarkus  | Jimmer    | Kotlin  | JDK  |
 |-----------|----------|-----------|---------|------|
-| `1.13.8`   | `3.39.2` | `0.12.1` | `2.4.10` | `21` |
+| `1.0.0`   | `3.39.2` | fork `1.0.0` | `2.4.20` | `21` |
 <!-- versions:end -->
 
-> The table and the version numbers in the snippets below are kept in sync with
-> `gradle/libs.versions.toml` by the `./gradlew syncReadme` task — run it after bumping a library
-> instead of editing this file by hand.
+The extension and ORM now share one build and release version. See
+[migration and maintenance](../../FORK.md) for upstream provenance and release checks.
 
 ## Dependency
 
-The artifacts are published through [JitPack](https://jitpack.io/#sleepkqq/quarkus-jimmer-extension).
+The artifacts are published through [JitPack](https://jitpack.io/#sleepkqq/jimmer).
 Pick the latest version from the badge above.
 
 ### Gradle (Kotlin DSL)
@@ -57,12 +55,12 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.13.8")
+    implementation("com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.0")
 
     // Java projects
-    annotationProcessor("org.babyfish.jimmer:jimmer-apt:0.12.1")
+    annotationProcessor("com.github.sleepkqq.jimmer:jimmer-apt:1.0.0")
     // Kotlin projects (KSP)
-    // ksp("org.babyfish.jimmer:jimmer-ksp:0.12.1")
+    // ksp("com.github.sleepkqq.jimmer:jimmer-ksp:1.0.0")
 }
 ```
 
@@ -74,8 +72,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.13.8'
-    annotationProcessor 'org.babyfish.jimmer:jimmer-apt:0.12.1'
+    implementation 'com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.0'
+    annotationProcessor 'com.github.sleepkqq.jimmer:jimmer-apt:1.0.0'
 }
 ```
 
@@ -457,22 +455,22 @@ fetchers and repositories work without extra `@RegisterForReflection` annotation
 ## Build
 
 ```bash
-./gradlew build                          # full build + tests
-./gradlew :quarkus-jimmer:compileJava    # compile runtime only
-./gradlew publishToMavenLocal            # publish to local Maven
-./gradlew integration-tests:test         # integration tests (Docker required: Postgres + Redis)
-./gradlew syncReadme                     # sync README versions from libs.versions.toml
+cd project                              # from the repository root
+./gradlew build                          # full ORM + extension build and tests
+./gradlew :jimmer-quarkus:quarkus-jimmer:compileJava
+./gradlew publishToMavenLocal
+./gradlew :jimmer-quarkus:integration-tests:test # Docker required: Postgres + Redis
 ```
 
-JDK 21, Gradle 9.4.0.
+JDK 21, Gradle 9.7.1. Native-image commands above are also run from `project/`.
 
 ## CI / Release
 
 - **CI** (`.github/workflows/ci.yml`) — on PRs and pushes to `main`: builds and runs the
   integration tests (Postgres + Redis on the runner).
-- **Release** (`.github/workflows/release.yml`) — on a tag push: builds and creates a GitHub
-  Release with generated notes. Consume the tagged version via
-  [JitPack](https://jitpack.io/#sleepkqq/quarkus-jimmer-extension).
+- **Release** — immutable semver tags are built by the root `jitpack.yml`. The release
+  is verified using the standalone published consumer before GitHub release notes are created.
+  Consume the tagged version via [JitPack](https://jitpack.io/#sleepkqq/jimmer).
 
 ## License
 

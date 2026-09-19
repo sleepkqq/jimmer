@@ -6,11 +6,11 @@ import org.babyfish.jimmer.sql.Serialized
 @Serialized
 data class Point(
 
-    @JsonProperty("_x")
+    @param:JsonProperty("_x")
     @field:JsonProperty("_x")
     val x: Int,
 
-    @JsonProperty("_y")
+    @param:JsonProperty("_y")
     @field:JsonProperty("_y")
     val y: Int
 )

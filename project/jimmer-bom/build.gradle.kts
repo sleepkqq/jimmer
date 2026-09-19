@@ -18,5 +18,7 @@ dependencies {
         api(projects.jimmerSpringBootStarter)
         api(projects.jimmerSql)
         api(projects.jimmerSqlKotlin)
+        api(projects.jimmerQuarkus.quarkusJimmer)
+        api(projects.jimmerQuarkus.quarkusJimmerDeployment)
     }
 }

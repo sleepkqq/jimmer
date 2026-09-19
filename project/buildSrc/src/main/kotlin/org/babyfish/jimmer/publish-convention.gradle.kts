@@ -12,20 +12,13 @@ afterEvaluate {
 
 mavenPublishing {
 
-    publishToMavenCentral(automaticRelease = true)
-
-    signAllPublications()
-}
-
-mavenPublishing {
-
     coordinates(project.group.toString(), project.name, project.version.toString())
 
     pom {
         name.set("Jimmer")
         description.set("The most advanced ORM of JVM, for both java & kotlin")
         inceptionYear.set("2025")
-        url.set("https://github.com/babyfish-ct/jimmer")
+        url.set("https://github.com/sleepkqq/jimmer")
         licenses {
             license {
                 name.set("Apache-2.0")
@@ -40,9 +33,9 @@ mavenPublishing {
             }
         }
         scm {
-            connection.set("scm:git:git://github.com/babyfish-ct/jimmer.git")
-            developerConnection.set("scm:git:ssh://github.com/babyfish-ct/jimmer.git")
-            url.set("https://github.com//babyfish-ct/jimmer")
+            connection.set("scm:git:https://github.com/sleepkqq/jimmer.git")
+            developerConnection.set("scm:git:ssh://github.com/sleepkqq/jimmer.git")
+            url.set("https://github.com/sleepkqq/jimmer")
         }
     }
 }

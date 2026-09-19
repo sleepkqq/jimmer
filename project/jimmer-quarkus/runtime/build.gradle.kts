@@ -1,6 +1,6 @@
 plugins {
 	`java-library`
-	alias(libs.plugins.quarkus.extension)
+	alias(quarkusLibs.plugins.quarkus.extension)
 }
 
 quarkusExtension {
@@ -8,27 +8,27 @@ quarkusExtension {
 }
 
 dependencies {
-	api(platform(libs.quarkus.bom))
+	api(platform(quarkusLibs.quarkus.bom))
 
-	api(libs.quarkus.arc)
-	api(libs.quarkus.agroal)
-	api(libs.quarkus.narayana.jta)
-	api(libs.quarkus.quartz)
-	api(libs.quarkus.rest)
-	api(libs.quarkus.rest.client.jackson)
+	api(quarkusLibs.quarkus.arc)
+	api(quarkusLibs.quarkus.agroal)
+	api(quarkusLibs.quarkus.narayana.jta)
+	api(quarkusLibs.quarkus.quartz)
+	api(quarkusLibs.quarkus.rest)
+	api(quarkusLibs.quarkus.rest.client.jackson)
 
 	api(libs.kotlin.stdlib)
 
-	api(libs.jimmer.sql)
-	api(libs.jimmer.sql.kotlin)
-	api(libs.jimmer.client)
-	api(libs.jimmer.client.swagger)
+	api(projects.jimmerSql)
+	api(projects.jimmerSqlKotlin)
+	api(projects.jimmerClient)
+	api(projects.jimmerClientSwagger)
 
-	api(libs.java.uuid.generator)
+	api(quarkusLibs.java.uuid.generator)
 
-	compileOnly(libs.quarkus.redis.client)
-	compileOnly(libs.quarkus.caffeine)
-	compileOnly(libs.graalvm.nativeimage)
+	compileOnly(quarkusLibs.quarkus.redis.client)
+	compileOnly(quarkusLibs.quarkus.caffeine)
+	compileOnly(quarkusLibs.graalvm.nativeimage)
 
-	annotationProcessor(libs.quarkus.extension.processor)
+	annotationProcessor(quarkusLibs.quarkus.extension.processor)
 }

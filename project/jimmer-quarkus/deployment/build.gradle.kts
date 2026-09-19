@@ -1,20 +1,20 @@
 dependencies {
-	implementation(platform(libs.quarkus.bom))
+	implementation(platform(quarkusLibs.quarkus.bom))
 
-	implementation(libs.quarkus.arc.deployment)
-	implementation(libs.quarkus.agroal.deployment)
-	implementation(libs.quarkus.narayana.jta.deployment)
-	implementation(libs.quarkus.quartz.deployment)
-	implementation(libs.quarkus.rest.deployment)
-	implementation(libs.quarkus.rest.client.jackson.deployment)
-	implementation(libs.quarkus.jackson.spi)
+	implementation(quarkusLibs.quarkus.arc.deployment)
+	implementation(quarkusLibs.quarkus.agroal.deployment)
+	implementation(quarkusLibs.quarkus.narayana.jta.deployment)
+	implementation(quarkusLibs.quarkus.quartz.deployment)
+	implementation(quarkusLibs.quarkus.rest.deployment)
+	implementation(quarkusLibs.quarkus.rest.client.jackson.deployment)
+	implementation(quarkusLibs.quarkus.jackson.spi)
 
-	compileOnly(libs.quarkus.redis.client.deployment)
-	compileOnly(libs.quarkus.caffeine.deployment)
+	compileOnly(quarkusLibs.quarkus.redis.client.deployment)
+	compileOnly(quarkusLibs.quarkus.caffeine.deployment)
 
-	implementation(project(":quarkus-jimmer"))
+	implementation(projects.jimmerQuarkus.quarkusJimmer)
 
-	annotationProcessor(libs.quarkus.extension.processor)
+	annotationProcessor(quarkusLibs.quarkus.extension.processor)
 
-	testImplementation(libs.quarkus.junit5.internal)
+	testImplementation(quarkusLibs.quarkus.junit5.internal)
 }

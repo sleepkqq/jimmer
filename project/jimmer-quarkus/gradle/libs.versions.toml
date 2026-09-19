@@ -1,8 +1,5 @@
 [versions]
-kotlin = "2.4.10"
-ksp = "2.3.11" # keep in step with the kotlin version above
 quarkus = "3.39.2"
-jimmer = "0.12.2"
 testcontainers = "2.0.5"
 java-uuid-generator = "5.2.0"
 
@@ -39,19 +36,8 @@ quarkus-caffeine-deployment = { module = "io.quarkus:quarkus-caffeine-deployment
 # Quarkus Build
 quarkus-extension-processor = { module = "io.quarkus:quarkus-extension-processor", version.ref = "quarkus" }
 
-# Kotlin
-kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
-
 # UUID
 java-uuid-generator = { module = "com.fasterxml.uuid:java-uuid-generator", version.ref = "java-uuid-generator" }
-
-# Jimmer
-jimmer-sql = { module = "org.babyfish.jimmer:jimmer-sql", version.ref = "jimmer" }
-jimmer-sql-kotlin = { module = "org.babyfish.jimmer:jimmer-sql-kotlin", version.ref = "jimmer" }
-jimmer-client = { module = "org.babyfish.jimmer:jimmer-client", version.ref = "jimmer" }
-jimmer-client-swagger = { module = "org.babyfish.jimmer:jimmer-client-swagger", version.ref = "jimmer" }
-jimmer-apt = { module = "org.babyfish.jimmer:jimmer-apt", version.ref = "jimmer" }
-jimmer-ksp = { module = "org.babyfish.jimmer:jimmer-ksp", version.ref = "jimmer" }
 
 # GraalVM
 graalvm-nativeimage = { module = "org.graalvm.sdk:nativeimage" }
@@ -64,7 +50,5 @@ testcontainers = { module = "org.testcontainers:testcontainers", version.ref = "
 testcontainers-junit = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
 
 [plugins]
-kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 quarkus = { id = "io.quarkus", version.ref = "quarkus" }
 quarkus-extension = { id = "io.quarkus.extension", version.ref = "quarkus" }

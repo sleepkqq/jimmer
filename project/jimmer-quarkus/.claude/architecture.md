@@ -4,28 +4,29 @@
 
 | Directory | Gradle name | Artifact | Description |
 |---|---|---|---|
-| `runtime/` | `:quarkus-jimmer` | quarkus-jimmer | Runtime: SqlClient, repositories, config, caching |
-| `deployment/` | `:quarkus-jimmer-deployment` | quarkus-jimmer-deployment | Build-time: code generation, bean scanning |
-| `integration-tests/` | `:integration-tests` | (not published) | Tests with H2 + Redis |
+| `runtime/` | `:jimmer-quarkus:quarkus-jimmer` | quarkus-jimmer | Runtime: SqlClient, repositories, config, caching |
+| `deployment/` | `:jimmer-quarkus:quarkus-jimmer-deployment` | quarkus-jimmer-deployment | Build-time: code generation, bean scanning |
+| `integration-tests/` | `:jimmer-quarkus:integration-tests` | (not published) | Tests with PostgreSQL + Redis |
 
-Group: `com.github.sleepkqq.quarkus-jimmer-extension`
+Group: `com.github.sleepkqq.jimmer`. ORM/APT/KSP use sibling project dependencies.
 
 ## Build
 
 ```bash
-./gradlew build                        # full build
-./gradlew :quarkus-jimmer:compileJava  # compile runtime only
+cd project                            # from the repository root
+./gradlew build                        # full ORM + extension build
+./gradlew :jimmer-quarkus:quarkus-jimmer:compileJava
 ./gradlew publishToMavenLocal          # publish to local Maven
-./gradlew integration-tests:test       # run integration tests
+./gradlew :jimmer-quarkus:integration-tests:test
 ```
 
-Java/Kotlin target: JDK 21. Gradle 9.4.0.
+Extension Java/Kotlin target: JDK 21. Gradle 9.7.1.
 
 ## Key Versions (libs.versions.toml)
 
-- Quarkus: 3.37.2
-- Jimmer: 0.11.0
-- Kotlin: 2.4.0
+- Quarkus: 3.39.2
+- Jimmer: fork 1.0.0 (upstream dev 7c1d302b0)
+- Kotlin: 2.4.20; KSP: 2.3.12
 
 ## Deployment vs Runtime
 
