@@ -256,9 +256,6 @@ class RealTableImpl extends AbstractDataManager<RealTable.Key, RealTable> implem
         }
         TableUsedState usedState = builder.getAstContext().getTableUsedState(this);
         if (usedState != TableUsedState.NONE) {
-            if (mode == TableImplementor.RenderMode.FROM_ONLY || mode == TableImplementor.RenderMode.WHERE_ONLY) {
-                builder.separator();
-            }
             renderSelf(builder, mode, false);
             if (mode == TableImplementor.RenderMode.DEEPER_JOIN_ONLY) {
                 for (RealTable childTable : this) {
@@ -367,6 +364,7 @@ class RealTableImpl extends AbstractDataManager<RealTable.Key, RealTable> implem
                     .sql(rootAlias);
         } else {
             builder
+                    .separator()
                     .sql(rootType.getTableName(strategy))
                     .sql(" ")
                     .sql(rootAlias);
@@ -835,6 +833,9 @@ class RealTableImpl extends AbstractDataManager<RealTable.Key, RealTable> implem
     ) {
         TableImpl<?> owner = (TableImpl<?>) this.owner;
         if (builder.getAstContext().getTableUsedState(this) != TableUsedState.NONE) {
+            if (mode == TableImplementor.RenderMode.FROM_ONLY || mode == TableImplementor.RenderMode.WHERE_ONLY) {
+                builder.separator();
+            }
             ImmutableType immutableType = owner.getImmutableType();
             MetadataStrategy strategy = builder.getAstContext().getSqlClient().getMetadataStrategy();
             switch (mode) {
@@ -891,6 +892,10 @@ class RealTableImpl extends AbstractDataManager<RealTable.Key, RealTable> implem
     ) {
         if (mode != TableImplementor.RenderMode.NORMAL && joinType != JoinType.INNER) {
             throw new AssertionError("Internal bug: outer join cannot be accepted by abnormal render mode");
+        }
+        // Emit separators only for joins that survive FK-only join elimination.
+        if (mode == TableImplementor.RenderMode.FROM_ONLY || mode == TableImplementor.RenderMode.WHERE_ONLY) {
+            builder.separator();
         }
         switch (mode) {
             case NORMAL:

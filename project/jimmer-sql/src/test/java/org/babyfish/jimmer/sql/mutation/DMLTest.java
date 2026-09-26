@@ -14,11 +14,14 @@ import org.babyfish.jimmer.sql.exception.ExecutionException;
 import org.babyfish.jimmer.sql.model.*;
 import org.babyfish.jimmer.sql.model.inheritance.AdministratorMetadataTable;
 import org.babyfish.jimmer.sql.model.inheritance.AdministratorTable;
+import org.babyfish.jimmer.sql.model.link.LearningLinkTable;
 import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
 import org.babyfish.jimmer.sql.runtime.Executor;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.sql.Connection;
@@ -341,6 +344,38 @@ public class DMLTest extends AbstractMutationTest {
                         it.variables("MANNING");
                     });
                     ctx.rowCount(3);
+                }
+        );
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDeleteUsingWithFkOnlySibling(boolean fkFirst) {
+        executeAndExpectRowCount(
+                sqlOnlyDeleteJoinClient(1, DeleteJoin.From.AS_USING)
+                        .createDelete(LearningLinkTable.class, (d, link) -> {
+                            d.disableDissociation();
+                            if (fkFirst) {
+                                d.where(link.course().id().eq(1L));
+                            }
+                            d.where(link.student().name().eq("Alex"));
+                            if (!fkFirst) {
+                                d.where(link.course().id().eq(1L));
+                            }
+                        }),
+                ctx -> {
+                    ctx.statement(it -> {
+                        it.sql("delete from LEARNING_LINK tb_1_ using STUDENT tb_2_ " +
+                                "where tb_1_.STUDENT_ID = tb_2_.ID and " +
+                                (fkFirst ? "tb_1_.COURSE_ID = ? and tb_2_.NAME = ?" :
+                                        "tb_2_.NAME = ? and tb_1_.COURSE_ID = ?"));
+                        if (fkFirst) {
+                            it.variables(1L, "Alex");
+                        } else {
+                            it.variables("Alex", 1L);
+                        }
+                    });
+                    ctx.rowCount(1);
                 }
         );
     }
