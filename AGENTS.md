@@ -6,7 +6,8 @@ This repository owns the ORM and its Quarkus integration. The Gradle build is un
 
 - Fix ORM SQL generation and JDBC type handling in `project/jimmer-sql`, not with service-specific queries, save-then-find workarounds or disabled save-returning optimizations. Trace neighboring insert/update/upsert callers before changing a shared renderer.
 - Render physical SQL types from existing getter/property metadata and the configured dialect. Runtime JDBC values can erase the distinction between `Instant` and `LocalDateTime`; never infer the database timestamp type solely from `java.sql.Timestamp`.
-- Derived `VALUES` sources do not inherit target-column types. Preserve temporal types explicitly for update-returning sources, including nullable values, while keeping insert/upsert semantics and optimistic-lock predicates intact.
+- Derived `VALUES` sources do not inherit target-column types. Preserve temporal and JSON types explicitly for update-returning sources, including nullable values and all-null batches, while keeping insert/upsert semantics and optimistic-lock predicates intact.
+- JSON getter metadata can have no SQL type name. For JSON source casts, prefer the physical column type and fall back to the dialect's JSON SQL type; do not map every `PGobject` to JSON because the driver also uses it for other PostgreSQL types.
 - Keep SQL-core code compatible with its Java 8 target and follow the surrounding Java style. Reuse existing dialect capabilities and SQL builders rather than adding application-specific branches or configuration switches.
 
 ## Regression checks
@@ -14,5 +15,6 @@ This repository owns the ORM and its Quarkus integration. The Gradle build is un
 - Extend the existing mutation tests and fixtures: `project/jimmer-sql/src/test/java/org/babyfish/jimmer/sql/mutation/ModifiedFetcherTest.java`, common `NativeDatabases`, and `project/jimmer-sql-test/jimmer-sql-test-model`. Do not create a new test application or manual application-JAR launcher.
 - Type-inference defects need a real database reproduction, not only an expected-SQL string or H2 run. Preserve returned values, null semantics, temporal precision/time zones and concurrency behavior. Native database fixtures use `jimmer-sql-test-native-database`; distinguish executed tests from skipped checks.
 - For temporal save-returning changes, run `:jimmer-sql:test --tests '*ModifiedFetcherTest' --tests '*ModifiedAssociationFetcherTest' --tests '*SaveKeyPropsTest'` from `project/`, with the PostgreSQL fixture configured for its native cases.
+- JSON save-returning regressions belong in the existing `sql/json/ScalarProviderTest` and `JsonWrapper` fixture. Cover both `@Serialized` and custom JSON scalar providers, non-null-to-SQL-null updates, mixed/all-null batches and database-read return values; distinguish SQL `NULL` from JSON `null`.
 - Align all consumer fork artifacts, including SQL/Kotlin, processors and Quarkus integration, on one released version. Verify resolved dependencies; a catalog's SQL version does not establish the extension's transitive version.
 - Record durable architecture corrections here and in relevant documentation. Commit, push, tag and publication require explicit user authorization; a local fix is not yet available to consumers.

@@ -61,6 +61,11 @@ public class PostgresDialect extends DefaultDialect {
     }
 
     @Override
+    public String getJsonSqlType() {
+        return "jsonb";
+    }
+
+    @Override
     public Object jsonToBaseValue(@Nullable String json) throws SQLException {
         PGobject pgobject = new PGobject();
         pgobject.setType("jsonb");

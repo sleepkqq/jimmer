@@ -5,7 +5,7 @@
 ## sleepkqq fork
 
 This fork includes the full Jimmer ORM and [Quarkus integration](project/jimmer-quarkus/README.md)
-in one Gradle build. Version **1.0.3** is based on upstream `dev` at
+in one Gradle build. Version **1.0.4** is based on upstream `dev` at
 [`4e49a9108`](https://github.com/babyfish-ct/jimmer/commit/4e49a9108), including belovaf's fixes.
 All modules are published anonymously through [JitPack](https://jitpack.io/#sleepkqq/jimmer)
 under `com.github.sleepkqq.jimmer`, with a single shared version.
@@ -16,9 +16,9 @@ repositories {
     maven("https://jitpack.io")
 }
 dependencies {
-    implementation("com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.3")
-    annotationProcessor("com.github.sleepkqq.jimmer:jimmer-apt:1.0.3")
-    // Kotlin: ksp("com.github.sleepkqq.jimmer:jimmer-ksp:1.0.3")
+    implementation("com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.4")
+    annotationProcessor("com.github.sleepkqq.jimmer:jimmer-apt:1.0.4")
+    // Kotlin: ksp("com.github.sleepkqq.jimmer:jimmer-ksp:1.0.4")
 }
 ```
 

@@ -42,9 +42,12 @@ class SaveReturningSql {
             if (returning.kind == SaveReturningKind.UPDATE) {
                 GetterMetadata metadata = sourceValue.getter.metadata();
                 Class<?> type = metadata.getSqlType();
-                // JDBC temporal parameters can be untyped; derived VALUES lack target-column context.
-                if (Date.class.isAssignableFrom(type) || Temporal.class.isAssignableFrom(type)) {
+                // Temporal parameters and JSON nulls can be untyped; VALUES lack target-column context.
+                if (metadata.isJson() || Date.class.isAssignableFrom(type) || Temporal.class.isAssignableFrom(type)) {
                     sqlType = metadata.getSqlTypeName();
+                    if (sqlType == null && metadata.isJson()) {
+                        sqlType = returning.ctx.options.getSqlClient().getDialect().getJsonSqlType();
+                    }
                 }
             }
             if (sqlType != null) {

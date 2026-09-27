@@ -13,6 +13,9 @@
   when FK-only joins are eliminated.
 - Release `1.0.3` preserves temporal SQL types in update-returning `VALUES` sources,
   including nullable timestamps and the distinction between local times and instants.
+- Release `1.0.4` preserves nullable JSON types in update-returning `VALUES` sources.
+  The renderer prefers column metadata and falls back to `Dialect.getJsonSqlType()`
+  (`jsonb` for PostgreSQL), since the JDBC `PGobject` class alone is not a SQL type name.
 - Kotlin 2.4.20, KSP 2.3.12 and compiler-testing 0.14.0 are aligned across the build.
 - All published modules, including the Quarkus runtime/deployment pair and BOM, share
   `com.github.sleepkqq.jimmer` and the version in `project/gradle.properties`.
@@ -22,8 +25,8 @@
 ## Migrate a consumer
 
 Replace `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.3`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.0.3`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.4`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.0.4`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
@@ -55,8 +58,8 @@ Docker is required for the PostgreSQL/Redis integration tests.
 ```bash
 project/gradlew -p project build
 project/gradlew -p project publishToMavenLocal -Dmaven.repo.local=/tmp/jimmer-m2
-python3 scripts/verify-publication.py /tmp/jimmer-m2 1.0.3
-project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.0.3
+python3 scripts/verify-publication.py /tmp/jimmer-m2 1.0.4
+project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.0.4
 ```
 
 `smoke-tests` is a separate Gradle build: it reuses the integration-test sources but
@@ -65,14 +68,14 @@ project dependencies, composite build or `mavenLocal()` fallback. The verifier c
 every published POM and Gradle module metadata file, plus the Quarkus deployment descriptor.
 
 For each release, update the fork version and consumer snippets, pass CI, commit and
-push `main`, then create and push an immutable semver tag (for example `1.0.3`).
+push `main`, then create and push an immutable semver tag (for example `1.0.4`).
 JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
 Request the tagged POM to trigger the public build, then check
-`https://jitpack.io/com/github/sleepkqq/jimmer/1.0.3/build.log` and run:
+`https://jitpack.io/com/github/sleepkqq/jimmer/1.0.4/build.log` and run:
 
 ```bash
-python3 scripts/verify-publication.py https://jitpack.io 1.0.3
-project/gradlew -p smoke-tests clean build -PforkVersion=1.0.3 --refresh-dependencies
+python3 scripts/verify-publication.py https://jitpack.io 1.0.4
+project/gradlew -p smoke-tests clean build -PforkVersion=1.0.4 --refresh-dependencies
 ```
 
 The final consumer check intentionally uses anonymous JitPack access. Create the GitHub

@@ -36,7 +36,7 @@ configuration that makes it work:
 <!-- versions:start -->
 | Extension | Quarkus  | Jimmer    | Kotlin  | JDK  |
 |-----------|----------|-----------|---------|------|
-| `1.0.3`   | `3.39.2` | fork `1.0.3` | `2.4.20` | `21` |
+| `1.0.4`   | `3.39.2` | fork `1.0.4` | `2.4.20` | `21` |
 <!-- versions:end -->
 
 The extension and ORM now share one build and release version. See
@@ -55,12 +55,12 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.3")
+    implementation("com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.4")
 
     // Java projects
-    annotationProcessor("com.github.sleepkqq.jimmer:jimmer-apt:1.0.3")
+    annotationProcessor("com.github.sleepkqq.jimmer:jimmer-apt:1.0.4")
     // Kotlin projects (KSP)
-    // ksp("com.github.sleepkqq.jimmer:jimmer-ksp:1.0.3")
+    // ksp("com.github.sleepkqq.jimmer:jimmer-ksp:1.0.4")
 }
 ```
 
@@ -72,8 +72,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.3'
-    annotationProcessor 'com.github.sleepkqq.jimmer:jimmer-apt:1.0.3'
+    implementation 'com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.4'
+    annotationProcessor 'com.github.sleepkqq.jimmer:jimmer-apt:1.0.4'
 }
 ```
 

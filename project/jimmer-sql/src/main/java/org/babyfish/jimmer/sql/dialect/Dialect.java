@@ -149,6 +149,11 @@ public interface Dialect extends SqlTypeStrategy {
     }
 
     @Nullable
+    default String getJsonSqlType() {
+        return sqlType(getJsonBaseType());
+    }
+
+    @Nullable
     default Object jsonToBaseValue(@Nullable String json) throws SQLException {
         return json;
     }
