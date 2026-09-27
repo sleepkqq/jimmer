@@ -17,6 +17,9 @@ import org.babyfish.jimmer.sql.model.*;
 import org.babyfish.jimmer.sql.model.hr.*;
 import org.babyfish.jimmer.sql.model.hr.dto.DepartmentCompositeView;
 import org.babyfish.jimmer.sql.model.hr.dto.EmployeeView;
+import org.babyfish.jimmer.sql.model.time.TemporalRecord;
+import org.babyfish.jimmer.sql.model.time.TemporalRecordDraft;
+import org.babyfish.jimmer.sql.model.time.TemporalRecordFetcher;
 import org.babyfish.jimmer.sql.runtime.LogicalDeletedBehavior;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,9 +29,13 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class ModifiedFetcherTest extends AbstractMutationTest {
 
@@ -1385,6 +1392,63 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
     }
 
     @Test
+    public void testUpdateReturningTemporalValuesByPostgres() {
+        NativeDatabases.assumeNativeDatabase();
+        LocalDateTime local = LocalDateTime.parse("2026-09-27T12:34:56.123456");
+        Instant instant = Instant.parse("2026-09-27T12:34:56.654321Z");
+        connectAndExpect(
+                NativeDatabases.POSTGRES_DATA_SOURCE,
+                con -> {
+                    try (Statement statement = con.createStatement()) {
+                        statement.execute("set time zone 'Asia/Tokyo'");
+                        statement.execute(
+                                "create temporary table TEMPORAL_RECORD(" +
+                                        "ID bigint primary key, VERSION int not null, " +
+                                        "CREATED_TIME timestamp not null, MODIFIED_TIME timestamptz, DESCRIPTION text not null)"
+                        );
+                        statement.execute(
+                                "insert into TEMPORAL_RECORD values " +
+                                        "(1, 0, '2020-01-01', now(), 'persisted'), (2, 0, '2020-01-01', now(), 'persisted')"
+                        );
+                    } catch (SQLException ex) {
+                        throw new AssertionError(ex);
+                    }
+                    BatchSaveResult<TemporalRecord> result = getSqlClient(it -> it.setDialect(new PostgresDialect()))
+                            .saveEntitiesCommand(Arrays.asList(
+                                    TemporalRecordDraft.$.produce(draft -> draft
+                                            .setId(1L).setVersion(0).setCreatedTime(local).setModifiedTime(null)),
+                                    TemporalRecordDraft.$.produce(draft -> draft
+                                            .setId(2L).setVersion(0).setCreatedTime(local).setModifiedTime(instant))
+                            ))
+                            .setMode(SaveMode.UPDATE_ONLY)
+                            .setSaveResultReadsAllProperties()
+                            .execute(con, TemporalRecordFetcher.$.allScalarFields());
+                    for (BatchSaveResult.Item<TemporalRecord> item : result.getItems()) {
+                        TemporalRecord modified = item.getModifiedEntity();
+                        assertEquals(1, modified.version());
+                        assertEquals(local, modified.createdTime());
+                        assertEquals(modified.id() == 1L ? null : instant, modified.modifiedTime());
+                        assertEquals("persisted", modified.description());
+                    }
+                    return result.getItems().size();
+                },
+                ctx -> {
+                    ctx.statement(it -> it.sql(
+                            "update TEMPORAL_RECORD tb_1_ " +
+                                    "set CREATED_TIME = tb_2_.CREATED_TIME, MODIFIED_TIME = tb_2_.MODIFIED_TIME, " +
+                                    "VERSION = tb_1_.VERSION + 1 " +
+                                    "from (values(?, ?, cast(? as timestamp), cast(? as timestamp with time zone)), " +
+                                    "(?, ?, cast(? as timestamp), cast(? as timestamp with time zone))) " +
+                                    "tb_2_(ID, VERSION, CREATED_TIME, MODIFIED_TIME) " +
+                                    "where tb_1_.ID = tb_2_.ID and tb_1_.VERSION = tb_2_.VERSION " +
+                                    "returning tb_1_.ID, tb_1_.VERSION, tb_1_.CREATED_TIME, tb_1_.MODIFIED_TIME, tb_1_.DESCRIPTION"
+                    ));
+                    ctx.value("2");
+                }
+        );
+    }
+
+    @Test
     public void testUpdateOnlyReturnDraftByPostgres() {
         NativeDatabases.assumeNativeDatabase();
 
@@ -1546,7 +1610,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                                         "EMAIL = excluded.EMAIL, " +
                                         "AREA = excluded.AREA, " +
                                         "NICK_NAME = excluded.NICK_NAME " +
-                                        "where tb_1_.ACCOUNT <> ?"
+                                        "where tb_1_.ACCOUNT <> excluded.ACCOUNT"
                         );
                     });
                     ctx.statement(it -> {
