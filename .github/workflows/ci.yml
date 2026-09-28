@@ -27,4 +27,5 @@ jobs:
           project/gradlew -p project publishToMavenLocal -Dmaven.repo.local="$RUNNER_TEMP/jimmer-m2"
           version=$(sed -n 's/^version=//p' project/gradle.properties)
           python3 scripts/verify-publication.py "$RUNNER_TEMP/jimmer-m2" "$version"
-          project/gradlew -p smoke-tests build -PforkRepository="file://$RUNNER_TEMP/jimmer-m2" -PforkVersion="$version"
+          python3 scripts/verify-publication.py https://jitpack.io "$version"
+          project/gradlew -p smoke-tests clean build -PforkRepository=https://jitpack.io -PforkVersion="$version" --refresh-dependencies
