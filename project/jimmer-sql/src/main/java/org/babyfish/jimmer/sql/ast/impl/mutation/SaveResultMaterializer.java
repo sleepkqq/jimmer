@@ -4,6 +4,7 @@ import org.babyfish.jimmer.ImmutableObjects;
 import org.babyfish.jimmer.meta.*;
 import org.babyfish.jimmer.runtime.DraftSpi;
 import org.babyfish.jimmer.runtime.ImmutableSpi;
+import org.babyfish.jimmer.runtime.Internal;
 import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.ast.impl.EntitiesImpl;
 import org.babyfish.jimmer.sql.ast.mutation.QueryReason;
@@ -333,7 +334,18 @@ class SaveResultMaterializer {
         List<Object> entities = new ArrayList<>(group.drafts.size());
         if (!JoinFetchFieldVisitor.hasTableFields(fetcher, sqlClient, true)) {
             for (int i = 0; i < group.drafts.size(); i++) {
-                entities.add(ImmutableObjects.makeIdOnly(group.drafts.get(i).__type(), group.ids.get(i)));
+                ImmutableType type = group.drafts.get(i).__type();
+                Object entity = ImmutableObjects.makeIdOnly(type, group.ids.get(i));
+                InheritanceInfo inheritance = type.getInheritanceInfo();
+                ImmutableProp discriminator = inheritance != null ? inheritance.getDiscriminatorProp() : null;
+                Object value = ImmutableObjects.getDiscriminator(entity);
+                if (discriminator != null && value != null &&
+                        ((FetcherImplementor<?>) fetcher).__contains(discriminator.getName())) {
+                    // No table read is needed for the discriminator of an already-known concrete subtype.
+                    entity = Internal.produce(type, entity,
+                            draft -> ((DraftSpi) draft).__set(discriminator.getId(), value));
+                }
+                entities.add(entity);
             }
             FetcherUtil.fetch(sqlClient, ctx.con, fetcher, null, entities);
         } else {
@@ -376,10 +388,16 @@ class SaveResultMaterializer {
                                         type == rootType ||
                                         containsAssignableType(group.types, type) :
                         null,
-                (type, prop, path) ->
-                        !path.isEmpty() ||
-                                !SaveFetcherAnalysis.isScalarColumnProp(prop) ||
-                                requiresScalarFetch(group, type, prop, inputShapeMatcher)
+                (type, prop, path) -> {
+                    if (!path.isEmpty()) {
+                        return true;
+                    }
+                    ImmutableProp idViewBase = prop.getIdViewBaseProp();
+                    // A to-one ID view is an already-known FK, not a collection snapshot.
+                    boolean scalar = SaveFetcherAnalysis.isScalarColumnProp(prop) ||
+                            idViewBase != null && idViewBase.isReference(TargetLevel.ENTITY);
+                    return !scalar || requiresScalarFetch(group, type, prop, inputShapeMatcher);
+                }
         );
         return isIdOnlyFetcher(residualFetcher) ? null : residualFetcher;
     }

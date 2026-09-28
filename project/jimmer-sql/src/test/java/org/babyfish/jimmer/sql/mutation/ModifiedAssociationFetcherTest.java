@@ -4,6 +4,7 @@ import org.babyfish.jimmer.sql.TargetTransferMode;
 import org.babyfish.jimmer.sql.ast.mutation.AssociatedSaveMode;
 import org.babyfish.jimmer.sql.ast.mutation.BatchSaveResult;
 import org.babyfish.jimmer.sql.ast.mutation.QueryReason;
+import org.babyfish.jimmer.sql.ast.mutation.SaveMode;
 import org.babyfish.jimmer.sql.common.AbstractMutationTest;
 import org.babyfish.jimmer.sql.common.Constants;
 import org.babyfish.jimmer.sql.dialect.H2Dialect;
@@ -15,6 +16,7 @@ import org.babyfish.jimmer.sql.model.hr.dto.DepartmentCompositeView;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -22,8 +24,53 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public class ModifiedAssociationFetcherTest extends AbstractMutationTest {
+
+    @Test
+    public void testIdViewDoesNotRefetchAcceptedReference() {
+        connectAndExpect(
+                con -> getSqlClient()
+                        .saveCommand(Immutables.createBook(draft -> {
+                            draft.setId(Constants.graphQLInActionId3);
+                            draft.setStoreId(Constants.oreillyId);
+                        }))
+                        .setMode(SaveMode.UPDATE_ONLY)
+                        .execute(con, BookFetcher.$.storeId())
+                        .getModifiedEntity(),
+                ctx -> {
+                    ctx.statement(it -> it.sql("update BOOK set STORE_ID = ? where ID = ?"));
+                    ctx.value(book -> assertEquals(Constants.oreillyId, book.storeId()));
+                }
+        );
+    }
+
+    @Test
+    public void testIdViewWithAppendDoesNotRepeatResidualFetch() {
+        connectAndExpect(
+                con -> getSqlClient()
+                        .saveCommand(Immutables.createBook(draft -> {
+                            draft.setId(Constants.graphQLInActionId3);
+                            draft.setStoreId(Constants.oreillyId);
+                            draft.setAuthors(Collections.emptyList());
+                        }))
+                        .setMode(SaveMode.UPDATE_ONLY)
+                        .setAssociatedMode(BookProps.AUTHORS, AssociatedSaveMode.APPEND)
+                        .execute(con, BookFetcher.$.storeId().authors(AuthorFetcher.$.firstName()))
+                        .getModifiedEntity(),
+                ctx -> {
+                    ctx.statement(it -> it.sql("select ID from final table (merge into BOOK tb_1_ " +
+                            "using(values(?, ?)) tb_2_(ID, STORE_ID) on tb_1_.ID = tb_2_.ID " +
+                            "when matched then update set STORE_ID = tb_2_.STORE_ID)"));
+                    ctx.statement(it -> {});
+                    ctx.value(book -> {
+                        assertEquals(Constants.oreillyId, book.storeId());
+                        assertFalse(book.authors().isEmpty());
+                    });
+                }
+        );
+    }
 
     @Test
     public void testMergeOneToManyWithReturning() {

@@ -9,6 +9,7 @@ This repository owns the ORM and its Quarkus integration. The Gradle build is un
 - Derived `VALUES` sources do not inherit target-column types. Preserve temporal and JSON types explicitly for update-returning sources, including nullable values and all-null batches, while keeping insert/upsert semantics and optimistic-lock predicates intact.
 - JSON getter metadata can have no SQL type name. For JSON source casts, prefer the physical column type and fall back to the dialect's JSON SQL type; do not map every `PGobject` to JSON because the driver also uses it for other PostgreSQL types.
 - Keep SQL-core code compatible with its Java 8 target and follow the surrounding Java style. Reuse existing dialect capabilities and SQL builders rather than adding application-specific branches or configuration switches.
+- Save-result shape matching treats a null child fetcher as an ID-only entity reference, distinct from a null root fetcher. Reuse satisfied to-one ID views and known concrete discriminators in residual seeds; APPEND collections still require their stored snapshot. Never infer collection completeness from submitted children.
 
 ## Regression checks
 
