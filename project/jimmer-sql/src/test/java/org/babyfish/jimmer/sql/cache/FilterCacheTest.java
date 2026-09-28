@@ -73,12 +73,18 @@ public class FilterCacheTest extends AbstractQueryTest {
                         return ref[0];
                     },
                     ctx -> {
+                        ctx.sql(
+                                "select tb_1_.ID from FILE tb_1_ " +
+                                        "where tb_1_.ID in (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                                        "and exists(select 1 from FILE_USER_MAPPING tb_2_ " +
+                                        "where tb_2_.FILE_ID = tb_1_.ID and tb_2_.USER_ID = ?)"
+                        );
                         if (useSql) {
-                            ctx.sql(
+                            ctx.statement(1).sql(
                                     "select tb_1_.ID, tb_1_.NAME, tb_1_.PARENT_ID " +
                                             "from FILE tb_1_ " +
                                             "where " +
-                                            "--->tb_1_.ID in (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                                            "--->tb_1_.ID in (?, ?, ?, ?, ?, ?) " +
                                             "and " +
                                             "--->exists(" +
                                             "--->--->select 1 " +

@@ -4,9 +4,11 @@ import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheTracker;
+import org.babyfish.jimmer.sql.cache.caffeine.CaffeineHashBinder;
 import org.babyfish.jimmer.sql.cache.caffeine.CaffeineValueBinder;
 import org.babyfish.jimmer.sql.cache.chain.ChainCacheBuilder;
 import org.babyfish.jimmer.sql.cache.chain.LoadingBinder;
+import org.babyfish.jimmer.sql.cache.chain.SimpleBinder;
 import org.jetbrains.annotations.Nullable;
 
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
@@ -27,7 +29,19 @@ final class LocalOnlyCaches {
             @Nullable ImmutableProp prop,
             JimmerCacheConfig.EntityCacheConfig config,
             @Nullable CacheTracker tracker,
-            boolean operationLog) {
+            boolean operationLog,
+            boolean multiView) {
+        if (multiView) {
+            SimpleBinder.Parameterized<K, V> binder = CaffeineHashBinder.<K, V>forProp(prop)
+                    .subscribe(tracker)
+                    .maximumSize(config.localMaxSize())
+                    .duration(config.localTtl())
+                    .build();
+            return new ChainCacheBuilder<K, V>()
+                    .add(operationLog ? LoggingBinder.wrap(binder) : binder)
+                    .add(tracker != null ? new InvalidationPublishBinder.Parameterized<>(prop, tracker) : null)
+                    .build();
+        }
         CaffeineValueBinder.Builder<K, V> caffeine = type != null
                 ? CaffeineValueBinder.forObject(type)
                 : CaffeineValueBinder.forProp(prop);

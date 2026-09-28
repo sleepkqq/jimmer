@@ -7,9 +7,9 @@ import java.util.Map;
 
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
+import org.babyfish.jimmer.sql.cache.AbstractCacheFactory;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheCreator;
-import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.babyfish.jimmer.sql.cache.CacheTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +26,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
  * <p>Requires Redis; see {@link JimmerLocalCacheFactory} for applications without
  * {@code quarkus-redis-client}.</p>
  */
-public class JimmerRedisCacheFactory implements CacheFactory {
+public class JimmerRedisCacheFactory extends AbstractCacheFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JimmerRedisCacheFactory.class);
 
@@ -88,7 +88,7 @@ public class JimmerRedisCacheFactory implements CacheFactory {
             return null;
         }
         if (config.mode() == CacheMode.LOCAL_ONLY) {
-            return SubscriptionCache.wrap(LocalOnlyCaches.create(type, null, config, tracker, operationLog), tracker);
+            return SubscriptionCache.wrap(LocalOnlyCaches.create(type, null, config, tracker, operationLog, false), tracker);
         }
         return creator(config).createForObject(type);
     }
@@ -114,10 +114,11 @@ public class JimmerRedisCacheFactory implements CacheFactory {
         if (config == null || !config.cacheAssociations() || !isCachedAssociation(prop)) {
             return null;
         }
+        boolean multiView = getFilterState() != null && getFilterState().isAffected(prop.getTargetType());
         if (config.mode() == CacheMode.LOCAL_ONLY) {
-            return (T) SubscriptionCache.wrap(LocalOnlyCaches.create(null, prop, config, tracker, operationLog), tracker);
+            return (T) SubscriptionCache.wrap(LocalOnlyCaches.create(null, prop, config, tracker, operationLog, multiView), tracker);
         }
-        return (T) (Cache) creator(config).createForProp(prop, false);
+        return (T) (Cache) creator(config).createForProp(prop, multiView);
     }
 
     private CacheCreator creator(JimmerCacheConfig.EntityCacheConfig config) {

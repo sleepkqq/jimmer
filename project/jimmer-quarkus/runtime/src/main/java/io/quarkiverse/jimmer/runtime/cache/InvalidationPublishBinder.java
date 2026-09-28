@@ -3,6 +3,7 @@ package io.quarkiverse.jimmer.runtime.cache;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.SortedMap;
 
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
@@ -49,5 +50,22 @@ public class InvalidationPublishBinder<K, V> extends AbstractTrackingProducerBin
     @Override
     protected boolean matched(@Nullable Object reason) {
         return false;
+    }
+
+    public static class Parameterized<K, V> extends InvalidationPublishBinder<K, V>
+            implements SimpleBinder.Parameterized<K, V> {
+
+        public Parameterized(ImmutableProp prop, CacheTracker tracker) {
+            super(null, prop, tracker);
+        }
+
+        @Override
+        public Map<K, V> getAll(Collection<K> keys, SortedMap<String, Object> parameters) {
+            return getAll(keys);
+        }
+
+        @Override
+        public void setAll(Map<K, V> map, SortedMap<String, Object> parameters) {
+        }
     }
 }

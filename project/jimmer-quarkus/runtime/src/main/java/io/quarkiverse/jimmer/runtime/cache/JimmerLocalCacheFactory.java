@@ -6,8 +6,8 @@ import java.util.Map;
 
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
+import org.babyfish.jimmer.sql.cache.AbstractCacheFactory;
 import org.babyfish.jimmer.sql.cache.Cache;
-import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,7 +19,7 @@ import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
  * Anything else fails the start — there is no Redis to back it and no pub/sub channel to
  * invalidate across instances. Free of Redis imports by design.
  */
-public class JimmerLocalCacheFactory implements CacheFactory {
+public class JimmerLocalCacheFactory extends AbstractCacheFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JimmerLocalCacheFactory.class);
 
@@ -48,7 +48,7 @@ public class JimmerLocalCacheFactory implements CacheFactory {
         if (config == null) {
             return null;
         }
-        return LocalOnlyCaches.create(type, null, config, null, operationLog);
+        return LocalOnlyCaches.create(type, null, config, null, operationLog, false);
     }
 
     @Override
@@ -67,7 +67,8 @@ public class JimmerLocalCacheFactory implements CacheFactory {
         if (config == null || !config.cacheAssociations() || !isCachedAssociation(prop)) {
             return null;
         }
-        return (T) LocalOnlyCaches.create(null, prop, config, null, operationLog);
+        boolean multiView = getFilterState() != null && getFilterState().isAffected(prop.getTargetType());
+        return (T) LocalOnlyCaches.create(null, prop, config, null, operationLog, multiView);
     }
 
     private boolean isCachedAssociation(ImmutableProp prop) {

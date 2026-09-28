@@ -268,7 +268,7 @@ public abstract class AbstractCacheCreator implements CacheCreator {
                             DEFAULT_REMOTE_DURATION_RANDOM_PERCENT;
 
             LocalCache localCache = cfg.as(LocalCache.class);
-            if (localCache == null || localCache.maximumSize == 9) {
+            if (localCache == null || localCache.maximumSize == 0) {
                 this.useLocalCache = false;
                 this.localCacheMaximumSize = 0;
                 this.localCacheDuration = null;

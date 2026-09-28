@@ -168,7 +168,7 @@ class ParameterizedChainCacheImpl<K, V> extends ChainCacheImpl<K, V> implements 
                 Map<K, V> loadedMap,
                 boolean updateBinder
         ) {
-            Map<K, V> mapFromNext = next.loadAll(missedKeys);
+            Map<K, V> mapFromNext = ((ParameterizedNode<K, V>) next).loadAll(missedKeys, parameterMap);
             if (mapFromNext.size() < missedKeys.size()) {
                 mapFromNext = new HashMap<>(mapFromNext);
                 if (updateBinder) {

@@ -498,10 +498,17 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         QueryAnalyzer analyzer = new QueryAnalyzer(astContext, this);
         if (!getMutableQuery().isFrozen()) {
             applyVirtualPredicates(astContext);
+            List<Selection<?>> filterSelections = getData().selections;
+            if (getData().oldSelections != null) {
+                // Count/reselect shares the mutable query with the original projection.
+                // Prepare its subqueries before rendering freezes that shared query.
+                filterSelections = new ArrayList<>(filterSelections);
+                filterSelections.addAll(getData().oldSelections);
+            }
             getMutableQuery().applyGlobalFilters(
                     astContext,
                     getMutableQuery().getContext().getFilterLevel(),
-                    getData().selections,
+                    filterSelections,
                     analyzer.analyzeJoinRequirements()
             );
         }

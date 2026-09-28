@@ -1,7 +1,15 @@
 package org.babyfish.jimmer.sql.query;
 
+import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.JSqlClient;
+import org.babyfish.jimmer.sql.ast.Expression;
+import org.babyfish.jimmer.sql.ast.query.ConfigurableRootQuery;
+import org.babyfish.jimmer.sql.ast.query.TypedSubQuery;
+import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
+import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
+import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.fetcher.ReferenceFetchType;
 import org.babyfish.jimmer.sql.filter.Filter;
 import org.babyfish.jimmer.sql.filter.FilterArgs;
@@ -10,8 +18,14 @@ import org.babyfish.jimmer.sql.model.hr.EmployeeFetcher;
 import org.babyfish.jimmer.sql.model.hr.EmployeeTable;
 import org.babyfish.jimmer.sql.model.inheritance.*;
 import org.babyfish.jimmer.sql.runtime.LogicalDeletedBehavior;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class GlobalFilterTest extends AbstractQueryTest {
 
@@ -27,6 +41,65 @@ public class GlobalFilterTest extends AbstractQueryTest {
         });
         lambdaClient = new LambdaClient(sqlClient);
         lambdaClientForDeletedData = new LambdaClient(sqlClientForDeletedData);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSelectedSubQueryFiltersSurvivePagination(boolean paged) {
+        JSqlClient client = getSqlClient(it -> it.addFilters(new Filter<PermissionTable>() {
+            @Override
+            public void filter(FilterArgs<PermissionTable> args) {
+                args.where(args.getTable().id().ne(1000L));
+            }
+        }));
+        RoleTable role = RoleTable.$;
+        PermissionTable permission = PermissionTable.$;
+        TypedSubQuery<Long> count = client.createSubQuery(permission)
+                .where(permission.role().id().eq(role.id()))
+                .select(Expression.rowCount());
+        ConfigurableRootQuery<RoleTable, Tuple2<Long, Long>> query = client.createQuery(role)
+                .where(role.id().eq(100L))
+                .orderBy(role.id())
+                .select(role.id(), count);
+
+        jdbc(con -> {
+            List<Tuple2<Long, Long>> rows = paged ? query.fetchPage(0, 10, con).getRows() : query.execute(con);
+            Assertions.assertEquals(1, rows.size());
+            // Permission 1000 is hidden by the user filter; 1001 is logically deleted.
+            Assertions.assertEquals(new Tuple2<>(100L, 0L), rows.get(0));
+        });
+    }
+
+    @Test
+    public void testCachedIdReadRechecksCurrentFilter() {
+        AtomicLong visibleId = new AtomicLong(-1L);
+        JSqlClient client = getSqlClient(it -> {
+            it.addFilters(new Filter<PermissionTable>() {
+                @Override
+                public void filter(FilterArgs<PermissionTable> args) {
+                    args.where(args.getTable().id().eq(visibleId.get()));
+                }
+            });
+            it.setCacheFactory(new CacheFactory() {
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return new CacheImpl<>(type);
+                }
+            });
+        });
+        jdbc(con -> {
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            visibleId.set(1000L);
+            Assertions.assertNotNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            visibleId.set(-1L);
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(PermissionFetcher.$.name(), 1000L));
+            visibleId.set(1000L);
+            Assertions.assertNotNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            clearExecutions();
+            Assertions.assertNotNull(client.getEntities().forConnection(con).forUpdate().findById(Permission.class, 1000L));
+            Assertions.assertTrue(getExecutions().get(0).getSql().endsWith("for update"));
+        });
     }
 
     @Test

@@ -2,12 +2,16 @@ package io.quarkiverse.jimmer.it;
 
 import static io.quarkiverse.jimmer.it.TestCacheConfigs.config;
 import static io.quarkiverse.jimmer.it.TestCacheConfigs.entity;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.sql.Connection;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.sql.DataSource;
 
@@ -23,6 +27,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import io.quarkiverse.jimmer.it.entity.Book;
+import io.quarkiverse.jimmer.it.entity.BookProps;
 import io.quarkiverse.jimmer.it.entity.BookTable;
 import io.quarkiverse.jimmer.runtime.cache.CacheMode;
 import io.quarkiverse.jimmer.runtime.cache.JimmerRedisCacheFactory;
@@ -89,6 +94,42 @@ class CacheModeReadTest {
                 .limit(1)
                 .execute()
                 .get(0);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CacheMode.class)
+    @SuppressWarnings("unchecked")
+    void filteredAssociationsKeepViewsSeparateAndInvalidateAllViews(CacheMode mode) throws Exception {
+        JimmerRedisCacheFactory factory = new JimmerRedisCacheFactory(
+                redisDataSource, config(entity("Book", mode), entity("Author", mode)), null, cacheTracker);
+        factory.setFilterState(type -> true);
+        Cache.Parameterized<Long, List<Long>> cache = (Cache.Parameterized<Long, List<Long>>)
+                assertInstanceOf(Cache.Parameterized.class, factory.createAssociatedIdListCache(BookProps.AUTHORS.unwrap()));
+        long id = -System.nanoTime();
+        AtomicInteger loads = new AtomicInteger();
+        try (Connection con = dataSource.getConnection()) {
+            CacheEnvironment<Long, List<Long>> first = new CacheEnvironment<>(sqlClient, con, keys -> {
+                loads.incrementAndGet();
+                return Map.of(id, List.of(11L));
+            }, false);
+            CacheEnvironment<Long, List<Long>> second = new CacheEnvironment<>(sqlClient, con, keys -> {
+                loads.incrementAndGet();
+                return Map.of(id, List.of(22L));
+            }, false);
+            TreeMap<String, Object> defaultTenant = new TreeMap<>(Map.of("tenant", "DEFAULT"));
+            TreeMap<String, Object> demoTenant = new TreeMap<>(Map.of("tenant", "DEMO"));
+            for (int i = 0; i < 2; i++) {
+                assertEquals(List.of(11L), cache.getAll(List.of(id), defaultTenant, first).get(id));
+                assertEquals(List.of(22L), cache.getAll(List.of(id), demoTenant, second).get(id));
+            }
+            assertEquals(2, loads.get());
+            cache.deleteAll(List.of(id), null);
+            assertEquals(List.of(11L), cache.getAll(List.of(id), defaultTenant, first).get(id));
+            assertEquals(List.of(22L), cache.getAll(List.of(id), demoTenant, second).get(id));
+            assertEquals(4, loads.get());
+        } finally {
+            cache.deleteAll(List.of(id), null);
+        }
     }
 
     @SuppressWarnings("unchecked")

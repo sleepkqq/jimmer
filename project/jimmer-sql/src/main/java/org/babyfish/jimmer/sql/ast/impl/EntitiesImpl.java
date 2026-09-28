@@ -272,10 +272,14 @@ public class EntitiesImpl implements Entities {
                 );
             }
         }
-        Cache<Object, E> cache = sqlClient.getCaches().getObjectCache(immutableType);
+        Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(immutableType);
         if (cache != null) {
+            Collection<Object> visibleIds = visibleCachedIds(immutableType, distinctIds, con);
+            if (visibleIds.isEmpty()) {
+                return Collections.emptyList();
+            }
             Collection<E> cachedEntities = cache.getAll(
-                    distinctIds,
+                    visibleIds,
                     new CacheEnvironment<>(
                             sqlClient,
                             con,
@@ -344,10 +348,14 @@ public class EntitiesImpl implements Entities {
                 );
             }
         }
-        Cache<Object, E> cache = sqlClient.getCaches().getObjectCache(immutableType);
+        Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(immutableType);
         if (cache != null) {
+            Collection<Object> visibleIds = visibleCachedIds(immutableType, distinctIds, con);
+            if (visibleIds.isEmpty()) {
+                return Collections.emptyList();
+            }
             Collection<E> cachedEntities = cache.getAll(
-                    distinctIds,
+                    visibleIds,
                     new CacheEnvironment<>(
                             sqlClient,
                             con,
@@ -393,6 +401,25 @@ public class EntitiesImpl implements Entities {
             query = query.forUpdate(true);
         }
         return query.execute(con);
+    }
+
+    private Collection<Object> visibleCachedIds(ImmutableType type, Set<Object> ids, Connection con) {
+        if (rootUserFiltersIgnored || purpose == ExecutionPurpose.LOAD || sqlClient.getFilters().getFilter(type) == null) {
+            return ids;
+        }
+        // Object caches are single-view. Access to a root ID must be checked in the
+        // current filter context, including on a warm hit or a previously denied ID.
+        return Queries.createQuery(
+                sqlClient,
+                type,
+                purpose,
+                FilterLevel.DEFAULT,
+                (q, table) -> {
+                    Expression<Object> id = table.get(type.getIdProp().getName());
+                    q.where(ids.size() == 1 ? id.eq(ids.iterator().next()) : id.in(ids));
+                    return q.select(id);
+                }
+        ).execute(con);
     }
 
     @SuppressWarnings("unchecked")
