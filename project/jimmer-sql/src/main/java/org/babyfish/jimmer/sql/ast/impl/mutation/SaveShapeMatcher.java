@@ -157,11 +157,11 @@ class SaveShapeMatcher {
                 if (prop.isReferenceList(TargetLevel.ENTITY)) {
                     List<DraftSpi> list = (List<DraftSpi>) associatedValue;
                     for (DraftSpi e : list) {
-                        if (!matches(e, childFetcher, trim, false)) {
+                        if (!matchesChild(e, childFetcher, trim)) {
                             return false;
                         }
                     }
-                } else if (!matches((DraftSpi) associatedValue, childFetcher, trim, false)) {
+                } else if (!matchesChild((DraftSpi) associatedValue, childFetcher, trim)) {
                     return false;
                 }
             }
@@ -174,6 +174,15 @@ class SaveShapeMatcher {
             }
         }
         return true;
+    }
+
+    private boolean matchesChild(DraftSpi draft, @Nullable Fetcher<?> fetcher, boolean trim) {
+        // A raw reference/implicit id-view dependency requests only the target ID.
+        // A null root fetcher has a different meaning: the upsert-mask result shape.
+        if (draft != null && fetcher == null && draft.__type().isEntity()) {
+            return draft.__isLoaded(draft.__type().getIdProp().getId());
+        }
+        return matches(draft, fetcher, trim, false);
     }
 
     private static void collectMatchedFieldMap(

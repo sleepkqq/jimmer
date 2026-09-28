@@ -9,6 +9,8 @@ import org.babyfish.jimmer.sql.dialect.MySqlDialect;
 import org.babyfish.jimmer.sql.exception.ExecutionException;
 import org.babyfish.jimmer.sql.model.inheritance.enumdiscriminator.EnumOrganization;
 import org.babyfish.jimmer.sql.model.inheritance.enumdiscriminator.EnumOrganizationDraft;
+import org.babyfish.jimmer.sql.model.inheritance.enumdiscriminator.EnumOrganizationFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.enumdiscriminator.ClientType;
 import org.babyfish.jimmer.sql.model.inheritance.key.NaturalOrganizationDraft;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.*;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.dto.ClientDiscriminatorInput;
@@ -28,6 +30,29 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class SingleTableInheritanceMutationTest extends AbstractMutationTest {
+
+    @Test
+    public void testSavedEnumDiscriminatorDoesNotRefetchKnownSubtype() {
+        connectAndExpect(
+                con -> getSqlClient().getEntities()
+                        .saveCommand(EnumOrganizationDraft.$.produce(organization -> {
+                            organization.setId(310L);
+                            organization.setName("Enum Org");
+                        }))
+                        .setMode(SaveMode.INSERT_ONLY)
+                        .execute(con, EnumOrganizationFetcher.$.type().name())
+                        .getModifiedEntity(),
+                ctx -> {
+                    ctx.statement(it -> it.sql(
+                            "insert into ENUM_CLIENT(ID, CLIENT_TYPE, NAME) values(?, ?, ?)"
+                    ));
+                    ctx.value(entity -> {
+                        assertEquals(ClientType.ORG, entity.type());
+                        assertEquals("Enum Org", entity.name());
+                    });
+                }
+        );
+    }
 
     @Test
     public void testInsertDerivedType() {
@@ -462,32 +487,8 @@ public class SingleTableInheritanceMutationTest extends AbstractMutationTest {
                         it.variables(306L, "Person", "Fetched Person", "Alice", "White");
                     });
                     ctx.statement(it -> {
-                        it.queryReason(QueryReason.FETCHER);
-                        it.sql(
-                                "select tb_1_.ID, tb_1_.CLIENT_TYPE, tb_1_.NAME, " +
-                                        "tb_2_.TAX_CODE, tb_3_.FIRST_NAME, tb_3_.LAST_NAME " +
-                                        "from CLIENT tb_1_ " +
-                                        "left join CLIENT tb_2_ on tb_1_.ID = tb_2_.ID and tb_2_.CLIENT_TYPE = ? " +
-                                        "left join CLIENT tb_3_ on tb_1_.ID = tb_3_.ID and tb_3_.CLIENT_TYPE = ? " +
-                                        "where tb_1_.ID = ?"
-                        );
-                        it.variables("ORG", "Person", 306L);
-                    });
-                    ctx.statement(it -> {
                         it.sql("insert into CLIENT(ID, CLIENT_TYPE, NAME, TAX_CODE) values(?, ?, ?, ?)");
                         it.variables(307L, "ORG", "Fetched Org", "F-ORG");
-                    });
-                    ctx.statement(it -> {
-                        it.queryReason(QueryReason.FETCHER);
-                        it.sql(
-                                "select tb_1_.ID, tb_1_.CLIENT_TYPE, tb_1_.NAME, " +
-                                        "tb_2_.TAX_CODE, tb_3_.FIRST_NAME, tb_3_.LAST_NAME " +
-                                        "from CLIENT tb_1_ " +
-                                        "left join CLIENT tb_2_ on tb_1_.ID = tb_2_.ID and tb_2_.CLIENT_TYPE = ? " +
-                                        "left join CLIENT tb_3_ on tb_1_.ID = tb_3_.ID and tb_3_.CLIENT_TYPE = ? " +
-                                        "where tb_1_.ID = ?"
-                        );
-                        it.variables("ORG", "Person", 307L);
                     });
                     ctx.value(this::assertFetchedBatchInputResult);
                 }
