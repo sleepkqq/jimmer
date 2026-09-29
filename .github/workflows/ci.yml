@@ -41,10 +41,12 @@ jobs:
           jimmer-sql-test-native-database: postgres
         run: |
           docker exec -i "${{ job.services.postgres.id }}" psql -U root -d jimmer_test -v ON_ERROR_STOP=1 < project/jimmer-sql/src/test/resources/database-postgres.sql
-          project/gradlew -p project :jimmer-sql:test --tests '*FluentDMLTest.testUpdateReturningReferenceIdByPostgres'
+          # Ubuntu's /bin/sh drops the upstream fixture's hyphenated environment key.
+          bash project/gradlew -p project :jimmer-sql:test --tests '*FluentDMLTest.testUpdateReturningReferenceIdByPostgres'
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
           result = ET.parse('project/jimmer-sql/build/test-results/test/TEST-org.babyfish.jimmer.sql.mutation.FluentDMLTest.xml').getroot()
+          print({key: result.get(key) for key in ('tests', 'failures', 'errors', 'skipped')})
           assert result.get('tests') == '1'
           assert all(result.get(key) == '0' for key in ('failures', 'errors', 'skipped'))
           print('PostgreSQL reference update-returning: passed, no skipped cases')
