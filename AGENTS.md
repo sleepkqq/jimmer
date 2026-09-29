@@ -12,6 +12,7 @@ This repository owns the ORM and its Quarkus integration. The Gradle build is un
 - Save-result shape matching treats a null child fetcher as an ID-only entity reference, distinct from a null root fetcher. Reuse satisfied to-one ID views and known concrete discriminators in residual seeds; APPEND collections still require their stored snapshot. Never infer collection completeness from submitted children.
 - Count/reselect shares a mutable query with its original projection. Prepare global filters in both current and retained selections before freezing it; projection-only subqueries must remain filtered during pagination.
 - Object caches are single-view content caches, not authorization caches. Public filtered ID reads must check visible IDs before cache lookup, including negative hits; `forUpdate` must execute a locking database read. Internal association loaders retain their existing filtered-ID loading path.
+- Bulk update-returning validates raw owning-reference IDs against their parent FK property. Preserve physical-table/inheritance checks; inverse references and actual joined target properties are not columns of the mutation target.
 - Propagate filter parameters through every tier of a parameterized cache chain. Declarative Quarkus factories use native `FilterState` and multi-view binders for filtered associations in LOCAL_ONLY, REMOTE_ONLY and FULL modes. Invalidation deletes every view for an owner key.
 
 ## Regression checks

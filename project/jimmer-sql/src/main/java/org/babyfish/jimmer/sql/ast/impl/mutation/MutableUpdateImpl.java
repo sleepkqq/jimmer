@@ -1359,6 +1359,16 @@ public class MutableUpdateImpl
         }
         PropExpressionImplementor<?> propExpression = (PropExpressionImplementor<?>) ast;
         Table<?> selectionTable = propExpression.getTable();
+        ImmutableProp prop = propExpression.getProp();
+        if (propExpression.isRawId() && prop.isId()) {
+            TableImplementor<?> resolvedTable = TableProxies.resolve(selectionTable, astContext);
+            ImmutableProp joinProp = resolvedTable.getJoinProp();
+            if (!resolvedTable.isInverse() && joinProp != null && joinProp.isColumnDefinition()) {
+                // An owning reference ID is stored on the parent, not on the joined target.
+                selectionTable = resolvedTable.getParent();
+                prop = joinProp;
+            }
+        }
         if (selectionTable != getTable() && selectionTable != getTableLikeImplementor()) {
             throw new IllegalArgumentException(
                     "The update-returning selection \"" +
@@ -1368,7 +1378,6 @@ public class MutableUpdateImpl
                             "\""
             );
         }
-        ImmutableProp prop = propExpression.getProp();
         if (!prop.isColumnDefinition()) {
             throw new IllegalArgumentException(
                     "The update-returning selection \"" +

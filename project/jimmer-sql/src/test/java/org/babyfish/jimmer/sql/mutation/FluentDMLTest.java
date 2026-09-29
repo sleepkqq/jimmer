@@ -6,6 +6,7 @@ import org.babyfish.jimmer.sql.ast.mutation.DeleteMode;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.common.AbstractMutationTest;
 import org.babyfish.jimmer.sql.common.NativeDatabases;
+import org.babyfish.jimmer.sql.dialect.H2Dialect;
 import org.babyfish.jimmer.sql.dialect.MySqlDialect;
 import org.babyfish.jimmer.sql.dialect.PostgresDialect;
 import org.babyfish.jimmer.sql.exception.ExecutionException;
@@ -137,6 +138,71 @@ public class FluentDMLTest extends AbstractMutationTest {
                         Assertions.assertEquals("Learning GraphQL+", rows.get(0).get_2());
                     });
                 }
+        );
+    }
+
+    @Test
+    public void testUpdateReturningReferenceId() {
+        assertUpdateReturningReferenceId(false, manningId);
+        assertUpdateReturningReferenceId(false, null);
+    }
+
+    @Test
+    public void testUpdateReturningReferenceIdByPostgres() {
+        NativeDatabases.assumeNativeDatabase();
+        assertUpdateReturningReferenceId(true, manningId);
+        assertUpdateReturningReferenceId(true, null);
+    }
+
+    private void assertUpdateReturningReferenceId(boolean postgres, UUID storeId) {
+        BookTable book = BookTable.$;
+        connectAndExpect(
+                postgres ? NativeDatabases.POSTGRES_DATA_SOURCE : null,
+                con -> getSqlClient(it -> it.setDialect(postgres ? new PostgresDialect() : new H2Dialect()))
+                        .createUpdate(book)
+                        .set(book.<UUID>getAssociatedId("store"), storeId)
+                        .where(book.id().eq(learningGraphQLId1))
+                        .returning(book.id(), book.<UUID>getAssociatedId("store"))
+                        .execute(con),
+                ctx -> {
+                    ctx.statement(it -> it.sql(
+                            (postgres ? "" : "select ID, STORE_ID from final table (") +
+                                    "update BOOK tb_1_ set STORE_ID = " + (storeId != null ? "?" : "null") +
+                                    " where tb_1_.ID = ?" +
+                                    (postgres ? " returning tb_1_.ID, tb_1_.STORE_ID" : ")")
+                    ));
+                    ctx.value((List<Tuple2<UUID, UUID>> rows) -> {
+                        Assertions.assertEquals(1, rows.size());
+                        Assertions.assertEquals(learningGraphQLId1, rows.get(0).get_1());
+                        Assertions.assertEquals(storeId, rows.get(0).get_2());
+                    });
+                }
+        );
+    }
+
+    @Test
+    public void testUpdateReturningRejectsJoinedProperty() {
+        BookTable book = BookTable.$;
+        connectAndExpect(
+                con -> getSqlClient().createUpdate(book)
+                        .set(book.name(), "changed")
+                        .where(book.id().eq(learningGraphQLId1))
+                        .returning(book.store().name())
+                        .execute(con),
+                ctx -> ctx.throwable(it -> it.type(IllegalArgumentException.class))
+        );
+    }
+
+    @Test
+    public void testUpdateReturningRejectsInverseReferenceId() {
+        BookStoreTable store = BookStoreTable.$;
+        connectAndExpect(
+                con -> getSqlClient().createUpdate(store)
+                        .set(store.name(), "changed")
+                        .where(store.id().eq(manningId))
+                        .returning(store.<UUID>getAssociatedId("books"))
+                        .execute(con),
+                ctx -> ctx.throwable(it -> it.type(IllegalArgumentException.class))
         );
     }
 
