@@ -174,6 +174,9 @@ internal class KConfigurableRootQueryImpl<P : KPropsLike, R>(
     ): KConfigurableRootQuery<P, R> =
         KConfigurableRootQueryImpl(javaQuery.setReverseSortOptimizationEnabled(enabled))
 
+    override fun useObjectCache(enabled: Boolean): KConfigurableRootQuery<P, R> =
+        KConfigurableRootQueryImpl(javaQuery.useObjectCache(enabled))
+
     override fun forUpdate(forUpdate: Boolean): KConfigurableRootQuery<P, R> =
         KConfigurableRootQueryImpl(javaQuery.forUpdate(forUpdate))
 

@@ -109,6 +109,33 @@ public abstract class AbstractTxConnectionManager implements TxConnectionManager
 
     protected abstract Connection openConnection() throws SQLException;
 
+    /**
+     * <p>Positively prove that the connection is not inside a transaction: the current
+     * thread's scope must actually own <em>this</em> connection, that scope must not
+     * own a transaction, and the JDBC connection must really be in auto-commit mode.</p>
+     *
+     * <p>Auto-commit alone is not trusted, because a managed scope may have borrowed a
+     * connection whose auto-commit was toggled externally, and an explicitly supplied
+     * external connection never establishes a scope. A missing scope, a scope that
+     * owns a different connection, a scope that owns a transaction, or any
+     * unknown/unmanaged connection state returns {@code false}.</p>
+     */
+    @Override
+    public boolean isTransactionKnownInactive(Connection con) {
+        if (con == null) {
+            return false;
+        }
+        Scope scope = scopeLocal.get();
+        if (scope == null || scope.con != con || scope.withTransaction) {
+            return false;
+        }
+        try {
+            return con.getAutoCommit();
+        } catch (SQLException | RuntimeException ex) {
+            return false;
+        }
+    }
+
     protected void closeConnection(Connection con) throws SQLException {
         con.close();
     }

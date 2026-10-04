@@ -50,6 +50,8 @@ class TypedQueryData {
 
     final JdbcOptions jdbcOptions;
 
+    final boolean useObjectCache;
+
     private PropExpressionImplementor<?> idOnlyExpression;
 
     private boolean idOnlyExpressionResolved;
@@ -68,6 +70,7 @@ class TypedQueryData {
         forUpdate = null;
         hint = null;
         jdbcOptions = JdbcOptions.EMPTY;
+        useObjectCache = false;
     }
 
     public TypedQueryData(
@@ -88,6 +91,7 @@ class TypedQueryData {
         forUpdate = null;
         hint = null;
         this.jdbcOptions = jdbcOptions;
+        useObjectCache = false;
     }
 
     private TypedQueryData(
@@ -103,7 +107,8 @@ class TypedQueryData {
             Boolean reverseSortOptimizationEnabled,
             ForUpdate forUpdate,
             String hint,
-            JdbcOptions jdbcOptions
+            JdbcOptions jdbcOptions,
+            boolean useObjectCache
     ) {
         this.selections = selections;
         this.tupleCreator = tupleCreator;
@@ -118,6 +123,7 @@ class TypedQueryData {
         this.forUpdate = forUpdate;
         this.hint = hint;
         this.jdbcOptions = jdbcOptions;
+        this.useObjectCache = useObjectCache;
     }
 
     public TypedQueryData reselect(List<Selection<?>> selections, TupleCreator<?> tupleCreator) {
@@ -134,7 +140,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -170,7 +177,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -188,7 +196,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -206,7 +215,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -224,7 +234,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -242,7 +253,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -260,7 +272,8 @@ class TypedQueryData {
                 enabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -278,7 +291,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -309,7 +323,8 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
         );
     }
 
@@ -327,7 +342,54 @@ class TypedQueryData {
                 reverseSortOptimizationEnabled,
                 forUpdate,
                 hint,
-                jdbcOptions
+                jdbcOptions,
+                useObjectCache
+        );
+    }
+
+    public TypedQueryData useObjectCache(boolean useObjectCache) {
+        if (this.useObjectCache == useObjectCache) {
+            return this;
+        }
+        return new TypedQueryData(
+                selections,
+                tupleCreator,
+                oldSelections,
+                oldTupleCreator,
+                distinct,
+                limit,
+                offset,
+                withoutSortingAndPaging,
+                reverseSorting,
+                reverseSortOptimizationEnabled,
+                forUpdate,
+                hint,
+                jdbcOptions,
+                useObjectCache
+        );
+    }
+
+    /**
+     * Copy with a different projection but the same predicates, ordering,
+     * pagination and other flags. Used by the optional object-cache execution to
+     * render an id-only skeleton over the shared query.
+     */
+    TypedQueryData skeleton(List<Selection<?>> selections, TupleCreator<?> tupleCreator) {
+        return new TypedQueryData(
+                processSelections(selections),
+                tupleCreator,
+                oldSelections,
+                oldTupleCreator,
+                distinct,
+                limit,
+                offset,
+                withoutSortingAndPaging,
+                reverseSorting,
+                reverseSortOptimizationEnabled,
+                forUpdate,
+                hint,
+                jdbcOptions,
+                false
         );
     }
 

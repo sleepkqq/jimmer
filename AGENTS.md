@@ -2,6 +2,10 @@
 
 This repository owns the ORM and its Quarkus integration. The Gradle build is under `project/`; fork coordinates, compatibility and releases are documented in [FORK.md](FORK.md).
 
+## Public repository boundary
+
+- Keep private consumer names, packages, schemas, source snippets and implementation details out of tracked code, tests, documentation and commit messages. Core changes must be generic; regressions use anonymized existing Jimmer fixtures.
+
 ## Ownership and SQL correctness
 
 - Fix ORM SQL generation and JDBC type handling in `project/jimmer-sql`, not with service-specific queries, save-then-find workarounds or disabled save-returning optimizations. Trace neighboring insert/update/upsert callers before changing a shared renderer.
@@ -12,6 +16,8 @@ This repository owns the ORM and its Quarkus integration. The Gradle build is un
 - Save-result shape matching treats a null child fetcher as an ID-only entity reference, distinct from a null root fetcher. Reuse satisfied to-one ID views and known concrete discriminators in residual seeds; APPEND collections still require their stored snapshot. Never infer collection completeness from submitted children.
 - Count/reselect shares a mutable query with its original projection. Prepare global filters in both current and retained selections before freezing it; projection-only subqueries must remain filtered during pagination.
 - Object caches are single-view content caches, not authorization caches. Public filtered ID reads must check visible IDs before cache lookup, including negative hits; `forUpdate` must execute a locking database read. Internal association loaders retain their existing filtered-ID loading path.
+- Query object-cache hydration is an explicit content-cache hint, not a query-result or statement-snapshot cache. SQL remains authoritative for membership, join topology, order, duplicates, pagination and scalar slots; fresh entity seeds use the existing readers and validate concrete cache types before shaping or DTO conversion. Missing, negative or incompatible cached values fall back to the whole original query, not a shortened page.
+- Object-cache query hints require positive proof of an inactive transaction on the connection owned by the executing manager scope. External, mismatched or unknown connections and locking or command reads must not publish query content into shared caches.
 - Bulk update-returning validates raw owning-reference IDs against their parent FK property. Preserve physical-table/inheritance checks; inverse references and actual joined target properties are not columns of the mutation target.
 - Propagate filter parameters through every tier of a parameterized cache chain. Declarative Quarkus factories use native `FilterState` and multi-view binders for filtered associations in LOCAL_ONLY, REMOTE_ONLY and FULL modes. Invalidation deletes every view for an owner key.
 

@@ -191,7 +191,12 @@ public class FetcherSelectionImpl<T> implements FetcherSelection<T>, Ast {
         }
         TableImplementor<?> tableImplementor = TableProxies.resolve(table, visitor.getAstContext());
         RealTable realTable = visitor.realTableForAnalysis(tableImplementor);
-        if (tableImplementor.getPolymorphicDiscriminatorProp() != null) {
+        // An entity projection on a joined table must keep that join even when only
+        // the id is selected. Otherwise the id-only optimization marks the join
+        // ID_ONLY and drops it while the renderer still emits the target's own id
+        // column, which references the missing alias.
+        if (tableImplementor.getPolymorphicDiscriminatorProp() != null ||
+                tableImplementor.getJoinProp() != null) {
             visitor.visitTableReference(realTable, null, false);
         }
         Fetcher<?> fetcher = getFetcher();

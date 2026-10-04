@@ -12,7 +12,9 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.SortedMap;
 
@@ -136,6 +138,48 @@ public class PropCacheInvalidatorTest {
         Assertions.assertTrue(
                 PropCacheInvalidators.isGetAffectedSourceIdsOverridden(
                         new H(),
+                        AssociationEvent.class,
+                        null
+                )
+        );
+    }
+
+    @Test
+    public void testCollection() {
+
+        Assertions.assertFalse(
+                PropCacheInvalidators.isGetAffectedSourceIdsOverridden(
+                        Collections.emptyList(),
+                        EntityEvent.class,
+                        null
+                )
+        );
+
+        Assertions.assertFalse(
+                PropCacheInvalidators.isGetAffectedSourceIdsOverridden(
+                        Arrays.asList(new A(), new E()),
+                        EntityEvent.class,
+                        null
+                )
+        );
+        Assertions.assertFalse(
+                PropCacheInvalidators.isGetAffectedSourceIdsOverridden(
+                        Arrays.asList(new A(), new E()),
+                        AssociationEvent.class,
+                        null
+                )
+        );
+
+        Assertions.assertTrue(
+                PropCacheInvalidators.isGetAffectedSourceIdsOverridden(
+                        Arrays.asList(new A(), new B()),
+                        EntityEvent.class,
+                        null
+                )
+        );
+        Assertions.assertTrue(
+                PropCacheInvalidators.isGetAffectedSourceIdsOverridden(
+                        Arrays.asList(new E(), new G()),
                         AssociationEvent.class,
                         null
                 )

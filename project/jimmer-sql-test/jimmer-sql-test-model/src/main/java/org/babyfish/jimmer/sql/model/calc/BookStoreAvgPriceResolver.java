@@ -6,9 +6,11 @@ import org.babyfish.jimmer.sql.TransientResolver;
 import org.babyfish.jimmer.sql.ast.Expression;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.event.AssociationEvent;
+import org.babyfish.jimmer.sql.event.ChangedRef;
 import org.babyfish.jimmer.sql.event.EntityEvent;
 import org.babyfish.jimmer.sql.model.Book;
 import org.babyfish.jimmer.sql.model.BookProps;
+import org.babyfish.jimmer.sql.model.BookStore;
 import org.babyfish.jimmer.sql.model.BookStoreProps;
 import org.babyfish.jimmer.sql.model.BookStoreTable;
 import org.jspecify.annotations.NonNull;
@@ -57,8 +59,24 @@ public class BookStoreAvgPriceResolver implements TransientResolver<UUID, BigDec
     @Nullable
     @Override
     public Collection<?> getAffectedSourceIds(@NonNull EntityEvent<?> e) {
-        if (e.getImmutableType().getJavaClass() == Book.class && e.isChanged(BookProps.PRICE)) {
-            return Collections.singleton(e.getUnchangedValue(BookProps.STORE_ID));
+        if (e.isEvict() || e.getImmutableType().getJavaClass() != Book.class) {
+            return null;
+        }
+        ChangedRef<BookStore> storeRef = e.getChangedRef(BookProps.STORE);
+        if (storeRef != null) {
+            ChangedRef<Object> idRef = storeRef.toIdRef();
+            Set<UUID> ids = new LinkedHashSet<>(2);
+            if (idRef.getOldValue() != null) {
+                ids.add((UUID) idRef.getOldValue());
+            }
+            if (idRef.getNewValue() != null) {
+                ids.add((UUID) idRef.getNewValue());
+            }
+            return ids.isEmpty() ? null : ids;
+        }
+        if (e.isChanged(BookProps.PRICE)) {
+            BookStore store = e.getUnchangedValue(BookProps.STORE);
+            return store != null ? Collections.singleton(store.id()) : null;
         }
         return null;
     }

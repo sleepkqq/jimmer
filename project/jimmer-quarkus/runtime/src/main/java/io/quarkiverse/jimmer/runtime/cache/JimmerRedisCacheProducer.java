@@ -14,6 +14,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheGuardConfig;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerRuntimeConfig;
+import io.quarkus.arc.DefaultBean;
 import io.quarkus.arc.Unremovable;
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
 import io.quarkus.redis.datasource.RedisDataSource;
@@ -43,6 +44,7 @@ public class JimmerRedisCacheProducer {
     @Produces
     @Singleton
     @Unremovable
+    @DefaultBean
     public CacheFactory jimmerCacheFactory(
             RedisDataSource redisDataSource,
             JimmerCacheConfig config,

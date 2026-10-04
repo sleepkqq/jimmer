@@ -83,6 +83,32 @@ interface KConfigurableRootQuery<P : KPropsLike, R> : KTypedRootQuery<R> {
     @NewChain
     fun setReverseSortOptimizationEnabled(enabled: Boolean): KConfigurableRootQuery<P, R>
 
+    /**
+     * Optional hint: try to serve the entity part of this query from the configured
+     * object cache instead of re-reading entity columns from the database. The query
+     * always executes SQL for membership, ordering, pagination, count and existence,
+     * and transparently falls back to ordinary SQL when the hint cannot be applied.
+     * Cached entity content is eventual, not a statement snapshot: concurrent writes
+     * can make it disagree with fresh SQL predicates or scalar slots. The hint requires
+     * a positively proven inactive transaction and is disabled for locking reads.
+     *
+     * @return A new query object with the hint enabled
+     */
+    @NewChain
+    fun useObjectCache(): KConfigurableRootQuery<P, R> =
+        useObjectCache(true)
+
+    /**
+     * Enable or disable the optional object-cache hint. The default is disabled,
+     * so ordinary queries are unchanged.
+     *
+     * @param enabled Whether the hint is enabled
+     * @return A new query object
+     */
+    @NewChain
+    fun useObjectCache(enabled: Boolean): KConfigurableRootQuery<P, R> =
+        this
+
     @NewChain
     fun forUpdate(forUpdate: Boolean = true): KConfigurableRootQuery<P, R>
 

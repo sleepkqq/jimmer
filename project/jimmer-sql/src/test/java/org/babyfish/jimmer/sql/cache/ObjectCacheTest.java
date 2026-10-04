@@ -5,7 +5,14 @@ import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.runtime.DraftSpi;
 import org.babyfish.jimmer.runtime.ImmutableSpi;
 import org.babyfish.jimmer.sql.JSqlClient;
+import org.babyfish.jimmer.sql.ast.impl.query.FilterLevel;
+import org.babyfish.jimmer.sql.ast.impl.query.Queries;
+import org.babyfish.jimmer.sql.ast.mutation.QueryReason;
+import org.babyfish.jimmer.sql.ast.query.ConfigurableRootQuery;
+import org.babyfish.jimmer.sql.ast.table.Table;
+import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
+import org.babyfish.jimmer.sql.common.AbstractTest;
 import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.model.*;
 import org.babyfish.jimmer.sql.model.dto.ReusableBookStoreView;
@@ -13,6 +20,9 @@ import org.babyfish.jimmer.sql.model.inheritance.joinedtable.*;
 import org.babyfish.jimmer.sql.model.inheritance.joinedtable.Organization;
 import org.babyfish.jimmer.sql.model.issue1252.TreeNode2;
 import org.babyfish.jimmer.sql.model.issue1252.TreeNode2Fetcher;
+import org.babyfish.jimmer.sql.runtime.ConnectionManager;
+import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
+import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +31,10 @@ import org.junit.jupiter.api.Test;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.babyfish.jimmer.sql.common.Constants.*;
 
@@ -32,7 +44,12 @@ public class ObjectCacheTest extends AbstractQueryTest {
 
     @BeforeEach
     public void initialize() {
-        sqlClient = getSqlClient(builder -> {
+        sqlClient = newClient(NON_TX_MANAGER);
+    }
+
+    private JSqlClient newClient(ConnectionManager connectionManager) {
+        return getSqlClient(builder -> {
+            builder.setConnectionManager(connectionManager);
             builder.setCaches(cfg ->
                     cfg.setCacheFactory(
                             new CacheFactory() {
@@ -506,5 +523,310 @@ public class ObjectCacheTest extends AbstractQueryTest {
                 );
             });
         }
+    }
+
+    private static final String HINT_SKELETON_SQL =
+            "select tb_1_.ID from BOOK_STORE tb_1_ where tb_1_.ID = ?";
+
+    private static final String HINT_WIDE_SQL =
+            "select tb_1_.ID, tb_1_.NAME, tb_1_.WEBSITE, tb_1_.VERSION " +
+                    "from BOOK_STORE tb_1_ where tb_1_.ID = ?";
+
+    private static final String HINT_TUPLE_SQL =
+            "select tb_1_.ID, tb_1_.NAME from BOOK_STORE tb_1_ where tb_1_.ID = ?";
+
+    /**
+     * A genuinely non-transactional test connection manager. The optional object-cache
+     * hint only activates when the manager can positively prove that the connection is
+     * not inside a transaction. This standalone JDBC fixture has no ambient framework
+     * transaction, so for a plain H2 connection that proof is exactly
+     * {@link Connection#getAutoCommit()}; a connection that really is in a local JDBC
+     * transaction (the default rollback fixture) is correctly denied instead of being
+     * assumed safe. No readiness flag and no fake proof is involved.
+     */
+    private static final ConnectionManager NON_TX_MANAGER = new ConnectionManager() {
+        @Override
+        @SuppressWarnings("unchecked")
+        public <R> R execute(Connection con, Function<Connection, R> block) {
+            if (con != null) {
+                return block.apply(con);
+            }
+            R[] resultBox = (R[]) new Object[1];
+            jdbc(null, false, c -> {
+                c.setAutoCommit(true);
+                resultBox[0] = block.apply(c);
+            });
+            return resultBox[0];
+        }
+
+        @Override
+        public boolean isTransactionKnownInactive(Connection con) {
+            if (con == null) {
+                return false;
+            }
+            try {
+                return con.getAutoCommit();
+            } catch (SQLException ex) {
+                return false;
+            }
+        }
+    };
+
+    /**
+     * Runs read-only bodies on a fresh H2 connection whose auto-commit is genuinely
+     * enabled, so nothing is ever committed and the connection is exactly what a
+     * non-transactional caller looks like.
+     */
+    private static void nontransactional(AbstractTest.SqlConsumer<Connection> block) {
+        jdbc(null, false, con -> {
+            con.setAutoCommit(true);
+            block.accept(con);
+        });
+    }
+
+    /**
+     * An "unknown" manager that never overrides {@code isTransactionKnownInactive}, so
+     * the default {@code false} proof is exercised even on a genuinely auto-commit
+     * connection: the hint must stay in ordinary SQL.
+     */
+    private static final ConnectionManager UNKNOWN_MANAGER = new ConnectionManager() {
+        @Override
+        @SuppressWarnings("unchecked")
+        public <R> R execute(Connection con, Function<Connection, R> block) {
+            if (con != null) {
+                return block.apply(con);
+            }
+            R[] resultBox = (R[]) new Object[1];
+            jdbc(null, false, c -> {
+                c.setAutoCommit(true);
+                resultBox[0] = block.apply(c);
+            });
+            return resultBox[0];
+        }
+    };
+
+    @Test
+    public void testObjectCacheHintEntity() {
+        BookStoreTable table = BookStoreTable.$;
+        for (int i = 0; i < 2; i++) {
+            final boolean warmMiss = i == 0;
+            clearExecutions();
+            List<BookStore> rows = new ArrayList<>();
+            nontransactional(con -> rows.addAll(
+                    sqlClient
+                            .createQuery(table)
+                            .where(table.id().eq(oreillyId))
+                            .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                            .useObjectCache()
+                            .execute(con)
+            ));
+            Assertions.assertEquals(1, rows.size());
+            Assertions.assertEquals("O'REILLY", rows.get(0).name());
+            assertHintStatements(warmMiss, HINT_SKELETON_SQL);
+        }
+    }
+
+    @Test
+    public void testObjectCacheHintTupleWithScalar() {
+        BookStoreTable table = BookStoreTable.$;
+        for (int i = 0; i < 2; i++) {
+            final boolean warmMiss = i == 0;
+            clearExecutions();
+            List<Tuple2<BookStore, String>> rows = new ArrayList<>();
+            nontransactional(con -> rows.addAll(
+                    sqlClient
+                            .createQuery(table)
+                            .where(table.id().eq(oreillyId))
+                            .select(
+                                    table.fetch(BookStoreFetcher.$.allScalarFields()),
+                                    table.name()
+                            )
+                            .useObjectCache()
+                            .execute(con)
+            ));
+            Assertions.assertEquals(1, rows.size());
+            Assertions.assertEquals("O'REILLY", rows.get(0).get_1().name());
+            Assertions.assertEquals("O'REILLY", rows.get(0).get_2());
+            assertHintStatements(warmMiss, HINT_TUPLE_SQL);
+        }
+    }
+
+    @Test
+    public void testObjectCacheHintDisabledFallsBack() {
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        nontransactional(con -> rows.addAll(
+                sqlClient
+                        .createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                        .useObjectCache(false)
+                        .execute(con)
+        ));
+        Assertions.assertEquals(1, rows.size());
+        Assertions.assertEquals("O'REILLY", rows.get(0).name());
+        Assertions.assertEquals(1, getExecutions().size());
+        Assertions.assertEquals(HINT_WIDE_SQL, getExecutions().get(0).getSql());
+    }
+
+    @Test
+    public void testObjectCacheHintForUpdateFallsBack() {
+        warmBookStore(sqlClient);
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        nontransactional(con -> rows.addAll(
+                sqlClient
+                        .createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                        .useObjectCache()
+                        .forUpdate()
+                        .execute(con)
+        ));
+        Assertions.assertEquals(1, rows.size());
+        Assertions.assertEquals("O'REILLY", rows.get(0).name());
+        // forUpdate is checked before the manager: the wide entity SQL must run even
+        // though the object cache is warm and the connection is provably inactive.
+        Assertions.assertEquals(1, getExecutions().size());
+        assertWideEntitySql(getExecutions().get(0).getSql());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testObjectCacheHintCommandPurposeFallsBack() {
+        warmBookStore(sqlClient);
+        clearExecutions();
+        ConfigurableRootQuery<Table<?>, BookStore> query = Queries.createQuery(
+                (JSqlClientImplementor) sqlClient,
+                ImmutableType.get(BookStore.class),
+                ExecutionPurpose.command(QueryReason.NONE),
+                FilterLevel.DEFAULT,
+                (q, table) -> q
+                        .where(table.get("id").eq(oreillyId))
+                        .select(((Table<BookStore>) table).fetch(BookStoreFetcher.$.allScalarFields()))
+        );
+        List<BookStore> rows = new ArrayList<>();
+        nontransactional(con -> rows.addAll(query.useObjectCache().execute(con)));
+        Assertions.assertEquals(1, rows.size());
+        Assertions.assertEquals("O'REILLY", rows.get(0).name());
+        // A command purpose can never be served from the object cache.
+        Assertions.assertEquals(1, getExecutions().size());
+        assertWideEntitySql(getExecutions().get(0).getSql());
+    }
+
+    @Test
+    public void testObjectCacheHintUnknownManagerFallsBack() {
+        JSqlClient local = newClient(UNKNOWN_MANAGER);
+        warmBookStore(local);
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        nontransactional(con -> rows.addAll(
+                local
+                        .createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        Assertions.assertEquals(1, rows.size());
+        Assertions.assertEquals("O'REILLY", rows.get(0).name());
+        // The default manager proof is false, so a genuinely auto-commit connection
+        // still must not activate the hint.
+        Assertions.assertEquals(1, getExecutions().size());
+        assertWideEntitySql(getExecutions().get(0).getSql());
+    }
+
+    @Test
+    public void testObjectCacheHintExplicitAutoCommitFalseFallsBack() {
+        warmBookStore(sqlClient);
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                sqlClient
+                        .createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        Assertions.assertEquals(1, rows.size());
+        Assertions.assertEquals("O'REILLY", rows.get(0).name());
+        // The supplied connection really is a local JDBC transaction (autoCommit=false).
+        Assertions.assertEquals(1, getExecutions().size());
+        Assertions.assertEquals(HINT_WIDE_SQL, getExecutions().get(0).getSql());
+    }
+
+    @Test
+    public void testObjectCacheHintColdDirtyRootReadIsNotPublished() {
+        BookStoreTable table = BookStoreTable.$;
+        // Warm the shared object cache with the committed state.
+        warmBookStore(sqlClient);
+
+        String pending = "O'REILLY-pending";
+        // A real local JDBC transaction with an uncommitted raw update: the hinted
+        // ROOT query must decline and observe the pending value through ordinary SQL.
+        jdbc(con -> {
+            try (PreparedStatement ps = con.prepareStatement(
+                    "update BOOK_STORE set NAME = ? where ID = ?"
+            )) {
+                ps.setString(1, pending);
+                ps.setObject(2, oreillyId);
+                Assertions.assertEquals(1, ps.executeUpdate());
+            }
+            List<BookStore> inTx = sqlClient
+                    .createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                    .useObjectCache()
+                    .execute(con);
+            Assertions.assertEquals(1, inTx.size());
+            Assertions.assertEquals(pending, inTx.get(0).name());
+        });
+
+        // The rollback restored the committed row and the uncommitted value must not
+        // have been published into the shared object cache.
+        clearExecutions();
+        List<BookStore> after = new ArrayList<>();
+        nontransactional(con -> after.addAll(
+                sqlClient
+                        .createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        Assertions.assertEquals(1, after.size());
+        Assertions.assertEquals("O'REILLY", after.get(0).name());
+        // The warm cache served the entity: exactly one id-only skeleton statement and
+        // no entity reload. A missing/polluted cache would emit the wide SQL or return
+        // the pending value instead.
+        Assertions.assertEquals(1, getExecutions().size());
+        Assertions.assertEquals(HINT_SKELETON_SQL, getExecutions().get(0).getSql());
+    }
+
+    private static void warmBookStore(JSqlClient client) {
+        nontransactional(con ->
+                client.getEntities().forConnection(con).findById(BookStore.class, oreillyId)
+        );
+    }
+
+    private void assertHintStatements(boolean warmMiss, String skeletonSql) {
+        List<Execution> executions = getExecutions();
+        Assertions.assertEquals(warmMiss ? 2 : 1, executions.size());
+        Assertions.assertEquals(skeletonSql, executions.get(0).getSql());
+        Assertions.assertEquals(oreillyId, executions.get(0).getVariables(0).get(0));
+        if (warmMiss) {
+            Assertions.assertEquals(HINT_WIDE_SQL, executions.get(1).getSql());
+            Assertions.assertEquals(oreillyId, executions.get(1).getVariables(0).get(0));
+        }
+    }
+
+    private void assertWideEntitySql(String sql) {
+        Assertions.assertTrue(sql.contains("tb_1_.WEBSITE"), sql);
+        Assertions.assertTrue(sql.contains("from BOOK_STORE tb_1_"), sql);
     }
 }

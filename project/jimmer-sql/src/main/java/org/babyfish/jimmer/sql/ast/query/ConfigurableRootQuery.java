@@ -112,6 +112,46 @@ public interface ConfigurableRootQuery<T extends TableLike<?>, R> extends TypedR
     @NewChain
     ConfigurableRootQuery<T, R> setReverseSortOptimizationEnabled(boolean enabled);
 
+    /**
+     * <p>Optional hint: try to serve the entity part of this query from the configured
+     * object cache instead of re-reading entity columns from the database.</p>
+     *
+     * <p><b>The entity content is eventual, not a same-statement snapshot.</b> The query
+     * always executes SQL for membership, ordering and pagination, and any fresh scalar
+     * slots are read from that SQL; the entity slots are then hydrated from the object
+     * cache. A concurrent writer can therefore make the fresh SQL predicates/scalars
+     * disagree with the possibly-stale cached entity content of a returned row.</p>
+     *
+     * <p>This is only a hint. If the query shape is not supported (for example an
+     * aggregation, distinct, effective join-fetch, unsupported table shape, or a command
+     * /load purpose), no object cache is configured, the transaction state cannot be
+     * positively proven inactive, or the cached content does not cover the selected
+     * rows, the query transparently falls back to the ordinary SQL execution.
+     * {@link #forUpdate()} always disables this hint.</p>
+     *
+     * <p>The default execution path, {@link #stream(Connection)}, {@link #forEach}, count
+     * and existence are unaffected and keep their ordinary semantics. Because a cold or
+     * mixed cache may load missing entries, the hint can add SQL round-trips.</p>
+     *
+     * @return A new query object with the hint enabled
+     */
+    @NewChain
+    default ConfigurableRootQuery<T, R> useObjectCache() {
+        return useObjectCache(true);
+    }
+
+    /**
+     * <p>Enable or disable the optional object-cache hint. The default is disabled,
+     * so ordinary queries are unchanged.</p>
+     *
+     * @param enabled Whether the hint is enabled
+     * @return A new query object
+     */
+    @NewChain
+    default ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
+        return this;
+    }
+
     @NewChain
     default ConfigurableRootQuery<T, R> forUpdate() {
         return forUpdate(true);

@@ -24,6 +24,35 @@
 
 ## Migrate a consumer
 
+### Optional object-cache query hydration in 1.1.0
+
+`useObjectCache()` is an explicit, off-by-default hint on Java and Kotlin root queries.
+It is a content-cache hint, not a query-result or statement-snapshot cache: SQL remains
+authoritative for membership, join topology, ordering, duplicates, pagination and scalar
+slots, while the shared object cache only supplies eventual entity content for the rows
+SQL already selected. Supported entity slots project ID-only skeletons and use the existing
+object-cache loader for cold entries. Cached slots are checked against fresh concrete SQL
+types; unresolved missing, negative or incompatible values fall back to the whole original
+query rather than a shortened page. Mixed cached/fresh rows, named entity tuples and root
+single-table polymorphic results are supported conservatively. Locking reads
+(`forUpdate`), command and aggregate reads, streaming and count queries are unchanged and
+never use the hint, and ordinary derived or association queries still determine membership
+by SQL rather than by a cached query result.
+
+The hint is honored only with positive proof that the connection is owned by the executing
+manager scope and is not in a transaction: external, mismatched or unknown connections,
+active or rollback-only transactions and locking reads are denied. Hinted root-query
+execution therefore does not hydrate uncommitted roots from, or publish them to, shared
+object caches. Custom cache factories still own their existing transaction guards.
+
+1.1.0 also fixes shared numerical CDC decoding: JSON node casting for `BigInteger` and
+`BigDecimal` now preserves the full value instead of truncating through an int cast, so
+CDC/binlog consumers decode numeric columns correctly in both Jackson v2 and v3 nodes.
+
+In Quarkus, the built-in local and Redis `CacheFactory` producers are now `@DefaultBean`,
+so an application-provided `CacheFactory` bean wins instead of making resolution ambiguous;
+the built-in producers remain available when no application factory exists.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -63,8 +92,8 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 ### Released coordinates
 
 Replace `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.7`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.0.7`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.0`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.0`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
@@ -96,8 +125,8 @@ Docker is required for the PostgreSQL/Redis integration tests.
 ```bash
 project/gradlew -p project build
 project/gradlew -p project publishToMavenLocal -Dmaven.repo.local=/tmp/jimmer-m2
-python3 scripts/verify-publication.py /tmp/jimmer-m2 1.0.7
-project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.0.7
+python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.0
+project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.0
 ```
 
 `smoke-tests` is a separate Gradle build: it reuses the integration-test sources but
@@ -106,14 +135,14 @@ project dependencies, composite build or `mavenLocal()` fallback. The verifier c
 every published POM and Gradle module metadata file, plus the Quarkus deployment descriptor.
 
 For each release, update the fork version and consumer snippets, pass CI, commit and
-push `main`, then create and push an immutable semver tag (for example `1.0.7`).
+push `main`, then create and push an immutable semver tag (for example `1.1.0`).
 JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
 Request the tagged POM to trigger the public build, then check
-`https://jitpack.io/com/github/sleepkqq/jimmer/1.0.7/build.log` and run:
+`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.0/build.log` and run:
 
 ```bash
-python3 scripts/verify-publication.py https://jitpack.io 1.0.7
-project/gradlew -p smoke-tests clean build -PforkVersion=1.0.7 --refresh-dependencies
+python3 scripts/verify-publication.py https://jitpack.io 1.1.0
+project/gradlew -p smoke-tests clean build -PforkVersion=1.1.0 --refresh-dependencies
 ```
 
 The final consumer check intentionally uses anonymous JitPack access. Create the GitHub

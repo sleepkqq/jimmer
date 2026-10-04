@@ -183,6 +183,16 @@ class UsedCacheImpl<K, V> implements UsedCache<K, V> {
                                     "\" cannot return draft"
                     );
                 }
+                ImmutableType resultType = ((ImmutableSpi) result).__type();
+                if (!type.isAssignableFrom(resultType)) {
+                    throw new CacheTypeMismatchException(
+                            "Object cache for \"" +
+                                    type +
+                                    "\" returns an object of the incompatible type \"" +
+                                    resultType +
+                                    "\""
+                    );
+                }
             } else if (prop.isReferenceList(TargetLevel.OBJECT)) {
                 if (!(result instanceof List<?>)) {
                     throw new IllegalArgumentException(

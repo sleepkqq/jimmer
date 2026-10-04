@@ -8,6 +8,7 @@ import org.babyfish.jimmer.sql.cache.CacheFactory;
 
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheGuardConfig;
+import io.quarkus.arc.DefaultBean;
 import io.quarkus.arc.Unremovable;
 
 /**
@@ -20,6 +21,7 @@ public class JimmerLocalCacheProducer {
     @Produces
     @Singleton
     @Unremovable
+    @DefaultBean
     public CacheFactory jimmerCacheFactory(JimmerCacheConfig config, JimmerCacheGuardConfig guard,
             Instance<CacheReadiness> readiness) {
         CacheFactory factory = new JimmerLocalCacheFactory(config);

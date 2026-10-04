@@ -25,6 +25,14 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
 
     private final Object connectionKey = new Object();
 
+    /**
+     * Connection acquired by the current thread's {@link #execute(Connection, Function)}
+     * managed branch, installed only while its callback runs. Used to prove ownership
+     * for {@link #isTransactionKnownInactive(Connection)}; never used to manage the
+     * connection lifecycle.
+     */
+    private final ThreadLocal<Connection> managedExecutionConnection = new ThreadLocal<>();
+
     private final DataSource dataSource;
     private final TransactionManager transactionManager;
     private final TransactionSynchronizationRegistry tsr;
@@ -53,13 +61,27 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
         }
 
         if (isTransactionActive()) {
-            return block.apply(transactionalConnection());
+            return executeWithTrackedConnection(transactionalConnection(), block);
         }
 
         try (Connection newConnection = dataSource.getConnection()) {
-            return block.apply(newConnection);
+            return executeWithTrackedConnection(newConnection, block);
         } catch (SQLException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private <R> R executeWithTrackedConnection(Connection con, Function<Connection, R> block) {
+        Connection previous = managedExecutionConnection.get();
+        managedExecutionConnection.set(con);
+        try {
+            return block.apply(con);
+        } finally {
+            if (previous != null) {
+                managedExecutionConnection.set(previous);
+            } else {
+                managedExecutionConnection.remove();
+            }
         }
     }
 
@@ -143,6 +165,31 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
             Transaction tx = transactionManager.getTransaction();
             return tx != null && tx.getStatus() == Status.STATUS_ACTIVE;
         } catch (SystemException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Positive proof for the optional object-cache query hint: the current thread's
+     * managed {@code execute} scope must actually own <em>this</em> connection (a
+     * null, external or mismatched connection is denied), the JTA manager reports no
+     * transaction at all and the JDBC connection really is in auto-commit mode. Any
+     * other status (active, marked rollback, preparing, committing, committed, rolled
+     * back, unknown), a disabled auto-commit or a transaction-manager error is
+     * conservatively denied. This deliberately does not reuse
+     * {@link #isTransactionActive()}, which only recognizes {@link Status#STATUS_ACTIVE}.
+     */
+    @Override
+    public boolean isTransactionKnownInactive(Connection con) {
+        if (con == null || managedExecutionConnection.get() != con) {
+            return false;
+        }
+        try {
+            if (transactionManager.getStatus() != Status.STATUS_NO_TRANSACTION) {
+                return false;
+            }
+            return con.getAutoCommit();
+        } catch (SystemException | SQLException | RuntimeException e) {
             return false;
         }
     }

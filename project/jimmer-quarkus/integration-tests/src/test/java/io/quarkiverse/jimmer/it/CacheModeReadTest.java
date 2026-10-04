@@ -6,11 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Connection;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.sql.DataSource;
@@ -129,6 +133,79 @@ class CacheModeReadTest {
             assertEquals(4, loads.get());
         } finally {
             cache.deleteAll(List.of(id), null);
+        }
+    }
+
+    /**
+     * A fill that is already in flight when an invalidation arrives must not be retained in either
+     * tier, for a hit value and for a cached miss (negative entry). The loader blocks on a latch, so
+     * the invalidation is delivered deterministically while the scope is active; no sleeps and no
+     * fake readiness are used.
+     */
+    @ParameterizedTest
+    @EnumSource(CacheMode.class)
+    void invalidatedInFlightFillIsNotRetained(CacheMode mode) throws Exception {
+        Cache<Long, Book> cache = objectCache(mode);
+        assertFillRaceIsNotRetained(cache, mode, anyBookId(), false);
+        assertFillRaceIsNotRetained(cache, mode, MISSING_ID, true);
+    }
+
+    private void assertFillRaceIsNotRetained(Cache<Long, Book> cache, CacheMode mode, long id, boolean negative)
+            throws Exception {
+        cache.deleteAll(List.of(id), null);
+        CountDownLatch loaded = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var inFlight = executor.submit(() -> {
+                try (Connection worker = dataSource.getConnection()) {
+                    return cache.getAll(List.of(id), new CacheEnvironment<>(sqlClient, worker, keys -> {
+                        Map<Long, Book> snapshot = negative ? Map.of()
+                                : CacheLoader.<Long, Book>objectLoader(sqlClient, worker, Book.class).loadAll(keys);
+                        loaded.countDown();
+                        awaitLatch(release);
+                        return snapshot;
+                    }, false)).get(id);
+                }
+            });
+            try {
+                assertTrue(loaded.await(5, TimeUnit.SECONDS));
+                // Real invalidation of the same key while the fill is in flight.
+                cache.deleteAll(List.of(id), null);
+                release.countDown();
+                if (negative) {
+                    assertNull(inFlight.get(5, TimeUnit.SECONDS));
+                } else {
+                    assertNotNull(inFlight.get(5, TimeUnit.SECONDS));
+                }
+            } finally {
+                release.countDown();
+            }
+            AtomicInteger freshLoads = new AtomicInteger();
+            try (Connection con = dataSource.getConnection()) {
+                Book fresh = cache.getAll(List.of(id), new CacheEnvironment<>(sqlClient, con, keys -> {
+                    freshLoads.incrementAndGet();
+                    return negative ? Map.of()
+                            : CacheLoader.<Long, Book>objectLoader(sqlClient, con, Book.class).loadAll(keys);
+                }, false)).get(id);
+                if (negative) {
+                    assertNull(fresh);
+                } else {
+                    assertNotNull(fresh);
+                }
+            }
+            assertEquals(1, freshLoads.get(),
+                    mode + ": an invalidated in-flight " + (negative ? "negative " : "") + "fill must not be retained");
+        } finally {
+            cache.deleteAll(List.of(id), null);
+        }
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(ex);
         }
     }
 

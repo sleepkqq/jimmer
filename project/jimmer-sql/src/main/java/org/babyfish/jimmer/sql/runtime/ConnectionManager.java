@@ -27,6 +27,25 @@ public interface ConnectionManager {
         );
     }
 
+    /**
+     * <p>Best-effort proof that the given connection is not inside a managed
+     * transaction. Only the object-cache query optimization consults this; ordinary
+     * execution is unaffected.</p>
+     *
+     * <p>The default returns {@code false} because a custom, external or otherwise
+     * unknown manager cannot prove anything, and the optimization must then use
+     * ordinary SQL. A built-in transaction manager overrides this to positively
+     * prove that its scope has no active transaction and that the JDBC connection
+     * really is in auto-commit mode.</p>
+     *
+     * @param con the connection that will be used, never {@code null}
+     * @return {@code true} only if the manager can prove the connection is not in a
+     *         transaction
+     */
+    default boolean isTransactionKnownInactive(Connection con) {
+        return false;
+    }
+
     ConnectionManager EXTERNAL_ONLY = new ConnectionManager() {
         @Override
         public <R> R execute(@Nullable Connection con, Function<Connection, R> block) {

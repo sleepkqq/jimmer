@@ -418,6 +418,12 @@ condition is evaluated per read and must be thread-safe and cheap. This gate doe
 not fence already-started reads, replace subscription tracking, or establish source
 freshness on its own. It adds no Kafka dependency to this extension.
 
+An application-declared `CacheFactory` bean replaces the built-in producer
+entirely: the runtime's Redis and local producers are `@DefaultBean` beans, so an
+explicit application factory wins and the built-in factory — including its
+readiness wiring — is not used. Such a custom factory owns the gate itself and
+must wrap with `GuardedCacheFactory` (or `GuardedCache.wrap`) when it needs one.
+
 Creator/factory-built Redis chains now fence fills with a per-key token. A Lua read
 atomically obtains the data and token; a conditional Lua fill succeeds only while that
 token is unchanged. Invalidation atomically replaces the token and deletes the value.

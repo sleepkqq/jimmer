@@ -11,6 +11,8 @@ import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
+import org.babyfish.jimmer.sql.runtime.ConnectionManager;
+import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
 import org.babyfish.jimmer.sql.runtime.Selectors;
 import org.babyfish.jimmer.sql.runtime.SqlBuilder;
 import org.jetbrains.annotations.NotNull;
@@ -328,6 +330,18 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     }
 
     @Override
+    public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
+        TypedQueryData data = getData();
+        if (data.useObjectCache == enabled) {
+            return this;
+        }
+        return new ConfigurableRootQueryImpl<>(
+                data.useObjectCache(enabled),
+                getMutableQuery()
+        );
+    }
+
+    @Override
     public List<R> execute(Connection con) {
         return getMutableQuery()
                 .getSqlClient()
@@ -399,6 +413,17 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             return Collections.emptyList();
         }
         JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
+        if (data.useObjectCache
+                && data.forUpdate == null
+                && getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY) {
+            ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
+            if (connectionManager.isTransactionKnownInactive(con)) {
+                List<R> rows = ObjectCacheQueryExecution.tryExecute(this, con, sqlClient);
+                if (rows != null) {
+                    return rows;
+                }
+            }
+        }
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
         return Selectors.select(
                 sqlClient,
@@ -412,6 +437,94 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 data.jdbcOptions,
                 data.forUpdate != null
         );
+    }
+
+    /**
+     * Package-private hook for {@link ObjectCacheQueryExecution}: resolves this
+     * query's virtual predicates (updating {@link #getData()}) without freezing or
+     * rendering the shared mutable query, so the caller can inspect the updated
+     * projection for aggregation/slot analysis.
+     */
+    void resolveVirtualPredicatesForObjectCache() {
+        MutableRootQueryImpl<T> mutableQuery = getMutableQuery();
+        if (!mutableQuery.isFrozen()
+                && (mutableQuery.hasVirtualPredicate() || getData().hasVirtualPredicate())) {
+            applyVirtualPredicates(new AstContext(mutableQuery.getSqlClient()));
+        }
+    }
+
+    /**
+     * Package-private hook for {@link ObjectCacheQueryExecution}: applies global filters
+     * for the union of this query's original/retained selections and the id-only skeleton
+     * selections before the shared mutable query is frozen, so the frozen join analysis
+     * stays correct for the original projection while only the skeleton is rendered.
+     * Retained {@link TypedQueryData#oldSelections} (count/reselect) are preserved.
+     */
+    void prepareGlobalFiltersForObjectCache(List<Selection<?>> skeletonSelections) {
+        MutableRootQueryImpl<T> mutableQuery = getMutableQuery();
+        if (mutableQuery.isFrozen()) {
+            return;
+        }
+        AstContext astContext = new AstContext(mutableQuery.getSqlClient());
+        List<Selection<?>> filterSelections = new ArrayList<>(getData().selections);
+        if (getData().oldSelections != null) {
+            // Count/reselect shares the mutable query with the original projection.
+            filterSelections.addAll(getData().oldSelections);
+        }
+        filterSelections.addAll(skeletonSelections);
+        QueryAnalyzer analyzer = new QueryAnalyzer(astContext, this);
+        mutableQuery.applyGlobalFilters(
+                astContext,
+                mutableQuery.getContext().getFilterLevel(),
+                filterSelections,
+                analyzer.analyzeJoinRequirements()
+        );
+    }
+
+    /**
+     * Package-private hook for {@link ObjectCacheQueryExecution}: renders the current
+     * (skeleton) projection assuming {@link #resolveVirtualPredicatesForObjectCache()}
+     * and {@link #prepareGlobalFiltersForObjectCache(List)} have already run. It neither
+     * re-prepares predicates/filters nor renders the discarded original projection.
+     */
+    Tuple3<String, List<Object>, List<Integer>> renderForObjectCache() {
+        JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
+        AstContext astContext = new AstContext(sqlClient, QueryRenderMode.NORMAL);
+        SqlBuilder builder = new SqlBuilder(astContext);
+        QueryAnalyzer analyzer = new QueryAnalyzer(astContext, this);
+        builder.setQueryAnalysis(analyzer.analyze());
+        renderTo(builder);
+        return builder.build();
+    }
+
+    /**
+     * Package-private hook for {@link ObjectCacheQueryExecution}: whether any
+     * selected expression is an aggregation, which makes an id-only entity
+     * skeleton unsafe.
+     */
+    boolean hasAggregationSelection() {
+        final boolean[] found = {false};
+        AstContext astContext = new AstContext(getMutableQuery().getSqlClient());
+        AstVisitor visitor = new AstVisitor(astContext) {
+            @Override
+            public boolean visitSubQuery(TypedSubQuery<?> subQuery) {
+                return false;
+            }
+
+            @Override
+            public void visitAggregation(String functionName, Expression<?> expression, String prefix) {
+                found[0] = true;
+            }
+        };
+        astContext.pushStatement(getMutableQuery());
+        try {
+            for (Selection<?> selection : getData().selections) {
+                Ast.from(selection, astContext).accept(visitor);
+            }
+        } finally {
+            astContext.popStatement();
+        }
+        return found[0];
     }
 
     @Override

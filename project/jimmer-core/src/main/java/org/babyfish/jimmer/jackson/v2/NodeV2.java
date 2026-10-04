@@ -32,8 +32,8 @@ public class NodeV2 implements Node {
         CASTER_MAP.put(Float.class, JsonNode::asDouble);
         CASTER_MAP.put(double.class, JsonNode::asDouble);
         CASTER_MAP.put(Double.class, JsonNode::asDouble);
-        CASTER_MAP.put(BigInteger.class, JsonNode::asInt);
-        CASTER_MAP.put(BigDecimal.class, JsonNode::asInt);
+        CASTER_MAP.put(BigInteger.class, JsonNode::bigIntegerValue);
+        CASTER_MAP.put(BigDecimal.class, JsonNode::decimalValue);
         CASTER_MAP.put(String.class, JsonNode::asText);
         CASTER_MAP.put(UUID.class, valueNode -> UUID.fromString(valueNode.asText()));
     }

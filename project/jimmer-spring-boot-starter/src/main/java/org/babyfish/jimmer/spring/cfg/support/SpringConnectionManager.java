@@ -9,9 +9,11 @@ import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -20,6 +22,14 @@ public class SpringConnectionManager implements DataSourceAwareConnectionManager
     private final DataSource dataSource;
 
     private final Supplier<DataSourceTransactionManager> transactionManagerResolver;
+
+    /**
+     * Connection acquired by the current thread's {@link #execute(Connection, Function)}
+     * managed branch, installed only while its callback runs. Used to prove ownership
+     * for {@link #isTransactionKnownInactive(Connection)}; never used to manage the
+     * connection lifecycle.
+     */
+    private final ThreadLocal<Connection> managedExecutionConnection = new ThreadLocal<>();
 
     private volatile Object transactionManagerOrException;
 
@@ -52,9 +62,16 @@ public class SpringConnectionManager implements DataSourceAwareConnectionManager
         if (con != null) return block.apply(con);
 
         Connection newConnection = DataSourceUtils.getConnection(dataSource);
+        Connection previous = managedExecutionConnection.get();
+        managedExecutionConnection.set(newConnection);
         try {
             return block.apply(newConnection);
         } finally {
+            if (previous != null) {
+                managedExecutionConnection.set(previous);
+            } else {
+                managedExecutionConnection.remove();
+            }
             DataSourceUtils.releaseConnection(newConnection, dataSource);
         }
     }
@@ -83,6 +100,33 @@ public class SpringConnectionManager implements DataSourceAwareConnectionManager
                 DataSourceUtils.releaseConnection(newConnection, dataSource);
             }
         };
+    }
+
+    /**
+     * Positive proof for the optional object-cache query hint: the current thread's
+     * managed {@code execute} scope must actually own <em>this</em> connection (a
+     * null, external or mismatched connection is denied), no Spring transaction is
+     * active, no synchronization scope is bound, no resource is bound to this data
+     * source, and the JDBC connection really is in auto-commit mode. Any
+     * transaction-manager/JDBC error is conservatively denied so an uncommitted or
+     * rollback-only scope cannot populate the shared cache.
+     */
+    @Override
+    public boolean isTransactionKnownInactive(Connection con) {
+        if (con == null || managedExecutionConnection.get() != con) {
+            return false;
+        }
+        try {
+            if (TransactionSynchronizationManager.isActualTransactionActive()
+                    || TransactionSynchronizationManager.isSynchronizationActive()
+                    || TransactionSynchronizationManager.hasResource(dataSource)
+                    || DataSourceUtils.isConnectionTransactional(con, dataSource)) {
+                return false;
+            }
+            return con.getAutoCommit();
+        } catch (SQLException | RuntimeException e) {
+            return false;
+        }
     }
 
     @Override

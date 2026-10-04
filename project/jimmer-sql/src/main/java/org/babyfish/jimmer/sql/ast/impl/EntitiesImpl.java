@@ -26,6 +26,7 @@ import org.babyfish.jimmer.sql.ast.table.Table;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheEnvironment;
 import org.babyfish.jimmer.sql.cache.CacheLoader;
+import org.babyfish.jimmer.sql.cache.CacheTypeMismatchException;
 import org.babyfish.jimmer.sql.exception.EmptyResultException;
 import org.babyfish.jimmer.sql.fetcher.DtoMetadata;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
@@ -241,10 +242,109 @@ public class EntitiesImpl implements Entities {
         return map;
     }
 
+    /**
+     * Internal (implementation, not public API) overload used by the optional
+     * object-cache query execution. It is the ordinary filtered object-cache read
+     * with two explicit pieces of information obtained from a fresh SQL skeleton:
+     * the concrete cache owner to read from and the expected concrete immutable
+     * type of each id.
+     *
+     * <p>Ordinary callers keep using {@link #findMapByIds(Class, Iterable)} /
+     * {@link #findMapByIds(Fetcher, Iterable)} and never reach this method. A
+     * non-null {@code expectedTypes} value that disagrees with the cached
+     * payload's concrete type is reported as {@link CacheTypeMismatchException},
+     * so the caller can fall back to ordinary SQL instead of reshaping a stale
+     * payload. A missing cache returns an empty map, which makes the caller
+     * decline the whole optimization.</p>
+     */
+    @SuppressWarnings("unchecked")
+    public <ID, E> Map<ID, E> findMapByIdsForQuery(
+            ImmutableType requestedType,
+            Fetcher<E> requestedFetcher,
+            ImmutableType cacheOwnerType,
+            Iterable<ID> ids,
+            Map<Object, ImmutableType> expectedTypes
+    ) {
+        return sqlClient
+                .getConnectionManager()
+                .execute(
+                        con,
+                        c -> findMapByIdsForQuery(
+                                requestedType,
+                                requestedFetcher,
+                                cacheOwnerType,
+                                ids,
+                                expectedTypes,
+                                c
+                        )
+                );
+    }
+
+    @SuppressWarnings("unchecked")
+    private <ID, E> Map<ID, E> findMapByIdsForQuery(
+            ImmutableType requestedType,
+            Fetcher<E> requestedFetcher,
+            ImmutableType cacheOwnerType,
+            Iterable<ID> ids,
+            Map<Object, ImmutableType> expectedTypes,
+            Connection con
+    ) {
+        // Reuse the flat filtered read: the requested (declared) type keeps the
+        // visibility check and the final shape, while the concrete cache owner and
+        // the fresh per-id concrete type are threaded through the internal
+        // overload. A missing cache or a filtered-out id comes back empty, which
+        // makes the caller decline the whole optimization.
+        List<E> entities = findByIds(
+                (Class<E>) requestedType.getJavaClass(),
+                requestedFetcher,
+                cacheOwnerType,
+                expectedTypes,
+                ids,
+                con
+        );
+        return toMap(entities, requestedType);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <ID, E> Map<ID, E> toMap(List<E> entities, ImmutableType type) {
+        PropId idPropId = type.getIdProp().getId();
+        Map<ID, E> map = new LinkedHashMap<>((entities.size() * 4 + 2) / 3);
+        for (E entity : entities) {
+            map.put((ID) ((ImmutableSpi) entity).__get(idPropId), entity);
+        }
+        return map;
+    }
+
     @SuppressWarnings("unchecked")
     private <E> List<E> findByIds(
             Class<E> type,
             Fetcher<E> fetcher,
+            Iterable<?> ids,
+            Connection con
+    ) {
+        return findByIds(type, fetcher, null, null, ids, con);
+    }
+
+    /**
+     * Internal overload of {@link #findByIds(Class, Fetcher, Iterable, Connection)}.
+     * Ordinary callers pass {@code null} for the two optional arguments and keep
+     * the plain "object cache, otherwise SQL" behavior.
+     *
+     * <p>The object-cache query helper additionally passes the concrete
+     * {@code cacheOwner} to read from and the fresh per-id concrete
+     * {@code expectedTypes} obtained from the skeleton query. When
+     * {@code expectedTypes} is non-null the method is in internal mode: it never
+     * starts the ordinary SQL fallback, so a missing cache or a filtered-out id
+     * returns empty and the caller declines the whole optimization. A cached
+     * payload whose concrete type disagrees with the fresh row is reported as
+     * {@link CacheTypeMismatchException} before any reshaping.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private <E> List<E> findByIds(
+            Class<E> type,
+            Fetcher<E> fetcher,
+            ImmutableType cacheOwner,
+            Map<Object, ImmutableType> expectedTypes,
             Iterable<?> ids,
             Connection con
     ) {
@@ -272,13 +372,15 @@ public class EntitiesImpl implements Entities {
                 );
             }
         }
-        Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(immutableType);
+        boolean internal = expectedTypes != null;
+        ImmutableType owner = cacheOwner != null ? cacheOwner : immutableType;
+        Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(owner);
         if (cache != null) {
             Collection<Object> visibleIds = visibleCachedIds(immutableType, distinctIds, con);
             if (visibleIds.isEmpty()) {
                 return Collections.emptyList();
             }
-            Collection<E> cachedEntities = cache.getAll(
+            Map<Object, E> cachedMap = cache.getAll(
                     visibleIds,
                     new CacheEnvironment<>(
                             sqlClient,
@@ -286,19 +388,49 @@ public class EntitiesImpl implements Entities {
                             CacheLoader.objectLoader(
                                     sqlClient,
                                     con,
-                                    (Class<E>) immutableType.getJavaClass()
+                                    (Class<E>) owner.getJavaClass()
                             ),
                             true
                     )
-            ).values();
-            List<E> entities = new ArrayList<>(cachedEntities.size());
-            for (E entity : cachedEntities) {
+            );
+            // Enforce the fresh concrete type per id before any shape/DTO
+            // conversion, so a stale polymorphic payload is declined rather
+            // than reshaped.
+            if (internal) {
+                for (Map.Entry<Object, E> e : cachedMap.entrySet()) {
+                    ImmutableType expectedType = expectedTypes.get(e.getKey());
+                    E entity = e.getValue();
+                    if (entity != null && expectedType != null) {
+                        ImmutableType actualType = ((ImmutableSpi) entity).__type();
+                        if (actualType != expectedType) {
+                            throw new CacheTypeMismatchException(
+                                    "Object cache for \"" +
+                                            owner +
+                                            "\" returned id \"" +
+                                            e.getKey() +
+                                            "\" as an object of type \"" +
+                                            actualType +
+                                            "\", but the freshly loaded row is \"" +
+                                            expectedType +
+                                            "\""
+                            );
+                        }
+                    }
+                }
+            }
+            List<E> entities = new ArrayList<>(cachedMap.size());
+            for (E entity : cachedMap.values()) {
                 if (entity != null) {
                     entities.add(entity);
                 }
             }
             Shapes.reshape(sqlClient, con, entities, immutableType, fetcher, null);
             return entities;
+        }
+        if (internal) {
+            // The internal query helper only routes a group here when its cache
+            // exists; a vanished cache declines instead of starting a second loader.
+            return Collections.emptyList();
         }
         ConfigurableRootQuery<?, E> query = Queries.createQuery(
                 sqlClient,
