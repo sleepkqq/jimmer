@@ -1,6 +1,6 @@
 plugins {
 	alias(quarkusLibs.plugins.quarkus)
-	alias(libs.plugins.ksp)
+	id("com.google.devtools.ksp")
 }
 
 configurations.all {
