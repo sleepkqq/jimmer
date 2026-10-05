@@ -148,6 +148,7 @@ public class DraftHandlerTest extends AbstractMutationTest {
 
     @Test
     public void testIssue882ByH2() {
+        resetIdentity(null, "EMPLOYEE");
         DraftPreProcessor<EmployeeDraft> processor = new DraftPreProcessor<EmployeeDraft>() {
             @Override
             public void beforeSave(@NotNull EmployeeDraft draft) {

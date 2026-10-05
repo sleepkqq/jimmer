@@ -13,6 +13,7 @@ import org.babyfish.jimmer.sql.ast.impl.mutation.DeleteCommandImpl;
 import org.babyfish.jimmer.sql.ast.impl.mutation.SimpleEntitySaveCommandImpl;
 import org.babyfish.jimmer.sql.ast.impl.query.FilterLevel;
 import org.babyfish.jimmer.sql.ast.impl.query.MutableRootQueryImpl;
+import org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheQuerySeed;
 import org.babyfish.jimmer.sql.ast.impl.query.Queries;
 import org.babyfish.jimmer.sql.ast.impl.table.FetcherSelectionImpl;
 import org.babyfish.jimmer.sql.ast.mutation.BatchEntitySaveCommand;
@@ -275,6 +276,41 @@ public class EntitiesImpl implements Entities {
                                 cacheOwnerType,
                                 ids,
                                 expectedTypes,
+                                null,
+                                c
+                        )
+                );
+    }
+
+    /**
+     * Authenticated overload used only by the optional object-cache query execution
+     * after it has executed the filtered id-only skeleton. The {@link ObjectCacheQuerySeed}
+     * proves that exact ids/types were already admitted by that skeleton on this exact
+     * owned, inactive connection, so the per-id visibility query is skipped. The seed
+     * is unforgeable (package-private mint), and {@link ObjectCacheQuerySeed#admits}
+     * re-validates every binding here before any cache access; a rejected seed returns
+     * an empty map, which makes the caller fall back to the whole original query.
+     */
+    @SuppressWarnings("unchecked")
+    public <ID, E> Map<ID, E> findMapByIdsForQuery(
+            ImmutableType requestedType,
+            Fetcher<E> requestedFetcher,
+            ImmutableType cacheOwnerType,
+            Iterable<ID> ids,
+            Map<Object, ImmutableType> expectedTypes,
+            ObjectCacheQuerySeed seed
+    ) {
+        return sqlClient
+                .getConnectionManager()
+                .execute(
+                        con,
+                        c -> findMapByIdsForQuery(
+                                requestedType,
+                                requestedFetcher,
+                                cacheOwnerType,
+                                ids,
+                                expectedTypes,
+                                seed,
                                 c
                         )
                 );
@@ -287,8 +323,37 @@ public class EntitiesImpl implements Entities {
             ImmutableType cacheOwnerType,
             Iterable<ID> ids,
             Map<Object, ImmutableType> expectedTypes,
+            ObjectCacheQuerySeed seed,
             Connection con
     ) {
+        // Snapshot the caller's group BEFORE authentication and use only this local
+        // copy afterwards: `ids` is an arbitrary iterable whose iteration may mutate
+        // the caller's map, so authenticating and then reading the caller's map (or
+        // its keySet) could admit ids the filtered skeleton never established.
+        Map<Object, ImmutableType> admittedTypes;
+        if (seed == null) {
+            admittedTypes = expectedTypes;
+        } else {
+            if (expectedTypes == null) {
+                return Collections.emptyMap();
+            }
+            admittedTypes = Collections.unmodifiableMap(new LinkedHashMap<>(expectedTypes));
+            if (!ObjectCacheQuerySeed.admits(
+                    seed,
+                    sqlClient,
+                    con,
+                    purpose,
+                    forUpdate,
+                    requestedType,
+                    cacheOwnerType,
+                    admittedTypes
+            )) {
+                // A forged, reused, mismatched or no-longer-inactive token must decline
+                // before any cache access. A null seed is the ordinary raw bridge and
+                // keeps its visibility check inside findByIds.
+                return Collections.emptyMap();
+            }
+        }
         // Reuse the flat filtered read: the requested (declared) type keeps the
         // visibility check and the final shape, while the concrete cache owner and
         // the fresh per-id concrete type are threaded through the internal
@@ -298,7 +363,8 @@ public class EntitiesImpl implements Entities {
                 (Class<E>) requestedType.getJavaClass(),
                 requestedFetcher,
                 cacheOwnerType,
-                expectedTypes,
+                admittedTypes,
+                seed,
                 ids,
                 con
         );
@@ -322,7 +388,7 @@ public class EntitiesImpl implements Entities {
             Iterable<?> ids,
             Connection con
     ) {
-        return findByIds(type, fetcher, null, null, ids, con);
+        return findByIds(type, fetcher, null, null, null, ids, con);
     }
 
     /**
@@ -338,6 +404,11 @@ public class EntitiesImpl implements Entities {
      * returns empty and the caller declines the whole optimization. A cached
      * payload whose concrete type disagrees with the fresh row is reported as
      * {@link CacheTypeMismatchException} before any reshaping.</p>
+     *
+     * <p>When {@code seed} is non-null (already authenticated by the caller) the
+     * filtered skeleton has positively established visibility for exactly these ids
+     * on this owned, inactive connection, so the redundant per-id visibility query is
+     * skipped and the admitted ids are used directly.</p>
      */
     @SuppressWarnings("unchecked")
     private <E> List<E> findByIds(
@@ -345,6 +416,7 @@ public class EntitiesImpl implements Entities {
             Fetcher<E> fetcher,
             ImmutableType cacheOwner,
             Map<Object, ImmutableType> expectedTypes,
+            ObjectCacheQuerySeed seed,
             Iterable<?> ids,
             Connection con
     ) {
@@ -376,7 +448,9 @@ public class EntitiesImpl implements Entities {
         ImmutableType owner = cacheOwner != null ? cacheOwner : immutableType;
         Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(owner);
         if (cache != null) {
-            Collection<Object> visibleIds = visibleCachedIds(immutableType, distinctIds, con);
+            Collection<Object> visibleIds = seed != null ?
+                    expectedTypes.keySet() :
+                    visibleCachedIds(immutableType, distinctIds, con);
             if (visibleIds.isEmpty()) {
                 return Collections.emptyList();
             }

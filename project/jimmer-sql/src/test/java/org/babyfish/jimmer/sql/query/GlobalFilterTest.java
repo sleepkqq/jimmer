@@ -7,7 +7,9 @@ import org.babyfish.jimmer.sql.ast.query.ConfigurableRootQuery;
 import org.babyfish.jimmer.sql.ast.query.TypedSubQuery;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.CacheEnvironment;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
+import org.babyfish.jimmer.sql.cache.ValueSerializer;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
 import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.fetcher.ReferenceFetchType;
@@ -24,7 +26,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class GlobalFilterTest extends AbstractQueryTest {
@@ -100,6 +107,73 @@ public class GlobalFilterTest extends AbstractQueryTest {
             Assertions.assertNotNull(client.getEntities().forConnection(con).forUpdate().findById(Permission.class, 1000L));
             Assertions.assertTrue(getExecutions().get(0).getSql().endsWith("for update"));
         });
+    }
+
+    @Test
+    public void testStoredNegativeIdStillRechecksCurrentFilter() {
+        // A real stored negative entry (an explicit serialized null, distinct from an
+        // eviction) must still be gated by the current-filter visibility check on every
+        // read, including the transition visible -> hidden -> visible. The stored null
+        // alone would make every assertion pass, so this pins the SQL visibility check
+        // and the absence of a content-cache lookup while the id is hidden.
+        AtomicLong visibleId = new AtomicLong(1000L);
+        ImmutableType permissionType = ImmutableType.get(Permission.class);
+        Map<Object, byte[]> seeded = new HashMap<>();
+        seeded.put(1000L, new ValueSerializer<Permission>(permissionType)
+                .serialize(Collections.<Long, Permission>singletonMap(1000L, null))
+                .get(1000L));
+        CountingCache<Permission> cache = new CountingCache<>(permissionType, seeded);
+        JSqlClient client = getSqlClient(it -> {
+            it.addFilters(new Filter<PermissionTable>() {
+                @Override
+                public void filter(FilterArgs<PermissionTable> args) {
+                    args.where(args.getTable().id().eq(visibleId.get()));
+                }
+            });
+            it.setCacheFactory(new CacheFactory() {
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return type == permissionType ? cache : null;
+                }
+            });
+        });
+        jdbc(con -> {
+            clearExecutions();
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            Assertions.assertEquals(1, getExecutions().size(), "allowed read must run the current-filter visibility check");
+            int afterAllowed = cache.invocationCount();
+
+            visibleId.set(-1L);
+            clearExecutions();
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            Assertions.assertEquals(1, getExecutions().size(), "hidden read must still run the visibility check");
+            Assertions.assertEquals(afterAllowed, cache.invocationCount(), "hidden id must not consult the content cache");
+
+            visibleId.set(1000L);
+            clearExecutions();
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            Assertions.assertEquals(1, getExecutions().size(), "re-visible read must run the visibility check");
+            Assertions.assertEquals(afterAllowed + 1, cache.invocationCount(), "negative entry must not be loaded as content");
+        });
+    }
+
+    private static class CountingCache<T> extends CacheImpl<T> {
+
+        private final List<Collection<Object>> keys = new ArrayList<>();
+
+        private CountingCache(ImmutableType type, Map<Object, byte[]> seeded) {
+            super(type, seeded);
+        }
+
+        @Override
+        public Map<Object, T> getAll(Collection<Object> keys, CacheEnvironment<Object, T> env) {
+            this.keys.add(new ArrayList<>(keys));
+            return super.getAll(keys, env);
+        }
+
+        int invocationCount() {
+            return keys.size();
+        }
     }
 
     @Test

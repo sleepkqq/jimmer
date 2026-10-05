@@ -31,6 +31,7 @@ import org.babyfish.jimmer.sql.fetcher.impl.FetchPath;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherImpl;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherSelection;
 import org.babyfish.jimmer.sql.fetcher.impl.JoinFetchFieldVisitor;
+import org.babyfish.jimmer.sql.runtime.ConnectionManager;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.runtime.Selectors;
 import org.babyfish.jimmer.sql.runtime.TupleCreator;
@@ -74,7 +75,8 @@ final class ObjectCacheQueryExecution {
     static <T extends org.babyfish.jimmer.sql.ast.table.spi.TableLike<?>, R> List<R> tryExecute(
             ConfigurableRootQueryImpl<T, R> query,
             Connection con,
-            JSqlClientImplementor sqlClient
+            JSqlClientImplementor sqlClient,
+            ConnectionManager connectionManager
     ) {
         // Resolve virtual predicates first so the updated projection is what the
         // aggregation/slot analysis below inspects.
@@ -268,12 +270,24 @@ final class ObjectCacheQueryExecution {
             Map<Object, Object> hydrated = new LinkedHashMap<>();
             try {
                 for (Map.Entry<ImmutableType, Map<Object, ImmutableType>> group : groups.entrySet()) {
+                    // The seed proves this exact id/type group was admitted by the
+                    // filtered skeleton on this exact owned, inactive connection, so
+                    // the bridge can skip the redundant per-id visibility query.
+                    ObjectCacheQuerySeed admission = new ObjectCacheQuerySeed(
+                            sqlClient,
+                            con,
+                            connectionManager,
+                            slot.entityType,
+                            group.getKey(),
+                            group.getValue()
+                    );
                     Map<Object, Object> groupHydrated = (Map<Object, Object>) entitiesImpl.findMapByIdsForQuery(
                             slot.entityType,
                             (Fetcher) slot.fetcher,
                             group.getKey(),
                             group.getValue().keySet(),
-                            group.getValue()
+                            group.getValue(),
+                            admission
                     );
                     hydrated.putAll(groupHydrated);
                 }

@@ -5,6 +5,7 @@ import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.JoinType;
 import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.ast.Expression;
+import org.babyfish.jimmer.sql.ast.impl.EntitiesImpl;
 import org.babyfish.jimmer.sql.ast.impl.table.FetcherSelectionImpl;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
@@ -697,6 +698,182 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         ));
     }
 
+    @Test
+    public void testFilteredWarmRootAndOwningToOneSkipSecondVisibilityQuery() {
+        // A real root filter would otherwise be applied a second time by the per-id
+        // visibility check of the object-cache read. The filtered skeleton already
+        // establishes membership, so the hint must use exactly the unhinted statement
+        // count while preserving the fresh scalar/join shape of the same page.
+        JSqlClient client = getSqlClient(builder -> {
+            builder.setConnectionManager(NON_TX_MANAGER);
+            builder.setEntityManager(new EntityManager(Book.class, BookStore.class, Author.class, Country.class));
+            builder.addFilters(new Filter<BookTable>() {
+                @Override
+                public void filter(FilterArgs<BookTable> args) {
+                    args.where(args.getTable().id().eq(learningGraphQLId1));
+                }
+            });
+            builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    Class<?> javaClass = type.getJavaClass();
+                    return javaClass == Book.class || javaClass == BookStore.class ? new MapCache<>(type) : null;
+                }
+            }));
+        });
+        BookTable table = BookTable.$;
+        jdbc(con -> {
+            client.getEntities().forConnection(con)
+                    .findByIds(Book.class, Collections.singletonList(learningGraphQLId1));
+            client.getEntities().forConnection(con)
+                    .findByIds(BookStore.class, Collections.singletonList(oreillyId));
+        });
+        // Unhinted baseline for the same filtered projection: one statement with the
+        // filter inlined.
+        clearExecutions();
+        List<Tuple2<Book, BookStore>> ordinary = new ArrayList<>();
+        jdbc(con -> ordinary.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(learningGraphQLId1))
+                        .select(
+                                table.fetch(BookFetcher.$.name()),
+                                table.store().fetch(BookStoreFetcher.$.name())
+                        )
+                        .execute(con)
+        ));
+        int ordinaryCount = getExecutions().size();
+        assertEquals(1, ordinary.size());
+        assertEquals(1, ordinaryCount);
+        // Hinted: both slots are warm, so the filtered id-only skeleton is the only
+        // statement. A second visibility query would make the count 2.
+        clearExecutions();
+        List<Tuple2<Book, BookStore>> hinted = new ArrayList<>();
+        jdbc(con -> hinted.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(learningGraphQLId1))
+                        .select(
+                                table.fetch(BookFetcher.$.name()),
+                                table.store().fetch(BookStoreFetcher.$.name())
+                        )
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertEquals(ordinaryCount, getExecutions().size());
+        assertEquals(1, hinted.size());
+        assertEquals(ordinary.get(0).get_1().name(), hinted.get(0).get_1().name());
+        assertEquals(ordinary.get(0).get_2().name(), hinted.get(0).get_2().name());
+        String sql = getExecutions().get(0).getSql();
+        // Root and joined target are both served from cache; the owning to-one join is
+        // retained so membership/nullability are unchanged.
+        assertTrue(sql.contains("BOOK_STORE"), sql);
+        assertTrue(sql.contains("tb_2_.ID"), sql);
+        assertFalse(sql.contains("tb_2_.NAME"), sql);
+        assertFalse(sql.contains("tb_1_.NAME"), sql);
+    }
+
+    @Test
+    public void testRawFindMapByIdsForQueryStillChecksVisibility() {
+        // SECURITY REGRESSION: the public raw bridge takes arbitrary ids and expected
+        // concrete types with no skeleton of any kind. It must never skip the
+        // current-filter visibility check, so a forbidden id that is present in the
+        // shared cache (here warmed through an allowed read) cannot leak.
+        UUID[] visibleId = { learningGraphQLId1 };
+        MapCache<Book> bookCache = new MapCache<>(ImmutableType.get(Book.class));
+        JSqlClient client = getSqlClient(builder -> {
+            builder.setConnectionManager(NON_TX_MANAGER);
+            builder.setEntityManager(new EntityManager(Book.class, BookStore.class, Author.class, Country.class));
+            builder.addFilters(new Filter<BookTable>() {
+                @Override
+                public void filter(FilterArgs<BookTable> args) {
+                    args.where(args.getTable().id().eq(visibleId[0]));
+                }
+            });
+            builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return type.getJavaClass() == Book.class ? bookCache : null;
+                }
+            }));
+        });
+        // Warm the shared cache while the id is visible through the filter.
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Book.class, Collections.singletonList(learningGraphQLId1)));
+        // Hide the id, then call the raw bridge directly with the cached id.
+        visibleId[0] = new UUID(0L, 0L);
+        Map<Object, ImmutableType> expectedTypes = new LinkedHashMap<>();
+        expectedTypes.put(learningGraphQLId1, ImmutableType.get(Book.class));
+        jdbc(con -> {
+            EntitiesImpl entities = (EntitiesImpl) client.getEntities().forConnection(con);
+            Map<UUID, Book> result = entities.<UUID, Book>findMapByIdsForQuery(
+                    ImmutableType.get(Book.class),
+                    null,
+                    ImmutableType.get(Book.class),
+                    Collections.singletonList(learningGraphQLId1),
+                    expectedTypes
+            );
+            assertTrue(result.isEmpty(), "the raw bridge must not bypass the current filter");
+        });
+    }
+
+    @Test
+    public void testHintedFilterSwapNeverServesHiddenWarmBody() {
+        // Warming the body then swapping the current filter state: the filtered skeleton
+        // remains the sole membership authority, so a now-hidden id is never served from
+        // the warm positive body and the content cache is not consulted for it.
+        UUID[] visible = { learningGraphQLId1 };
+        MapCache<Book> bookCache = new MapCache<>(ImmutableType.get(Book.class));
+        JSqlClient client = getSqlClient(builder -> {
+            builder.setConnectionManager(NON_TX_MANAGER);
+            builder.setEntityManager(new EntityManager(Book.class, BookStore.class, Author.class, Country.class));
+            builder.addFilters(new Filter<BookTable>() {
+                @Override
+                public void filter(FilterArgs<BookTable> args) {
+                    args.where(args.getTable().id().eq(visible[0]));
+                }
+            });
+            builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return type.getJavaClass() == Book.class ? bookCache : null;
+                }
+            }));
+        });
+        BookTable table = BookTable.$;
+        // Warm the positive body through an allowed read.
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Book.class, Collections.singletonList(learningGraphQLId1)));
+        // Allowed hinted read: the filtered skeleton is the only statement and the cached body is served.
+        clearExecutions();
+        List<Book> allowed = hintedBooks(client, table);
+        assertEquals(1, allowed.size());
+        assertFalse(getExecutions().get(0).getSql().contains("tb_1_.NAME"), getExecutions().get(0).getSql());
+        int afterAllowed = bookCache.getAllKeys.size();
+        // Hide the row by swapping the filter state.
+        visible[0] = new UUID(0L, 0L);
+        clearExecutions();
+        List<Book> hidden = hintedBooks(client, table);
+        assertTrue(hidden.isEmpty(), "a hidden id must never be served from the warm body cache");
+        assertEquals(afterAllowed, bookCache.getAllKeys.size(), "hidden membership must not consult the content cache");
+        // Re-allow: the positive cache body is served from the primary SQL membership again.
+        visible[0] = learningGraphQLId1;
+        clearExecutions();
+        List<Book> reAllowed = hintedBooks(client, table);
+        assertEquals(1, reAllowed.size());
+        assertEquals(learningGraphQLId1, reAllowed.get(0).id());
+    }
+
+    private List<Book> hintedBooks(JSqlClient client, BookTable table) {
+        List<Book> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(learningGraphQLId1))
+                        .select(table.fetch(BookFetcher.$.name()))
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        return rows;
+    }
+
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {
         return getSqlClient(builder -> {
             builder.setConnectionManager(NON_TX_MANAGER);
@@ -714,6 +891,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         private final ImmutableType type;
 
         private final Map<Object, T> map = new LinkedHashMap<>();
+
+        private final List<Collection<Object>> getAllKeys = new ArrayList<>();
 
         private MapCache(ImmutableType type) {
             this.type = type;
@@ -737,6 +916,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 @NotNull Collection<Object> keys,
                 @NotNull CacheEnvironment<Object, T> env
         ) {
+            getAllKeys.add(new ArrayList<>(keys));
             Map<Object, T> result = new LinkedHashMap<>();
             Set<Object> missedKeys = new LinkedHashSet<>();
             for (Object key : keys) {

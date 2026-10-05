@@ -53,6 +53,18 @@ In Quarkus, the built-in local and Redis `CacheFactory` producers are now `@Defa
 so an application-provided `CacheFactory` bean wins instead of making resolution ambiguous;
 the built-in producers remain available when no application factory exists.
 
+### Authenticated query-cache hydration in 1.1.1 (unreleased)
+
+Because the hinted base SQL is itself filtered, the id-only skeleton already proves page
+membership. Unlike 1.1.0, this correction avoids repeating the per-id visibility query
+for those ids. That shortcut requires an opaque, internally minted proof bound to the exact
+executing client, connection, manager and id/concrete-type group, and it is re-validated
+before any cache access; the caller-supplied group is snapshotted into an immutable copy
+before that validation and only the snapshot is used afterwards, so a hostile ids iterable
+that mutates the caller's map during iteration cannot widen the admitted group. The public
+raw map read and every ordinary filtered ID read keep their existing visibility check, so a
+shared cache cannot leak an id the current filter hides.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -92,8 +104,8 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 ### Released coordinates
 
 Replace `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.0`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.0`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.1`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.1`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
@@ -125,8 +137,8 @@ Docker is required for the PostgreSQL/Redis integration tests.
 ```bash
 project/gradlew -p project build
 project/gradlew -p project publishToMavenLocal -Dmaven.repo.local=/tmp/jimmer-m2
-python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.0
-project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.0
+python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.1
+project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.1
 ```
 
 `smoke-tests` is a separate Gradle build: it reuses the integration-test sources but
@@ -135,14 +147,14 @@ project dependencies, composite build or `mavenLocal()` fallback. The verifier c
 every published POM and Gradle module metadata file, plus the Quarkus deployment descriptor.
 
 For each release, update the fork version and consumer snippets, pass CI, commit and
-push `main`, then create and push an immutable semver tag (for example `1.1.0`).
+push `main`, then create and push an immutable semver tag (for example `1.1.1`).
 JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
 Request the tagged POM to trigger the public build, then check
-`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.0/build.log` and run:
+`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.1/build.log` and run:
 
 ```bash
-python3 scripts/verify-publication.py https://jitpack.io 1.1.0
-project/gradlew -p smoke-tests clean build -PforkVersion=1.1.0 --refresh-dependencies
+python3 scripts/verify-publication.py https://jitpack.io 1.1.1
+project/gradlew -p smoke-tests clean build -PforkVersion=1.1.1 --refresh-dependencies
 ```
 
 The final consumer check intentionally uses anonymous JitPack access. Create the GitHub

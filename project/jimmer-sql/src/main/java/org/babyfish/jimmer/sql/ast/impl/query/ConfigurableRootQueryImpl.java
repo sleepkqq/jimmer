@@ -418,7 +418,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 && getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY) {
             ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
             if (connectionManager.isTransactionKnownInactive(con)) {
-                List<R> rows = ObjectCacheQueryExecution.tryExecute(this, con, sqlClient);
+                List<R> rows = ObjectCacheQueryExecution.tryExecute(this, con, sqlClient, connectionManager);
                 if (rows != null) {
                     return rows;
                 }

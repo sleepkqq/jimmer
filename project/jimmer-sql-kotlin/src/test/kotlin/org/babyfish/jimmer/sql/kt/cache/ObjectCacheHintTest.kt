@@ -8,9 +8,13 @@ import org.babyfish.jimmer.sql.kt.ast.expression.eq
 import org.babyfish.jimmer.sql.kt.common.AbstractQueryTest
 import org.babyfish.jimmer.sql.kt.common.AbstractTest
 import org.babyfish.jimmer.sql.kt.common.createCache
+import org.babyfish.jimmer.sql.kt.filter.KFilter
+import org.babyfish.jimmer.sql.kt.filter.KFilterArgs
 import org.babyfish.jimmer.sql.kt.model.classic.book.Book
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookView
 import org.babyfish.jimmer.sql.kt.model.classic.book.id
+import org.babyfish.jimmer.sql.kt.model.filter.File
+import org.babyfish.jimmer.sql.kt.model.filter.id
 import org.babyfish.jimmer.sql.runtime.ConnectionManager
 import java.sql.Connection
 import java.util.function.Function
@@ -169,6 +173,57 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         // The decline is observable: ordinary SQL re-reads the entity columns even
         // though the object cache is warm.
         assertTrue(executions.single().sql.contains("PRICE"), executions.single().sql)
+    }
+
+    @Test
+    fun testFilteredWarmQueryStatementParity() {
+        // A real root filter must not be applied a second time by the per-id
+        // visibility check of the object-cache read. The filtered skeleton already
+        // proves membership, so the hinted statement count must equal the unhinted
+        // count instead of adding a redundant visibility query.
+        val visibleId = longArrayOf(1L)
+        val client = sqlClient {
+            setConnectionManager(AutoCommitConnectionManager())
+            addFilters(
+                object : KFilter<File> {
+                    override fun filter(args: KFilterArgs<File>) {
+                        args.where(args.table.id eq visibleId[0])
+                    }
+                }
+            )
+            setCacheFactory(
+                object : KCacheFactory {
+                    override fun createObjectCache(type: ImmutableType): Cache<*, *> =
+                        createCache<Any, Any>(type)
+                }
+            )
+        }
+        // Warm the shared cache through the ordinary entities path while visible.
+        nontransactional { con ->
+            client.entities.forConnection(con).findById(File::class, 1L)
+        }
+        // Unhinted baseline for the same filtered query.
+        clearExecutions()
+        nontransactional { con ->
+            val rows = client.createQuery(File::class) {
+                where(table.id eq 1L)
+                select(table)
+            }.execute(con)
+            assertEquals(1, rows.size)
+        }
+        val ordinaryCount = executions.size
+        clearExecutions()
+        nontransactional { con ->
+            val rows = client.createQuery(File::class) {
+                where(table.id eq 1L)
+                select(table)
+            }.useObjectCache().execute(con)
+            assertEquals(1, rows.size)
+            assertEquals(1L, rows[0].id)
+        }
+        assertEquals(ordinaryCount, executions.size)
+        // A fallback to ordinary SQL would re-read the NAME column.
+        executions.forEach { assertFalse(it.sql.contains("NAME"), it.sql) }
     }
 
     /**
