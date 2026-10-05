@@ -231,7 +231,7 @@ final class ObjectCacheQueryExecution {
             // type per id; decline rather than guess.
             return null;
         }
-        EntitiesImpl entitiesImpl = (EntitiesImpl) entities;
+        EntitiesImpl entitiesImpl = ((EntitiesImpl) entities).forSqlClient(sqlClient);
         Map<Integer, Map<Object, Object>> hydratedBySlot = new LinkedHashMap<>();
         for (int i = 0; i < size; i++) {
             Slot slot = slots[i];

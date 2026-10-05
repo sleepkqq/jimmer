@@ -65,6 +65,19 @@ that mutates the caller's map during iteration cannot widen the admitted group. 
 raw map read and every ordinary filtered ID read keep their existing visibility check, so a
 shared cache cannot leak an id the current filter hides.
 
+### Delegated-client query-cache hydration in 1.1.2
+
+A delegating `JSqlClient` (for example the Quarkus default client wrapped by a `KSqlClient`)
+returns the underlying entities reader from `getEntities()`. The 1.1.1 authenticated-hydration
+seed is minted for the delegate, so hydration compares the seed client against that delegate.
+Hydration now rebinds the reader to the query's executing client (`forSqlClient`) before the
+seed is validated; otherwise that check fails for delegated clients and every hinted root query
+silently falls back to the full projection, re-reading wide columns instead of using the
+declared object cache. 1.1.2 keeps the existing seed purpose, manager-inactivity, locking and
+visibility re-validation, and only corrects the reader identity. A delegated Java or Kotlin root
+query over a mixed tuple can therefore serve the cached entity body while SQL still supplies the
+scalar slots; a cache miss or a declined hint still falls back to the whole original query.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -104,8 +117,8 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 ### Released coordinates
 
 Replace `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.1`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.1`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.2`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.2`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
@@ -137,8 +150,8 @@ Docker is required for the PostgreSQL/Redis integration tests.
 ```bash
 project/gradlew -p project build
 project/gradlew -p project publishToMavenLocal -Dmaven.repo.local=/tmp/jimmer-m2
-python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.1
-project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.1
+python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.2
+project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.2
 ```
 
 `smoke-tests` is a separate Gradle build: it reuses the integration-test sources but
@@ -147,14 +160,14 @@ project dependencies, composite build or `mavenLocal()` fallback. The verifier c
 every published POM and Gradle module metadata file, plus the Quarkus deployment descriptor.
 
 For each release, update the fork version and consumer snippets, pass CI, commit and
-push `main`, then create and push an immutable semver tag (for example `1.1.1`).
+push `main`, then create and push an immutable semver tag (for example `1.1.2`).
 JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
 Request the tagged POM to trigger the public build, then check
-`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.1/build.log` and run:
+`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.2/build.log` and run:
 
 ```bash
-python3 scripts/verify-publication.py https://jitpack.io 1.1.1
-project/gradlew -p smoke-tests clean build -PforkVersion=1.1.1 --refresh-dependencies
+python3 scripts/verify-publication.py https://jitpack.io 1.1.2
+project/gradlew -p smoke-tests clean build -PforkVersion=1.1.2 --refresh-dependencies
 ```
 
 The final consumer check intentionally uses anonymous JitPack access. Create the GitHub

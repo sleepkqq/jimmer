@@ -2,12 +2,15 @@ package org.babyfish.jimmer.sql.kt.cache
 
 import org.babyfish.jimmer.meta.ImmutableType
 import org.babyfish.jimmer.sql.cache.Cache
+import org.babyfish.jimmer.sql.di.AbstractJSqlClientDelegate
 import org.babyfish.jimmer.sql.kt.KSqlClient
 import org.babyfish.jimmer.sql.kt.ast.expression.asc
 import org.babyfish.jimmer.sql.kt.ast.expression.eq
+import org.babyfish.jimmer.sql.kt.ast.expression.value
 import org.babyfish.jimmer.sql.kt.common.AbstractQueryTest
 import org.babyfish.jimmer.sql.kt.common.AbstractTest
 import org.babyfish.jimmer.sql.kt.common.createCache
+import org.babyfish.jimmer.sql.kt.fetcher.newFetcher
 import org.babyfish.jimmer.sql.kt.filter.KFilter
 import org.babyfish.jimmer.sql.kt.filter.KFilterArgs
 import org.babyfish.jimmer.sql.kt.model.classic.book.Book
@@ -15,7 +18,12 @@ import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookView
 import org.babyfish.jimmer.sql.kt.model.classic.book.id
 import org.babyfish.jimmer.sql.kt.model.filter.File
 import org.babyfish.jimmer.sql.kt.model.filter.id
+import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.Employee
+import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.`by`
+import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.id
+import org.babyfish.jimmer.sql.kt.toKSqlClient
 import org.babyfish.jimmer.sql.runtime.ConnectionManager
+import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor
 import java.sql.Connection
 import java.util.function.Function
 import kotlin.test.Test
@@ -224,6 +232,54 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         assertEquals(ordinaryCount, executions.size)
         // A fallback to ordinary SQL would re-read the NAME column.
         executions.forEach { assertFalse(it.sql.contains("NAME"), it.sql) }
+    }
+
+    @Test
+    fun testDelegatedClientWarmMixedTupleUsesSkeleton() {
+        // Real Quarkus/Kotlin shape: a KSqlClient retains a JSqlClient delegate whose
+        // getEntities() returns the underlying EntitiesImpl. The seed is minted for the
+        // delegate, so the hydration must rebind those entities to the same delegate, or
+        // every warm mixed-tuple query silently declines back to the full projection.
+        val visibleId = longArrayOf(6000L)
+        val underlying = sqlClient {
+            setConnectionManager(AutoCommitConnectionManager())
+            addFilters(
+                object : KFilter<Employee> {
+                    override fun filter(args: KFilterArgs<Employee>) {
+                        args.where(args.table.id eq visibleId[0])
+                    }
+                }
+            )
+            setCacheFactory(
+                object : KCacheFactory {
+                    override fun createObjectCache(type: ImmutableType): Cache<*, *> =
+                        createCache<Any, Any>(type)
+                }
+            )
+        }
+        val delegated: KSqlClient = object : AbstractJSqlClientDelegate() {
+            override fun sqlClient(): JSqlClientImplementor = underlying.javaClient
+        }.toKSqlClient()
+        // Warm the shared cache through the delegated client while the row is visible.
+        nontransactional { con ->
+            delegated.entities.forConnection(con).findById(Employee::class, 6000L)
+        }
+        clearExecutions()
+        nontransactional { con ->
+            val rows = delegated.createQuery(Employee::class) {
+                where(table.id eq 6000L)
+                select(
+                    table.fetch(newFetcher(Employee::class).by { fullName() }),
+                    value(1L)
+                )
+            }.useObjectCache().execute(con)
+            assertEquals(1, rows.size)
+            assertEquals(6000L, rows[0]._1.id)
+        }
+        // One id-only skeleton, and the cached entity body (FULL_NAME) is not re-read.
+        // A decline fallback would emit FULL_NAME and run a second statement.
+        assertEquals(1, executions.size, executions.joinToString("\n") { it.sql })
+        assertFalse(executions[0].sql.contains("FULL_NAME"), executions[0].sql)
     }
 
     /**
