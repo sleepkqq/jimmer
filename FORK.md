@@ -53,7 +53,7 @@ In Quarkus, the built-in local and Redis `CacheFactory` producers are now `@Defa
 so an application-provided `CacheFactory` bean wins instead of making resolution ambiguous;
 the built-in producers remain available when no application factory exists.
 
-### Authenticated query-cache hydration in 1.1.1 (unreleased)
+### Authenticated query-cache hydration in 1.1.1
 
 Because the hinted base SQL is itself filtered, the id-only skeleton already proves page
 membership. Unlike 1.1.0, this correction avoids repeating the per-id visibility query
