@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publicReleaseVersion:
+        description: 'Released fork version to verify anonymously from JitPack (empty skips public verification)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -219,6 +225,51 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: isolated-consumer-evidence
+          path: |
+            ${{ runner.temp }}/*.log
+            smoke-tests/build/test-results/test
+            smoke-tests/build/reports/tests/test
+          if-no-files-found: warn
+
+  public-release-verify:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publicReleaseVersion != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v6.3.0
+      - name: Require the dispatched version to match this ref
+        shell: bash
+        env:
+          PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
+        run: |
+          configured=$(sed -n 's/^version=//p' project/gradle.properties)
+          if [ "$PUBLIC_RELEASE_VERSION" != "$configured" ]; then
+            echo "::error::requested $PUBLIC_RELEASE_VERSION does not match project/gradle.properties $configured at ${GITHUB_REF}"
+            exit 1
+          fi
+      - name: Verify the anonymous JitPack release
+        shell: bash
+        env:
+          PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
+        run: |
+          set -o pipefail
+          python3 scripts/verify-publication.py https://jitpack.io "$PUBLIC_RELEASE_VERSION" 2>&1 | tee "$RUNNER_TEMP/verify-publication-public.log"
+      - name: Build the isolated consumer against the public release
+        shell: bash
+        env:
+          PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
+        run: |
+          set -o pipefail
+          project/gradlew -p smoke-tests clean build -PforkVersion="$PUBLIC_RELEASE_VERSION" --no-parallel --max-workers=2 --refresh-dependencies 2>&1 | tee "$RUNNER_TEMP/smoke-tests-public.log"
+      - name: Upload public release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: public-release-evidence
           path: |
             ${{ runner.temp }}/*.log
             smoke-tests/build/test-results/test

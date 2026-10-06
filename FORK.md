@@ -78,6 +78,30 @@ visibility re-validation, and only corrects the reader identity. A delegated Jav
 query over a mixed tuple can therefore serve the cached entity body while SQL still supplies the
 scalar slots; a cache miss or a declined hint still falls back to the whole original query.
 
+### Explicit cached-content masks in 1.1.3
+
+`useObjectCache(Fetcher<?> cachedContent)` is an additional, off-by-default root-query hint
+that names exactly which recursive content may be served from the object cache. The argument
+is a path-specific whitelist of stored scalar, embedded and JVM-formula dependency leaves;
+association entries navigate into child content and never authorize caching the edge itself.
+Every other selected value, the foreign-key topology, membership, ordering, pagination and
+concrete type stay fresh SQL, so only caller-approved display leaves can be eventually stale.
+A JVM formula is recomputed by its getter in the current context rather than cached as a
+computed value, and fresh SQL wins any overlap. Fetching `BookStoreFetcher.$.name().website()`
+under `useObjectCache(BookStoreFetcher.$.name())`, for example, permits caching the store
+name while `website` and row membership remain SQL-authoritative. Protected version and
+logical-delete properties cannot be approved. The boolean and no-argument hints keep their
+existing semantics.
+
+The mask must select a subset of the query's fetcher. Collection associations, id-views,
+remote or non-stored properties, SQL formulas and protected version/logical-delete properties
+are rejected. Recursive projections, masked field-local filters and reductions that cannot
+prove target admission conservatively decline the optimization. Unsupported shapes, an
+unproven transaction state or missing/incompatible cached values run the complete original
+projection once on a cache-disabled client. This fresh-graph policy also applies to locking,
+command, reselected, streaming and `forEach` reads. Cached content is eventual, not a statement
+snapshot, and the caller owns which content is acceptable to serve stale.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -114,15 +138,18 @@ Regression coverage lives in `ModifiedAssociationFetcherTest` and
 `SingleTableInheritanceMutationTest`; rejected conditional saves retain their unmaterialized result.
 Release 1.0.5 includes this correction; 1.0.4 does not.
 
-### Released coordinates
+### Coordinates
 
-Replace `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.2`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.2`, including
+For version `1.1.3`, replace
+`com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.3`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.3`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12.
+this release is tested with Kotlin 2.4.20 and KSP 2.3.12. Verify the tagged public
+artifacts using the release check below before adopting these coordinates; a tag alone
+does not establish artifact availability.
 
 The previous extension repository and tags are retained for existing consumers. Its
 archive is a maintenance handoff, not an artifact relocation or deletion.
@@ -147,28 +174,42 @@ merge the tested sync branch into `main`.
 
 Docker is required for the PostgreSQL/Redis integration tests.
 
+Run normal CI in GitHub before pushing a release tag. The existing CI workflow
+has an opt-in `public-release-verify` job, skipped by default, that verifies the anonymous
+public artifacts before any GitHub release: it requires the dispatched version to equal
+`project/gradle.properties` at the ref, runs the anonymous verifier against
+`https://jitpack.io`, builds the default public smoke consumer, and always uploads the log
+and test XML. Dispatch it after pushing the tag:
+
+```bash
+gh workflow run ci.yml --ref 1.1.3 -f publicReleaseVersion=1.1.3
+```
+
+For each release, update the fork version and consumer snippets, pass CI, commit and
+push `main`, then create and push an immutable semver tag (for example `1.1.3`).
+JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
+Request the tagged POM to trigger the public build, then check
+`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.3/build.log` and run:
+
+```bash
+python3 scripts/verify-publication.py https://jitpack.io 1.1.3
+project/gradlew -p smoke-tests clean build -PforkVersion=1.1.3 --refresh-dependencies
+```
+
+The same verification remains reproducible against an isolated repository as a generic
+operator reference:
+
 ```bash
 project/gradlew -p project build
 project/gradlew -p project publishToMavenLocal -Dmaven.repo.local=/tmp/jimmer-m2
-python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.2
-project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.2
+python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.3
+project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.3
 ```
 
 `smoke-tests` is a separate Gradle build: it reuses the integration-test sources but
 resolves runtime, deployment, APT and KSP from the selected Maven repository, with no
 project dependencies, composite build or `mavenLocal()` fallback. The verifier checks
 every published POM and Gradle module metadata file, plus the Quarkus deployment descriptor.
-
-For each release, update the fork version and consumer snippets, pass CI, commit and
-push `main`, then create and push an immutable semver tag (for example `1.1.2`).
-JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
-Request the tagged POM to trigger the public build, then check
-`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.2/build.log` and run:
-
-```bash
-python3 scripts/verify-publication.py https://jitpack.io 1.1.2
-project/gradlew -p smoke-tests clean build -PforkVersion=1.1.2 --refresh-dependencies
-```
 
 The final consumer check intentionally uses anonymous JitPack access. Create the GitHub
 release only after JitPack succeeds; a tag alone does not prove the artifacts are available.
