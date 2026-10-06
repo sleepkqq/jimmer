@@ -2712,6 +2712,29 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             // Delete the second target behind the warm cache, leaving the FAKE FK.
             rawUpdate("delete from ISSUE_1434_USER where ID = ?", 2L);
             clearExecutions();
+            // The cache-disabled copy of the same projection is the SQL membership
+            // oracle: the explicit LEFT join, not the nullable property, keeps the page.
+            JSqlClient oracle = createClient(type -> null);
+            List<Tuple2<Issue1434Message, Issue1434User>> baseline = new ArrayList<>();
+            jdbc(con -> baseline.addAll(
+                    oracle.createQuery(table)
+                            .where(table.id().in(Arrays.asList(1L, 2L)))
+                            .orderBy(table.id())
+                            .select(
+                                    table.fetch(Issue1434MessageFetcher.$.user(
+                                            ReferenceFetchType.SELECT,
+                                            Issue1434UserFetcher.$.name()
+                                    )),
+                                    table.user(JoinType.LEFT).fetch(Issue1434UserFetcher.$.name())
+                            )
+                            .execute(con)
+            ));
+            assertEquals(2, baseline.size(), "the fresh projection must define the full page");
+            assertEquals(1L, baseline.get(0).get_1().id());
+            assertEquals(2L, baseline.get(1).get_1().id());
+            assertNull(baseline.get(1).get_1().user(), "the deleted SELECT target is NULL on the fresh baseline");
+            assertNull(baseline.get(1).get_2(), "the deleted LEFT-joined slot is NULL on the fresh baseline");
+            clearExecutions();
             List<Tuple2<Issue1434Message, Issue1434User>> rows = new ArrayList<>();
             jdbc(con -> rows.addAll(
                     client.createQuery(table)
@@ -2722,7 +2745,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                                             ReferenceFetchType.SELECT,
                                             Issue1434UserFetcher.$.name()
                                     )),
-                                    table.user().fetch(Issue1434UserFetcher.$.name())
+                                    table.user(JoinType.LEFT).fetch(Issue1434UserFetcher.$.name())
                             )
                             .useObjectCache(Issue1434MessageFetcher.$.user(Issue1434UserFetcher.$.name()))
                             .execute(con)
