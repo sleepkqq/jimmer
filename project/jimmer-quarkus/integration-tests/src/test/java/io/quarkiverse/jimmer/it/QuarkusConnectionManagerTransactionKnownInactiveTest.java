@@ -311,13 +311,12 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void contentFetcherColdCacheInsideTransactionNeverPublishesPendingValue() throws Exception {
         long bookId = anyBookId();
         long id = bookStoreId(bookId);
         String original = storeName(id);
         Cache<Object, BookStore> cache =
-                (Cache<Object, BookStore>) sqlClient.getCaches().getObjectCache(ImmutableType.get(BookStore.class));
+                sqlClient.getCaches().<Object, BookStore>getObjectCache(ImmutableType.get(BookStore.class));
         assertNotNull(cache, "The BookStore object cache must be configured");
         cache.deleteAll(Collections.singletonList(id), null);
 
