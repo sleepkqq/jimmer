@@ -10,6 +10,9 @@ import org.babyfish.jimmer.sql.ast.query.*;
 import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
+import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
+import org.babyfish.jimmer.sql.fetcher.Fetcher;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherUtil;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.runtime.ConnectionManager;
 import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
@@ -332,11 +335,22 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     @Override
     public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         TypedQueryData data = getData();
-        if (data.useObjectCache == enabled) {
+        // A deliberate boolean call is a mode switch: it must clear any explicit
+        // content mask, exactly like TypedQueryData.useObjectCache(boolean), instead of
+        // short-circuiting while the mask is still installed.
+        if (data.useObjectCache == enabled && data.cachedContent == null) {
             return this;
         }
         return new ConfigurableRootQueryImpl<>(
                 data.useObjectCache(enabled),
+                getMutableQuery()
+        );
+    }
+
+    @Override
+    public ConfigurableRootQuery<T, R> useObjectCache(Fetcher<?> cachedContent) {
+        return new ConfigurableRootQueryImpl<>(
+                getData().useObjectCache(cachedContent),
                 getMutableQuery()
         );
     }
@@ -413,9 +427,30 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             return Collections.emptyList();
         }
         JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
+        boolean queryPurpose =
+                getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY;
+        if (data.useObjectCache && data.cachedContent != null) {
+            // The explicit recursive content mask is a cache-content hint, not an
+            // authorization cache. Whenever it cannot be honored - a non-QUERY purpose,
+            // a locking read, an unproven transaction state or any decline - the complete
+            // original projection runs on a cache-disabled derived client, so no
+            // SELECT-loaded association can serve stale or uncommitted content and the
+            // render/read/loader stay consistent.
+            if (data.forUpdate == null && queryPurpose) {
+                ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
+                if (connectionManager.isTransactionKnownInactive(con)) {
+                    List<R> rows =
+                            ObjectCacheQueryExecution.tryExecute(this, con, sqlClient, connectionManager);
+                    if (rows != null) {
+                        return rows;
+                    }
+                }
+            }
+            return executeBypassed(con, data, sqlClient);
+        }
         if (data.useObjectCache
                 && data.forUpdate == null
-                && getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY) {
+                && queryPurpose) {
             ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
             if (connectionManager.isTransactionKnownInactive(con)) {
                 List<R> rows = ObjectCacheQueryExecution.tryExecute(this, con, sqlClient, connectionManager);
@@ -437,6 +472,31 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 data.jdbcOptions,
                 data.forUpdate != null
         );
+    }
+
+    /**
+     * Runs the complete original projection with all object caches disabled, used as the
+     * content-mask hint's fallback. Rendering, reading and every loader use the same
+     * derived client so the query's join decisions match the reader that consumes them.
+     */
+    private List<R> executeBypassed(Connection con, TypedQueryData data, JSqlClientImplementor sqlClient) {
+        JSqlClientImplementor readClient = sqlClient.caches(CacheDisableConfig::disableAll);
+        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(readClient, QueryRenderMode.NORMAL);
+        // A nested field filter or converter may already have an ambient fetcher
+        // context whose client is cache-enabled; the fallback must load every
+        // association on this cache-disabled client to stay fresh and consistent.
+        return FetcherUtil.withoutFetcherContext(() -> Selectors.select(
+                readClient,
+                con,
+                sqlResult.get_1(),
+                sqlResult.get_2(),
+                sqlResult.get_3(),
+                data.selections,
+                data.tupleCreator,
+                getMutableQuery().getPurpose(),
+                data.jdbcOptions,
+                data.forUpdate != null
+        ));
     }
 
     /**
@@ -488,8 +548,17 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
      * re-prepares predicates/filters nor renders the discarded original projection.
      */
     Tuple3<String, List<Object>, List<Integer>> renderForObjectCache() {
-        JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
-        AstContext astContext = new AstContext(sqlClient, QueryRenderMode.NORMAL);
+        return renderForObjectCache(getMutableQuery().getSqlClient());
+    }
+
+    /**
+     * Package-private hook for {@link ObjectCacheQueryExecution}: renders the current
+     * (skeleton) projection with an explicit client. The recursive content-mask path
+     * renders on its locally derived, cache-disabled client so the join decisions of
+     * the rendered SQL match the reader and loaders that consume it.
+     */
+    Tuple3<String, List<Object>, List<Integer>> renderForObjectCache(JSqlClientImplementor renderClient) {
+        AstContext astContext = new AstContext(renderClient, QueryRenderMode.NORMAL);
         SqlBuilder builder = new SqlBuilder(astContext);
         QueryAnalyzer analyzer = new QueryAnalyzer(astContext, this);
         builder.setQueryAnalysis(analyzer.analyze());
@@ -533,7 +602,11 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         if (data.limit == 0) {
             return Stream.empty();
         }
-        JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
+        // A content-mask query never streams the cached hint; it stays a fresh,
+        // whole-graph read on a cache-disabled derived client.
+        JSqlClientImplementor sqlClient = data.cachedContent != null ?
+                getMutableQuery().getSqlClient().caches(CacheDisableConfig::disableAll) :
+                getMutableQuery().getSqlClient();
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
         return Selectors.stream(
                 sqlClient,
@@ -581,9 +654,15 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     }
 
     private void forEachImpl(Connection con, int batchSize, Consumer<R> consumer) {
-        JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
+        // A content-mask query never uses the cached hint for forEach; it stays a
+        // fresh, whole-graph read on a cache-disabled derived client. The legacy
+        // boolean/no-arg hint keeps its ordinary client and ambient-context batching.
+        boolean masked = getData().cachedContent != null;
+        JSqlClientImplementor sqlClient = masked ?
+                getMutableQuery().getSqlClient().caches(CacheDisableConfig::disableAll) :
+                getMutableQuery().getSqlClient();
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
-        Selectors.forEach(
+        Runnable read = () -> Selectors.forEach(
                 sqlClient,
                 con,
                 sqlResult.get_1(),
@@ -596,6 +675,17 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 consumer,
                 getForUpdate() != null
         );
+        if (masked) {
+            // A nested field filter or converter may already have an ambient fetcher
+            // context whose client is cache-enabled; run the read in a fresh context so
+            // every post-fetch loader uses this cache-disabled client.
+            FetcherUtil.withoutFetcherContext(() -> {
+                read.run();
+                return null;
+            });
+        } else {
+            read.run();
+        }
     }
 
     private Tuple3<String, List<Object>, List<Integer>> preExecute(JSqlClientImplementor sqlClient) {

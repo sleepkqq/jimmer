@@ -6,6 +6,7 @@ import org.babyfish.jimmer.lang.NewChain
 import org.babyfish.jimmer.sql.ast.query.LockMode
 import org.babyfish.jimmer.sql.ast.query.LockWait
 import org.babyfish.jimmer.sql.ast.query.PageFactory
+import org.babyfish.jimmer.sql.fetcher.Fetcher
 import org.babyfish.jimmer.sql.kt.ast.expression.constant
 import org.babyfish.jimmer.sql.kt.ast.expression.rowCount
 import org.babyfish.jimmer.sql.kt.ast.table.KPropsLike
@@ -108,6 +109,20 @@ interface KConfigurableRootQuery<P : KPropsLike, R> : KTypedRootQuery<R> {
     @NewChain
     fun useObjectCache(enabled: Boolean): KConfigurableRootQuery<P, R> =
         this
+
+    /**
+     * Optional hint with an explicit cached-content fetcher: only the recursive
+     * fetcher's stored display leaves come from the object cache, while association
+     * edges and every other selected fact stay fresh SQL. The hint still requires a
+     * positively proven inactive transaction and otherwise executes the complete
+     * graph from fresh SQL.
+     *
+     * @param cachedContent Recursive fetcher defining the cacheable display whitelist
+     * @return A new query object
+     */
+    @NewChain
+    fun useObjectCache(cachedContent: Fetcher<*>): KConfigurableRootQuery<P, R> =
+        throw UnsupportedOperationException("Cached-content fetchers are not supported by this query")
 
     @NewChain
     fun forUpdate(forUpdate: Boolean = true): KConfigurableRootQuery<P, R>

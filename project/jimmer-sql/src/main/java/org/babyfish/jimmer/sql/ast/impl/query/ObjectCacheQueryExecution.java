@@ -25,11 +25,13 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple7;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple8;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple9;
 import org.babyfish.jimmer.sql.cache.CacheTypeMismatchException;
+import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.Field;
 import org.babyfish.jimmer.sql.fetcher.impl.FetchPath;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherImpl;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherSelection;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherUtil;
 import org.babyfish.jimmer.sql.fetcher.impl.JoinFetchFieldVisitor;
 import org.babyfish.jimmer.sql.runtime.ConnectionManager;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
@@ -40,9 +42,12 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -83,6 +88,10 @@ final class ObjectCacheQueryExecution {
         query.resolveVirtualPredicatesForObjectCache();
         TypedQueryData data = query.getData();
         MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
+
+        if (data.cachedContent != null) {
+            return tryExecuteWithContent(query, con, sqlClient, connectionManager);
+        }
 
         // ---- Strict eligibility -------------------------------------------------
         if (data.oldSelections != null || data.distinct || mutableQuery.isGroupByClauseUsed()) {
@@ -353,6 +362,439 @@ final class ObjectCacheQueryExecution {
     }
 
     /**
+     * <p>Recursive content-mask execution: SQL reads the caller's projection with
+     * only the whitelisted stored leaves removed, so membership, ordering, pagination,
+     * current FK edges, concrete types and every non-whitelisted scalar stay fresh;
+     * the whitelisted leaves are then filled from the configured reference object
+     * caches. Association edges are never served from cache, and the cached payload is
+     * never merged as a whole.</p>
+     *
+     * <p>The retained read runs on a locally derived, cache-disabled client so no
+     * association loader can accidentally serve a cached whole target or property
+     * edge; that client is used consistently for rendering, reading and every
+     * loader-created target query. The original client is used only for the explicit
+     * cache content loads, which reuse the authenticated seed bridge. Any missing,
+     * negative or incompatible cached value falls back to the whole original query,
+     * which keeps running on the original client.</p>
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static <T extends org.babyfish.jimmer.sql.ast.table.spi.TableLike<?>, R> List<R> tryExecuteWithContent(
+            ConfigurableRootQueryImpl<T, R> query,
+            Connection con,
+            JSqlClientImplementor sqlClient,
+            ConnectionManager connectionManager
+    ) {
+        TypedQueryData data = query.getData();
+        MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
+
+        if (data.oldSelections != null || data.distinct || mutableQuery.isGroupByClauseUsed()) {
+            return null;
+        }
+        if (mutableQuery.getTable() instanceof BaseTable) {
+            return null;
+        }
+        if (query.hasAggregationSelection()) {
+            return null;
+        }
+        List<Selection<?>> selections = data.selections;
+        int size = selections.size();
+        if (size == 0) {
+            return null;
+        }
+
+        CacheContentMask rootMask = CacheContentMask.of(data.cachedContent);
+
+        // The retained graph must not read any object cache: a locally derived,
+        // cache-disabled client keeps every loader query fresh and consistent with the
+        // rendered SQL. It is also the client whose join decisions the join-preservation
+        // check must consult.
+        JSqlClientImplementor readClient = sqlClient.caches(CacheDisableConfig::disableAll);
+
+        AstContext astContext = new AstContext(sqlClient);
+        astContext.pushStatement(mutableQuery);
+        TableImplementor<?> rootImplementor;
+        try {
+            rootImplementor = TableProxies.resolve((Table<?>) mutableQuery.getTable(), astContext);
+        } finally {
+            astContext.popStatement();
+        }
+
+        MaskSlot[] slots = new MaskSlot[size];
+        List<Selection<?>> retainedSelections = new ArrayList<>(size);
+        int maskedCount = 0;
+        boolean maskMatched = false;
+        astContext = new AstContext(sqlClient);
+        astContext.pushStatement(mutableQuery);
+        try {
+            for (int i = 0; i < size; i++) {
+                Selection<?> selection = selections.get(i);
+                if (selection instanceof FetcherSelection<?>) {
+                    FetcherSelection<?> fetcherSelection = (FetcherSelection<?>) selection;
+                    if (fetcherSelection.getEmbeddedPropExpression() != null) {
+                        return null;
+                    }
+                    Table<?> selectedTable = ((FetcherSelectionImpl<?>) selection).getTable();
+                    TableImplementor<?> tableImplementor =
+                            TableProxies.resolve(selectedTable, astContext);
+                    Fetcher<?> fetcher = fetcherSelection.getFetcher();
+                    CacheContentMask node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                    if (node == null) {
+                        slots[i] = MaskSlot.fresh(fetcherSelection.getConverter());
+                        retainedSelections.add(stripConverter(fetcherSelection));
+                        continue;
+                    }
+                    maskMatched = true;
+                    Fetcher<?> retained = fetcher != null ?
+                            CacheContentMask.retainedFetcher(fetcher, node, sqlClient) : null;
+                    if (retained != null &&
+                            node.hasCacheableLeaves(sqlClient) &&
+                            !node.hasJoinedInheritanceCacheable(sqlClient)) {
+                        slots[i] = MaskSlot.masked(node, fetcherSelection.getConverter());
+                        retainedSelections.add(retainedSelection(fetcherSelection, retained));
+                        maskedCount++;
+                    } else {
+                        slots[i] = MaskSlot.fresh(fetcherSelection.getConverter());
+                        retainedSelections.add(stripConverter(fetcherSelection));
+                    }
+                    continue;
+                }
+                Table<?> selectedTable = null;
+                if (selection instanceof Table<?>) {
+                    selectedTable = (Table<?>) selection;
+                } else if (selection instanceof KTable<?>) {
+                    selectedTable = ((KTable<?>) selection).getImplementor();
+                }
+                if (selectedTable == null) {
+                    slots[i] = MaskSlot.scalar();
+                    retainedSelections.add(selection);
+                    continue;
+                }
+                TableImplementor<?> tableImplementor =
+                        TableProxies.resolve(selectedTable, astContext);
+                CacheContentMask node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                if (node == null) {
+                    slots[i] = MaskSlot.fresh(null);
+                    retainedSelections.add(selection);
+                    continue;
+                }
+                maskMatched = true;
+                // A bare entity-table selection fetches all table properties. Its
+                // partial form cannot express association content selected by other
+                // tuple slots, so only this node's own leaves apply.
+                CacheContentMask bareMask = node.withoutChildren();
+                Fetcher<?> all = allTableFieldsFetcher(tableImplementor.getImmutableType());
+                Fetcher<?> retained = all != null ?
+                        CacheContentMask.retainedFetcher(all, bareMask, sqlClient) : null;
+                if (retained != null &&
+                        bareMask.hasCacheableLeaves(sqlClient) &&
+                        !bareMask.hasJoinedInheritanceCacheable(sqlClient)) {
+                    slots[i] = MaskSlot.masked(bareMask, null);
+                    retainedSelections.add(((Table) selectedTable).fetch(retained));
+                    maskedCount++;
+                } else {
+                    slots[i] = MaskSlot.fresh(null);
+                    retainedSelections.add(selection);
+                }
+            }
+        } finally {
+            astContext.popStatement();
+        }
+        if (!maskMatched) {
+            throw new IllegalArgumentException(
+                    "The object-cache content mask does not match any selected table"
+            );
+        }
+        if (maskedCount == 0) {
+            return null;
+        }
+
+        TypedQueryData retainedData = data.skeleton(retainedSelections, IDENTITY_TUPLE_CREATOR);
+        ConfigurableRootQueryImpl<T, Object[]> retainedQuery =
+                new ConfigurableRootQueryImpl<>(retainedData, mutableQuery);
+        query.prepareGlobalFiltersForObjectCache(retainedSelections);
+
+        // The retained read renders, reads and loads on the same cache-disabled derived
+        // client, so no loader query can serve a cached whole target or property edge.
+        Tuple3<String, List<Object>, List<Integer>> sqlResult =
+                retainedQuery.renderForObjectCache(readClient);
+        // A nested field filter or converter may already have an ambient fetcher
+        // context whose client is the cache-enabled caller; run the retained read in a
+        // fresh context so every post-fetch loader uses this cache-disabled client.
+        List<Object[]> seeds = FetcherUtil.withoutFetcherContext(() -> Selectors.select(
+                readClient,
+                con,
+                sqlResult.get_1(),
+                sqlResult.get_2(),
+                sqlResult.get_3(),
+                retainedData.selections,
+                retainedData.tupleCreator,
+                mutableQuery.getPurpose(),
+                data.jdbcOptions,
+                false
+        ));
+        if (seeds.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Entities entities = sqlClient.getEntities().forConnection(con);
+        if (!(entities instanceof EntitiesImpl)) {
+            return null;
+        }
+        EntitiesImpl entitiesImpl = ((EntitiesImpl) entities).forSqlClient(sqlClient);
+
+        // Collect the id/concrete-type seeds for every masked slot node (and its
+        // navigated children) from the fresh retained graph, then load each node's
+        // cache content once through the authenticated seed bridge.
+        Map<CacheContentMask, Map<Object, ImmutableType>> nodeSeeds = new LinkedHashMap<>();
+        // A slot node is proven by its own SQL selection (the guarded outer WHERE for a
+        // root table, the explicit join for a child table), so it may use the
+        // visibility-skipping seed. A deeper navigated node is only proven when its own
+        // SQL edge read the target; otherwise the bridge keeps its fresh visibility read.
+        Set<CacheContentMask> provenNodes = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (int i = 0; i < size; i++) {
+            MaskSlot slot = slots[i];
+            if (slot == null || !slot.masked) {
+                continue;
+            }
+            boolean ownLeaves = slot.node.hasCacheableOwnLeaves(sqlClient);
+            PropId idPropId = slot.node.getType().getIdProp().getId();
+            for (Object[] seed : seeds) {
+                Object seedValue = seed[i];
+                if (seedValue == null) {
+                    continue;
+                }
+                ImmutableSpi fresh = (ImmutableSpi) seedValue;
+                if (ownLeaves) {
+                    Object id = fresh.__get(idPropId);
+                    if (id != null) {
+                        nodeSeeds.computeIfAbsent(slot.node, it -> new LinkedHashMap<>())
+                                .put(id, fresh.__type());
+                        provenNodes.add(slot.node);
+                    }
+                }
+                CacheContentMask.collectSeeds(fresh, slot.node, nodeSeeds, provenNodes, sqlClient);
+            }
+        }
+
+        Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode = new LinkedHashMap<>();
+        try {
+            for (Map.Entry<CacheContentMask, Map<Object, ImmutableType>> e : nodeSeeds.entrySet()) {
+                Map<Object, ImmutableSpi> cached = loadCacheContent(
+                        sqlClient,
+                        con,
+                        connectionManager,
+                        e.getKey().getType(),
+                        e.getValue(),
+                        entitiesImpl,
+                        provenNodes.contains(e.getKey())
+                );
+                if (cached == null) {
+                    return null;
+                }
+                cachedByNode.put(e.getKey(), cached);
+            }
+        } catch (CacheTypeMismatchException ex) {
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Object-cache content hint declined: {}", ex.getMessage());
+            }
+            return null;
+        }
+
+        // Validate the complete page before any converter runs, so a later incomplete
+        // row/slot cannot leave an earlier converter already applied on the full fallback.
+        for (Object[] seed : seeds) {
+            for (int i = 0; i < size; i++) {
+                MaskSlot slot = slots[i];
+                if (slot == null || slot.scalar || !slot.masked) {
+                    continue;
+                }
+                Object value = seed[i];
+                if (value == null) {
+                    continue;
+                }
+                if (!CacheContentMask.validate((ImmutableSpi) value, slot.node, cachedByNode, sqlClient)) {
+                    return null;
+                }
+            }
+        }
+
+        // Rebuild the original projection: every converter runs here, exactly once per
+        // output row, only after every masked slot of the page has been validated.
+        List<R> results = new ArrayList<>(seeds.size());
+        for (Object[] seed : seeds) {
+            Object[] args = seed.clone();
+            for (int i = 0; i < size; i++) {
+                MaskSlot slot = slots[i];
+                if (slot == null || slot.scalar) {
+                    continue;
+                }
+                Object value = args[i];
+                if (!slot.masked) {
+                    if (value != null && slot.converter != null) {
+                        args[i] = ((Function<Object, Object>) slot.converter).apply(value);
+                    }
+                    continue;
+                }
+                if (value == null) {
+                    continue;
+                }
+                Object overlaid = CacheContentMask.overlay((ImmutableSpi) value, slot.node, cachedByNode, sqlClient);
+                if (slot.converter != null) {
+                    overlaid = ((Function<Object, Object>) slot.converter).apply(overlaid);
+                }
+                args[i] = overlaid;
+            }
+            results.add((R) rebuild(data.tupleCreator, args));
+        }
+        return results;
+    }
+
+    /**
+     * Maps a selected table to the mask node reached by its join path from the root
+     * table, so a whitelist entry for an association applies to whichever selected
+     * slot targets that association. Returns {@code null} for a table that is not a
+     * plain to-one join descent of the root or whose path is not whitelisted.
+     */
+    private static CacheContentMask maskNodeFor(
+            CacheContentMask rootMask,
+            TableImplementor<?> tableImplementor,
+            TableImplementor<?> rootImplementor
+    ) {
+        List<ImmutableProp> path = new ArrayList<>();
+        TableImplementor<?> table = tableImplementor;
+        while (table != null && table != rootImplementor) {
+            ImmutableProp joinProp = table.getJoinProp();
+            if (joinProp == null || table.isTreated() || table.isRemote() || table.isInverse()) {
+                return null;
+            }
+            path.add(0, joinProp);
+            table = table.getParent();
+        }
+        if (table != rootImplementor) {
+            return null;
+        }
+        CacheContentMask node = rootMask;
+        for (ImmutableProp prop : path) {
+            node = node.getChildren().get(prop);
+            if (node == null) {
+                return null;
+            }
+        }
+        return node;
+    }
+
+    private static final class MaskSlot {
+
+        final boolean scalar;
+
+        final boolean masked;
+
+        final CacheContentMask node;
+
+        final Function<?, ?> converter;
+
+        private MaskSlot(boolean scalar, boolean masked, CacheContentMask node, Function<?, ?> converter) {
+            this.scalar = scalar;
+            this.masked = masked;
+            this.node = node;
+            this.converter = converter;
+        }
+
+        static MaskSlot scalar() {
+            return new MaskSlot(true, false, null, null);
+        }
+
+        static MaskSlot fresh(Function<?, ?> converter) {
+            return new MaskSlot(false, false, null, converter);
+        }
+
+        static MaskSlot masked(CacheContentMask node, Function<?, ?> converter) {
+            return new MaskSlot(false, true, node, converter);
+        }
+    }
+
+    /**
+     * Loads one node's cached entities through the authenticated seed bridge. When
+     * {@code proven} is true the node's SQL selection already established this exact
+     * id/type group, so the visibility-skipping seed is minted. Otherwise the bridge
+     * keeps its fresh per-id visibility read (the actual target read boundary), so a
+     * deleted or filtered-out target is never resurrected from a warm payload. The
+     * cache owner is the declared type when it has a cache, otherwise each concrete
+     * type's own cache; a vanished cache or a missing entry returns {@code null} so the
+     * caller declines the whole optimization instead of shortening the page.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Map<Object, ImmutableSpi> loadCacheContent(
+            JSqlClientImplementor sqlClient,
+            Connection con,
+            ConnectionManager connectionManager,
+            ImmutableType requestedType,
+            Map<Object, ImmutableType> ids,
+            EntitiesImpl entitiesImpl,
+            boolean proven
+    ) {
+        if (ids.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        boolean declaredCache = sqlClient.getCaches().getObjectCache(requestedType) != null;
+        Map<ImmutableType, Map<Object, ImmutableType>> groups = new LinkedHashMap<>();
+        for (Map.Entry<Object, ImmutableType> e : ids.entrySet()) {
+            ImmutableType owner = declaredCache ? requestedType : e.getValue();
+            if (!declaredCache && sqlClient.getCaches().getObjectCache(owner) == null) {
+                return null;
+            }
+            groups.computeIfAbsent(owner, it -> new LinkedHashMap<>()).put(e.getKey(), e.getValue());
+        }
+        Map<Object, ImmutableSpi> result = new LinkedHashMap<>();
+        for (Map.Entry<ImmutableType, Map<Object, ImmutableType>> group : groups.entrySet()) {
+            ObjectCacheQuerySeed admission = proven ?
+                    new ObjectCacheQuerySeed(
+                            sqlClient,
+                            con,
+                            connectionManager,
+                            requestedType,
+                            group.getKey(),
+                            group.getValue()
+                    ) :
+                    null;
+            Map<Object, Object> loaded = (Map<Object, Object>) entitiesImpl.findMapByIdsForQuery(
+                    requestedType,
+                    (Fetcher) null,
+                    group.getKey(),
+                    group.getValue().keySet(),
+                    group.getValue(),
+                    admission
+            );
+            for (Map.Entry<Object, Object> e : loaded.entrySet()) {
+                if (e.getValue() != null) {
+                    result.put(e.getKey(), (ImmutableSpi) e.getValue());
+                }
+            }
+        }
+        for (Object id : ids.keySet()) {
+            if (!result.containsKey(id)) {
+                return null;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Copies a {@link FetcherSelection} with a different (retained) fetcher and its
+     * converter removed, keeping the table and path intact.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Selection<?> retainedSelection(FetcherSelection<?> selection, Fetcher<?> retained) {
+        FetcherSelectionImpl<?> impl = (FetcherSelectionImpl<?>) selection;
+        Table<?> table = impl.getTable();
+        FetchPath path = selection.getPath();
+        if (path != null) {
+            return new FetcherSelectionImpl(table, path, retained);
+        }
+        return new FetcherSelectionImpl(table, retained, (Function) null);
+    }
+
+    /**
      * Whether the entity slot can be served from the object cache with an id-only
      * skeleton seed. The root table keeps the existing behaviour (single-table
      * polymorphism and subtype-only caches included) except for a root
@@ -413,6 +855,21 @@ final class ObjectCacheQueryExecution {
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static Fetcher<?> idOnlyFetcher(ImmutableType entityType) {
         return new FetcherImpl<>(entityType.getJavaClass());
+    }
+
+    /**
+     * The all-table-property projection a bare entity-table selection fetches. Reusing
+     * the existing fetcher machinery keeps its partial retained form identical to an
+     * explicit {@code fetch(allTableFields())}, so the mask can remove approved leaves
+     * while membership and the remaining columns stay SQL.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Fetcher<?> allTableFieldsFetcher(ImmutableType entityType) {
+        try {
+            return new FetcherImpl<>(entityType.getJavaClass()).allTableFields();
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 
     /**

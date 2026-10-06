@@ -7,6 +7,7 @@ import org.babyfish.jimmer.sql.ast.impl.query.PageSource
 import org.babyfish.jimmer.sql.ast.query.*
 import org.babyfish.jimmer.sql.ast.table.BaseTable
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike
+import org.babyfish.jimmer.sql.fetcher.Fetcher
 import org.babyfish.jimmer.sql.kt.ast.query.KConfigurableRootQuery
 import org.babyfish.jimmer.sql.kt.ast.query.KMutableRootQuery
 import org.babyfish.jimmer.sql.kt.ast.table.KPropsLike
@@ -176,6 +177,9 @@ internal class KConfigurableRootQueryImpl<P : KPropsLike, R>(
 
     override fun useObjectCache(enabled: Boolean): KConfigurableRootQuery<P, R> =
         KConfigurableRootQueryImpl(javaQuery.useObjectCache(enabled))
+
+    override fun useObjectCache(cachedContent: Fetcher<*>): KConfigurableRootQuery<P, R> =
+        KConfigurableRootQueryImpl(javaQuery.useObjectCache(cachedContent))
 
     override fun forUpdate(forUpdate: Boolean): KConfigurableRootQuery<P, R> =
         KConfigurableRootQueryImpl(javaQuery.forUpdate(forUpdate))

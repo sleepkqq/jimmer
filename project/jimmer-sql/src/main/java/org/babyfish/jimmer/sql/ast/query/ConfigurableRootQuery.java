@@ -6,6 +6,7 @@ import org.babyfish.jimmer.lang.NewChain;
 import org.babyfish.jimmer.sql.ast.Expression;
 import org.babyfish.jimmer.sql.ast.impl.query.ConfigurableRootQueryImpl;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
+import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -150,6 +151,31 @@ public interface ConfigurableRootQuery<T extends TableLike<?>, R> extends TypedR
     @NewChain
     default ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         return this;
+    }
+
+    /**
+     * <p>Enable the optional object-cache hint with an explicit recursive content
+     * mask. Only the stored scalar, embedded and JVM-formula-dependency leaves the
+     * mask whitelists may be served from the configured object cache; every other
+     * value, every association edge, the current FK topology, membership, ordering,
+     * pagination and concrete type stay SQL-authoritative. Association entries in the
+     * mask navigate into child content and never authorize caching the edge.</p>
+     *
+     * <p>The mask is validated against the selected fetcher: collection associations,
+     * id-views, remote and non-stored properties are rejected, and a mask listing
+     * content that is not selected is rejected. Unsupported query shapes, a missing
+     * cache, an unproven transaction state or any missing/incompatible cached value
+     * fall back to the ordinary SQL execution exactly once. {@link #forUpdate()} always
+     * disables this hint.</p>
+     *
+     * @param cachedContent The recursive content mask
+     * @return A new query object with the hint enabled
+     */
+    @NewChain
+    default ConfigurableRootQuery<T, R> useObjectCache(Fetcher<?> cachedContent) {
+        throw new UnsupportedOperationException(
+                "useObjectCache(Fetcher) is not supported by this query implementation"
+        );
     }
 
     @NewChain

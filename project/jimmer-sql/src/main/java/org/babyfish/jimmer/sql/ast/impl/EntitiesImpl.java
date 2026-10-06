@@ -368,17 +368,19 @@ public class EntitiesImpl implements Entities {
                 ids,
                 con
         );
-        return toMap(entities, requestedType);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <ID, E> Map<ID, E> toMap(List<E> entities, ImmutableType type) {
-        PropId idPropId = type.getIdProp().getId();
-        Map<ID, E> map = new LinkedHashMap<>((entities.size() * 4 + 2) / 3);
+        // A cache payload that does not even carry its own id cannot be admitted; decline
+        // the whole optimization instead of letting the map construction throw while
+        // reading it. Genuine cache or database exceptions still propagate.
+        PropId queryIdPropId = requestedType.getIdProp().getId();
+        Map<ID, E> queryMap = new LinkedHashMap<>((entities.size() * 4 + 2) / 3);
         for (E entity : entities) {
-            map.put((ID) ((ImmutableSpi) entity).__get(idPropId), entity);
+            ImmutableSpi spi = (ImmutableSpi) entity;
+            if (!spi.__isLoaded(queryIdPropId)) {
+                return Collections.emptyMap();
+            }
+            queryMap.put((ID) spi.__get(queryIdPropId), entity);
         }
-        return map;
+        return queryMap;
     }
 
     @SuppressWarnings("unchecked")
@@ -448,9 +450,13 @@ public class EntitiesImpl implements Entities {
         ImmutableType owner = cacheOwner != null ? cacheOwner : immutableType;
         Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(owner);
         if (cache != null) {
+            // A seed proves the filtered skeleton already admitted these exact ids on this
+            // connection. An internal caller without a seed (a navigated FAKE-FK/filtered
+            // child) has no such proof, so force the fresh per-id SQL visibility read that
+            // also establishes target existence instead of trusting the ids as visible.
             Collection<Object> visibleIds = seed != null ?
                     expectedTypes.keySet() :
-                    visibleCachedIds(immutableType, distinctIds, con);
+                    visibleCachedIds(immutableType, distinctIds, con, internal);
             if (visibleIds.isEmpty()) {
                 return Collections.emptyList();
             }
@@ -469,13 +475,17 @@ public class EntitiesImpl implements Entities {
             );
             // Enforce the fresh concrete type per id before any shape/DTO
             // conversion, so a stale polymorphic payload is declined rather
-            // than reshaped.
+            // than reshaped. Also require the payload to carry its own id equal
+            // to the requested key: otherwise two admitted same-type rows whose
+            // payloads were swapped would be silently re-keyed by payload id and
+            // the association between requested id and content would be lost.
             if (internal) {
                 for (Map.Entry<Object, E> e : cachedMap.entrySet()) {
                     ImmutableType expectedType = expectedTypes.get(e.getKey());
                     E entity = e.getValue();
                     if (entity != null && expectedType != null) {
-                        ImmutableType actualType = ((ImmutableSpi) entity).__type();
+                        ImmutableSpi spi = (ImmutableSpi) entity;
+                        ImmutableType actualType = spi.__type();
                         if (actualType != expectedType) {
                             throw new CacheTypeMismatchException(
                                     "Object cache for \"" +
@@ -488,6 +498,12 @@ public class EntitiesImpl implements Entities {
                                             expectedType +
                                             "\""
                             );
+                        }
+                        if (!spi.__isLoaded(immutableType.getIdProp().getId()) ||
+                                !Objects.equals(e.getKey(), spi.__get(immutableType.getIdProp().getId()))) {
+                            // A malformed or mismatched payload cannot be admitted;
+                            // decline the whole optimization so the original query runs.
+                            return Collections.emptyList();
                         }
                     }
                 }
@@ -610,7 +626,15 @@ public class EntitiesImpl implements Entities {
     }
 
     private Collection<Object> visibleCachedIds(ImmutableType type, Set<Object> ids, Connection con) {
-        if (rootUserFiltersIgnored || purpose == ExecutionPurpose.LOAD || sqlClient.getFilters().getFilter(type) == null) {
+        return visibleCachedIds(type, ids, con, false);
+    }
+
+    private Collection<Object> visibleCachedIds(ImmutableType type, Set<Object> ids, Connection con, boolean force) {
+        if (!force && (
+                rootUserFiltersIgnored ||
+                        purpose == ExecutionPurpose.LOAD ||
+                        sqlClient.getFilters().getFilter(type) == null
+        )) {
             return ids;
         }
         // Object caches are single-view. Access to a root ID must be checked in the

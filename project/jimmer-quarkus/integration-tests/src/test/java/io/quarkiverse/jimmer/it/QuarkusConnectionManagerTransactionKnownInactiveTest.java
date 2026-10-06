@@ -12,6 +12,7 @@ import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -26,13 +27,18 @@ import jakarta.transaction.TransactionManager;
 
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.JSqlClient;
+import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
+import org.babyfish.jimmer.sql.fetcher.ReferenceFetchType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import io.quarkiverse.jimmer.it.entity.Book;
+import io.quarkiverse.jimmer.it.entity.BookFetcher;
 import io.quarkiverse.jimmer.it.entity.BookStore;
 import io.quarkiverse.jimmer.it.entity.BookStoreFetcher;
 import io.quarkiverse.jimmer.it.entity.BookStoreTable;
+import io.quarkiverse.jimmer.it.entity.BookTable;
 import io.quarkiverse.jimmer.runtime.cfg.support.QuarkusConnectionManager;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -268,6 +274,153 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
         List<BookStore> after = queryStore(id);
         assertEquals(1, after.size());
         assertEquals(original, after.get(0).name());
+    }
+
+    /**
+     * The same guard applies to the recursive content-fetcher overload: even an
+     * explicitly approved whitelist must stay ordinary SQL inside an active
+     * transaction, so the uncommitted value is read instead of the warm cache.
+     */
+    @Test
+    void contentFetcherInsideTransactionDoesNotReturnStaleCachedData() throws Exception {
+        long id = anyStoreId();
+        String original = storeName(id);
+
+        List<BookStore> warm = queryStore(id);
+        assertEquals(1, warm.size());
+        assertEquals(original, warm.get(0).name());
+
+        String pending = original + "-pending";
+        transactionManager.begin();
+        try (Connection con = dataSource.getConnection()) {
+            try (PreparedStatement ps = con.prepareStatement("update BOOK_STORE set NAME = ? where ID = ?")) {
+                ps.setString(1, pending);
+                ps.setLong(2, id);
+                assertEquals(1, ps.executeUpdate());
+            }
+            List<BookStore> inTx = sqlClient.createQuery(BookStoreTable.$)
+                    .where(BookStoreTable.$.id().eq(id))
+                    .select(BookStoreTable.$.fetch(BookStoreFetcher.$.name()))
+                    .useObjectCache(BookStoreFetcher.$.name())
+                    .execute();
+            assertEquals(1, inTx.size());
+            assertEquals(pending, inTx.get(0).name());
+        } finally {
+            transactionManager.rollback();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void contentFetcherColdCacheInsideTransactionNeverPublishesPendingValue() throws Exception {
+        long bookId = anyBookId();
+        long id = bookStoreId(bookId);
+        String original = storeName(id);
+        Cache<Object, BookStore> cache =
+                (Cache<Object, BookStore>) sqlClient.getCaches().getObjectCache(ImmutableType.get(BookStore.class));
+        assertNotNull(cache, "The BookStore object cache must be configured");
+        cache.deleteAll(Collections.singletonList(id), null);
+
+        String pending = original + "-pending";
+        transactionManager.begin();
+        try (Connection con = dataSource.getConnection()) {
+            try (PreparedStatement ps = con.prepareStatement("update BOOK_STORE set NAME = ? where ID = ?")) {
+                ps.setString(1, pending);
+                ps.setLong(2, id);
+                assertEquals(1, ps.executeUpdate());
+            }
+            List<Book> inTx = sqlClient.createQuery(BookTable.$)
+                    .where(BookTable.$.id().eq(bookId))
+                    .select(BookTable.$.fetch(BookFetcher.$.store(
+                            ReferenceFetchType.SELECT,
+                            BookStoreFetcher.$.name()
+                    )))
+                    .useObjectCache(BookFetcher.$.store(BookStoreFetcher.$.name()))
+                    .execute();
+            assertEquals(1, inTx.size());
+            assertEquals(pending, inTx.get(0).store().name());
+        } finally {
+            transactionManager.rollback();
+        }
+
+        // The cold load inside the transaction never published the pending value.
+        List<BookStore> after = queryStore(id);
+        assertEquals(1, after.size());
+        assertEquals(original, after.get(0).name());
+    }
+
+    /**
+     * The nested child path is no exception: inside a JTA transaction the masked hint
+     * must read the pending FK edge and the pending child fact instead of the warm
+     * child cache, and a rollback must not publish the uncommitted child.
+     */
+    @Test
+    void contentFetcherNestedChildInsideTransactionReadsPendingTarget() throws Exception {
+        long bookId = anyBookId();
+        long originalStoreId = bookStoreId(bookId);
+        long otherStoreId = anyOtherStoreId(originalStoreId);
+        String originalOtherName = storeName(otherStoreId);
+
+        // Warm the currently committed child through the ordinary object-cache path.
+        List<BookStore> warm = queryStore(originalStoreId);
+        assertEquals(1, warm.size());
+
+        String pendingName = originalOtherName + "-pending";
+        transactionManager.begin();
+        try (Connection con = dataSource.getConnection()) {
+            try (PreparedStatement ps = con.prepareStatement("update BOOK set STORE_ID = ? where ID = ?")) {
+                ps.setLong(1, otherStoreId);
+                ps.setLong(2, bookId);
+                assertEquals(1, ps.executeUpdate());
+            }
+            try (PreparedStatement ps = con.prepareStatement("update BOOK_STORE set NAME = ? where ID = ?")) {
+                ps.setString(1, pendingName);
+                ps.setLong(2, otherStoreId);
+                assertEquals(1, ps.executeUpdate());
+            }
+            List<Book> inTx = sqlClient.createQuery(BookTable.$)
+                    .where(BookTable.$.id().eq(bookId))
+                    .select(BookTable.$.fetch(BookFetcher.$.store(BookStoreFetcher.$.name())))
+                    .useObjectCache(BookFetcher.$.store(BookStoreFetcher.$.name()))
+                    .execute();
+            assertEquals(1, inTx.size());
+            assertEquals(otherStoreId, inTx.get(0).store().id());
+            assertEquals(pendingName, inTx.get(0).store().name());
+        } finally {
+            transactionManager.rollback();
+        }
+
+        // The rollback restored the committed child and the pending name was never
+        // published into the shared cache.
+        List<BookStore> after = queryStore(otherStoreId);
+        assertEquals(1, after.size());
+        assertEquals(originalOtherName, after.get(0).name());
+    }
+
+    private long anyBookId() {
+        return sqlClient.createQuery(BookTable.$)
+                .where(BookTable.$.storeId().isNotNull())
+                .select(BookTable.$.id())
+                .limit(1)
+                .execute()
+                .get(0);
+    }
+
+    private long bookStoreId(long bookId) {
+        return sqlClient.createQuery(BookTable.$)
+                .where(BookTable.$.id().eq(bookId))
+                .select(BookTable.$.storeId())
+                .execute()
+                .get(0);
+    }
+
+    private long anyOtherStoreId(long storeId) {
+        return sqlClient.createQuery(BookStoreTable.$)
+                .where(BookStoreTable.$.id().ne(storeId))
+                .select(BookStoreTable.$.id())
+                .limit(1)
+                .execute()
+                .get(0);
     }
 
     private List<BookStore> queryStore(long id) {

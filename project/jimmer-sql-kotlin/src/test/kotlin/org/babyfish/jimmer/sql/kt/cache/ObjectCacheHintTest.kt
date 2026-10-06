@@ -14,6 +14,7 @@ import org.babyfish.jimmer.sql.kt.fetcher.newFetcher
 import org.babyfish.jimmer.sql.kt.filter.KFilter
 import org.babyfish.jimmer.sql.kt.filter.KFilterArgs
 import org.babyfish.jimmer.sql.kt.model.classic.book.Book
+import org.babyfish.jimmer.sql.kt.model.classic.book.by
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookView
 import org.babyfish.jimmer.sql.kt.model.classic.book.id
 import org.babyfish.jimmer.sql.kt.model.filter.File
@@ -106,6 +107,31 @@ class ObjectCacheHintTest : AbstractQueryTest() {
             assertEquals(1, rows.size)
             assertEquals(3L, rows[0].id)
         }
+    }
+
+    @Test
+    fun testContentFetcherServesOnlyApprovedFieldFromCache() {
+        // Warm the object cache with the full entity through the ordinary path.
+        nontransactional { con ->
+            _sqlClient.entities.forConnection(con).findById(Book::class, 3L)
+        }
+        clearExecutions()
+        nontransactional { con ->
+            val rows = _sqlClient.createQuery(Book::class) {
+                where(table.id eq 3L)
+                select(table)
+            }.useObjectCache(newFetcher(Book::class).by { name() }).execute(con)
+            assertEquals(1, rows.size)
+            assertEquals(3L, rows[0].id)
+            assertEquals("Learning GraphQL", rows[0].name)
+        }
+        // The explicit whitelist serves only NAME from the warm cache, so the
+        // skeleton must omit NAME and keep the unapproved PRICE column
+        // SQL-authoritative. A no-op wrapper or whole-query fallback still emits
+        // NAME, and a wholesale cached entity drops PRICE; both fail here.
+        val sql = executions.single().sql
+        assertFalse(sql.contains("NAME"), sql)
+        assertTrue(sql.contains("PRICE"), sql)
     }
 
     @Test

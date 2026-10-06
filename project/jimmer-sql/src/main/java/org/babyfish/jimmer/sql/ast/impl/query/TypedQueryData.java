@@ -52,6 +52,8 @@ class TypedQueryData {
 
     final boolean useObjectCache;
 
+    final Fetcher<?> cachedContent;
+
     private PropExpressionImplementor<?> idOnlyExpression;
 
     private boolean idOnlyExpressionResolved;
@@ -71,6 +73,7 @@ class TypedQueryData {
         hint = null;
         jdbcOptions = JdbcOptions.EMPTY;
         useObjectCache = false;
+        cachedContent = null;
     }
 
     public TypedQueryData(
@@ -92,6 +95,7 @@ class TypedQueryData {
         hint = null;
         this.jdbcOptions = jdbcOptions;
         useObjectCache = false;
+        cachedContent = null;
     }
 
     private TypedQueryData(
@@ -108,7 +112,8 @@ class TypedQueryData {
             ForUpdate forUpdate,
             String hint,
             JdbcOptions jdbcOptions,
-            boolean useObjectCache
+            boolean useObjectCache,
+            Fetcher<?> cachedContent
     ) {
         this.selections = selections;
         this.tupleCreator = tupleCreator;
@@ -124,9 +129,17 @@ class TypedQueryData {
         this.hint = hint;
         this.jdbcOptions = jdbcOptions;
         this.useObjectCache = useObjectCache;
+        this.cachedContent = cachedContent;
     }
 
     public TypedQueryData reselect(List<Selection<?>> selections, TupleCreator<?> tupleCreator) {
+        // A reselected projection no longer matches the original fetcher content mask,
+        // so the mask is never honored: oldSelections makes the content path decline
+        // before it can be applied. The mask is retained only as the marker that this
+        // query must run as a fresh, whole-graph, cache-disabled fallback. Dropping it
+        // would re-enable the legacy cache-enabled client and let a SELECT-loaded child
+        // serve stale content. The legacy boolean hint (no explicit content mask) and a
+        // plain query keep their existing behaviour.
         return new TypedQueryData(
                 processSelections(selections),
                 tupleCreator,
@@ -141,7 +154,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -178,7 +192,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -197,7 +212,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -216,7 +232,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -235,7 +252,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -254,7 +272,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -273,7 +292,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -292,7 +312,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -324,7 +345,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
@@ -343,12 +365,13 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                cachedContent
         );
     }
 
     public TypedQueryData useObjectCache(boolean useObjectCache) {
-        if (this.useObjectCache == useObjectCache) {
+        if (this.useObjectCache == useObjectCache && cachedContent == null) {
             return this;
         }
         return new TypedQueryData(
@@ -365,7 +388,36 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                useObjectCache
+                useObjectCache,
+                null
+        );
+    }
+
+    /**
+     * Enables the hint with an explicit recursive content mask. Only the stored
+     * leaves the mask whitelists may be served from the object cache; every other
+     * value, and every association edge, stays SQL-authoritative.
+     */
+    public TypedQueryData useObjectCache(Fetcher<?> cachedContent) {
+        if (cachedContent == null) {
+            throw new IllegalArgumentException("The object-cache content mask cannot be null");
+        }
+        return new TypedQueryData(
+                selections,
+                tupleCreator,
+                oldSelections,
+                oldTupleCreator,
+                distinct,
+                limit,
+                offset,
+                withoutSortingAndPaging,
+                reverseSorting,
+                reverseSortOptimizationEnabled,
+                forUpdate,
+                hint,
+                jdbcOptions,
+                true,
+                cachedContent
         );
     }
 
@@ -389,7 +441,8 @@ class TypedQueryData {
                 forUpdate,
                 hint,
                 jdbcOptions,
-                false
+                false,
+                cachedContent
         );
     }
 
