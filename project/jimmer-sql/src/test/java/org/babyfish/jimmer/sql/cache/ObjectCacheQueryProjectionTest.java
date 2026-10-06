@@ -1947,6 +1947,87 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testContentFetcherBaseNameApprovalCoversExplicitBranchDuplicate() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ?, FIRST_NAME = ? where ID = ?", "STALE-101", "STALE-FIRST-101", 101L);
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(
+                                    ClientFetcher.$.name()
+                                            .forType(OrganizationFetcher.$.name().taxCode())
+                                            .forType(PersonFetcher.$.firstName())
+                            ))
+                            .useObjectCache(ClientFetcher.$.name())
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            assertEquals("Acme", organization.name());
+            assertEquals("STALE-TAX-100", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals("Bob", person.name());
+            assertEquals("STALE-FIRST-101", person.firstName());
+            // A root approval must also reduce the explicit branch's duplicate inherited NAME.
+            String sql = getExecutions().get(0).getSql();
+            assertFalse(sql.contains(".NAME"), sql);
+            assertTrue(sql.contains("TAX_CODE"), sql);
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchMaskAcceptsInheritedBaseSelection() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ?, FIRST_NAME = ? where ID = ?", "STALE-101", "STALE-FIRST-101", 101L);
+            // The Organization branch approves the inherited NAME the base selects, plus TAX_CODE.
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode())))
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.name().taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            assertEquals("STALE-100", organization.name());
+            assertEquals("ACME-001", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals("STALE-101", person.name());
+            String sql = getExecutions().get(0).getSql();
+            assertTrue(sql.contains(".NAME"), sql);
+            assertFalse(sql.contains("TAX_CODE"), sql);
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
     public void testContentFetcherBranchDefaultDtoSqlReduction() {
         MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
@@ -2119,6 +2200,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         JSqlClient client = getSqlClient(builder -> {
             builder.setConnectionManager(NON_TX_MANAGER);
             builder.setForeignKeyEnabledByDefault(false);
+            // Scope metadata to TreeNode2 so the FAKE default is validated only here.
+            builder.setEntityManager(new EntityManager(TreeNode2.class));
             builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
                 @Override
                 public Cache<?, ?> createObjectCache(ImmutableType type) {

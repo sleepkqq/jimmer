@@ -225,7 +225,7 @@ final class CacheContentMask {
                             "\""
             );
         }
-        if (!isSubset(projection, mask)) {
+        if (!isSubset(projection, Collections.<String, Field>emptyMap(), mask)) {
             throw new IllegalArgumentException(
                     "The object-cache content mask lists content that the selected fetcher does not select"
             );
@@ -358,34 +358,79 @@ final class CacheContentMask {
         }
     }
 
-    private static boolean isSubset(Fetcher<?> projection, CacheContentMask mask) {
-        Map<String, Field> fieldMap = projection.getFieldMap();
+    /**
+     * Whether every approved mask entry is selected by the projection. A branch also
+     * inherits its declaring entity's selected fields, so an inherited base leaf counts for
+     * the branch even when the branch fetcher does not repeat it locally. A branch whose
+     * content is selected nowhere (no projection branch and not inherited) is still
+     * rejected, so a mask cannot introduce unselected properties.
+     */
+    private static boolean isSubset(Fetcher<?> projection, Map<String, Field> inherited, CacheContentMask mask) {
+        return isSubset(
+                projection.getFieldMap(),
+                typeBranchFetchers(projection),
+                inherited,
+                mask
+        );
+    }
+
+    private static boolean isSubset(
+            Map<String, Field> fieldMap,
+            Map<ImmutableType, Fetcher<?>> branches,
+            Map<String, Field> inherited,
+            CacheContentMask mask
+    ) {
         for (ImmutableProp leaf : mask.leaves) {
-            if (!fieldMap.containsKey(leaf.getName())) {
+            if (!selected(fieldMap, inherited, leaf)) {
                 return false;
             }
         }
         for (ImmutableProp formula : mask.formulas) {
-            if (!fieldMap.containsKey(formula.getName())) {
+            if (!selected(fieldMap, inherited, formula)) {
                 return false;
             }
         }
         for (Map.Entry<ImmutableProp, CacheContentMask> e : mask.children.entrySet()) {
-            Field field = fieldMap.get(e.getKey().getName());
+            Field field = fieldOf(fieldMap, inherited, e.getKey().getName());
             if (field == null || field.getChildFetcher() == null) {
                 return false;
             }
-            if (!isSubset(field.getChildFetcher(), e.getValue())) {
+            if (!isSubset(field.getChildFetcher(), Collections.<String, Field>emptyMap(), e.getValue())) {
                 return false;
             }
         }
         for (Map.Entry<ImmutableType, CacheContentMask> e : mask.typeBranches.entrySet()) {
-            Fetcher<?> branchFetcher = typeBranchFetchers(projection).get(e.getKey());
-            if (branchFetcher == null || !isSubset(branchFetcher, e.getValue())) {
+            Fetcher<?> branchFetcher = branches.get(e.getKey());
+            // An absent projection branch inherits only the declaring entity's selection.
+            Map<String, Field> branchFields = branchFetcher != null ?
+                    branchFetcher.getFieldMap() :
+                    Collections.<String, Field>emptyMap();
+            Map<ImmutableType, Fetcher<?>> branchBranches = branchFetcher != null ?
+                    typeBranchFetchers(branchFetcher) :
+                    Collections.<ImmutableType, Fetcher<?>>emptyMap();
+            if (!isSubset(branchFields, branchBranches, mergedFields(fieldMap, inherited), e.getValue())) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean selected(Map<String, Field> fieldMap, Map<String, Field> inherited, ImmutableProp prop) {
+        return fieldMap.containsKey(prop.getName()) || inherited.containsKey(prop.getName());
+    }
+
+    private static Field fieldOf(Map<String, Field> fieldMap, Map<String, Field> inherited, String name) {
+        Field field = fieldMap.get(name);
+        return field != null ? field : inherited.get(name);
+    }
+
+    private static Map<String, Field> mergedFields(Map<String, Field> fieldMap, Map<String, Field> inherited) {
+        if (inherited.isEmpty()) {
+            return fieldMap;
+        }
+        Map<String, Field> merged = new LinkedHashMap<>(inherited);
+        merged.putAll(fieldMap);
+        return merged;
     }
 
     private boolean isRemovedAt(
@@ -401,49 +446,30 @@ final class CacheContentMask {
                 return false;
             }
         }
-        // The owning node is the one whose type matches the current fetcher: the node
-        // itself for a base fetcher, the branch node for a type-branch fetcher. A scope
-        // that cannot be resolved unambiguously keeps the column fresh.
-        CacheContentMask owner = node.branchFor(currentType);
-        if (owner == null) {
-            return false;
-        }
-        if (owner.embedded && owner.nullable) {
+        if (node.embedded && node.nullable) {
             // A nullable embedded's presence depends on all of its columns; removing any
             // could fabricate absence.
             return false;
         }
-        if (!owner.isCacheableNode(sqlClient)) {
+        if (!node.isCacheableNode(sqlClient)) {
             return false;
         }
-        if (owner.hasWholeEmbeddedLeaf(prop)) {
+        if (node.hasWholeEmbeddedLeaf(prop)) {
             // Whole-embedded leaves carry no nested loadedness; keep their columns.
             return false;
         }
-        if (owner.leaves.contains(prop)) {
+        // A node-level (base) approval is common to every concrete type and every
+        // applicable branch, so it removes the column in any fetch scope.
+        if (node.leaves.contains(prop)) {
             return true;
         }
-        if (owner.formulas.contains(prop)) {
+        if (node.formulas.contains(prop)) {
             return prop.getSqlTemplate() == null;
         }
-        // Branch-only approval must cover every concrete type in this fetcher's scope that
-        // can carry the property; a universal column approved for one subtype alone stays
-        // for its siblings.
-        return owner.approvesEveryCarrier(currentType, prop);
-    }
-
-    /** This node or the subtype branch of the given type, or null when absent. */
-    private CacheContentMask branchFor(ImmutableType branchType) {
-        if (type == branchType) {
-            return this;
-        }
-        for (CacheContentMask branch : typeBranches.values()) {
-            CacheContentMask found = branch.branchFor(branchType);
-            if (found != null) {
-                return found;
-            }
-        }
-        return null;
+        // Otherwise the base and every applicable branch must together approve the property
+        // for every concrete type in the current fetcher's scope. A sibling branch's
+        // approval is never inherited, so an unapproved sibling stays SQL-fresh.
+        return node.approvesEveryCarrier(currentType, prop);
     }
 
     /** Whether this node or a subtype branch approves {@code prop} as a whole-embedded leaf. */
@@ -1007,11 +1033,14 @@ final class CacheContentMask {
         // A branch shares this payload/draft; overlay from the same cached value through
         // its own projection while visibility stays scoped to the whole entity.
         for (CacheContentMask branch : applicableBranches(node, fresh.__type())) {
+            // A mask branch with no projection counterpart inherits the current selection,
+            // so its (inherited) children are descended through the same projection.
+            Fetcher<?> branchProjection = branchProjection(nodeProjection, branch.type);
             overlayContent(
                     draft,
                     fresh,
                     entityProjection,
-                    branchProjection(nodeProjection, branch.type),
+                    branchProjection != null ? branchProjection : nodeProjection,
                     branch,
                     cached,
                     cachedByNode,

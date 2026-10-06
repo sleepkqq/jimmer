@@ -103,13 +103,15 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskRejectsProtectedAndUnselectedContent' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskKeepsUniversallySelectedBaseNameFresh' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchInheritedLeafApprovalKeepsSiblingsFresh' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBaseNameApprovalCoversExplicitBranchDuplicate' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskAcceptsInheritedBaseSelection' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchDefaultDtoSqlReduction' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchLateBadPayloadFallsBackBeforeConverter' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherNestedPolymorphicChildBranchStaysConcreteTypeScoped' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherUnsupportedPublicFetcherProjectionDeclinesSafely' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherDepth2FakeFkJoinPolicyDeclinesWholeFresh' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherIncompleteCachedEmbeddedFallsBackWholeQuery' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 78 \
+            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 80 \
             org.babyfish.jimmer.sql.cache.ObjectCacheTest 18 \
             org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7
           python3 scripts/verify-test-results.py project/jimmer-sql-kotlin/build/test-results/test \

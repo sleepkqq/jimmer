@@ -2,6 +2,7 @@ package org.babyfish.jimmer.sql.ast.impl.table;
 
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
+import org.babyfish.jimmer.meta.InheritanceInfo;
 import org.babyfish.jimmer.sql.JoinType;
 import org.babyfish.jimmer.sql.ast.PropExpression;
 import org.babyfish.jimmer.sql.ast.impl.Ast;
@@ -399,7 +400,21 @@ public class FetcherSelectionImpl<T> implements FetcherSelection<T>, Ast {
                 if (!(implementor instanceof TableImplementor<?>)) {
                     return null;
                 }
-                return ((TableImplementor<?>) implementor).getPolymorphicDiscriminatorProp();
+                ImmutableProp discriminatorProp =
+                        ((TableImplementor<?>) implementor).getPolymorphicDiscriminatorProp();
+                if (discriminatorProp != null || table != realTable) {
+                    // The root table is reported by getPolymorphicDiscriminatorProp; a
+                    // descended join table is not this selection's own entity.
+                    return discriminatorProp;
+                }
+                // A polymorphic entity projected on a joined table (the selection's own
+                // table) is still read by an ObjectReader that requires its discriminator.
+                // getPolymorphicDiscriminatorProp reports null for any non-root table, so
+                // select the discriminator here too; otherwise the reader would consume a
+                // column the SQL never emitted.
+                InheritanceInfo inheritanceInfo =
+                        ((TableImplementor<?>) implementor).getImmutableType().getInheritanceInfo();
+                return inheritanceInfo != null ? inheritanceInfo.getDiscriminatorProp() : null;
             }
 
             private boolean isRenderedByDiscriminatorSlot(RealTable table, ImmutableProp prop) {

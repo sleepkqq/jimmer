@@ -514,7 +514,11 @@ public class EntitiesImpl implements Entities {
                     entities.add(entity);
                 }
             }
-            Shapes.reshape(sqlClient, con, entities, immutableType, fetcher, null);
+            // Internal content reads need subtype leaves that null-fetcher reshaping unloads.
+            // Ordinary and explicit-fetcher reads keep their existing shape contract.
+            if (fetcher != null || !internal) {
+                Shapes.reshape(sqlClient, con, entities, immutableType, fetcher, null);
+            }
             return entities;
         }
         if (internal) {
