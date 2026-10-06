@@ -208,9 +208,10 @@ final class CacheContentMask {
      *
      * @return the retained fetcher, or {@code null} when a whitelisted nested association
      * resolves to an effective SQL join whose reduction to id-only would drop the join
-     * that proves the target exists, or when the mask would reduce a reference carrying a
-     * field-local filter and thereby erase its admission boundary; the caller declines
-     * instead of manufacturing the target or bypassing the filter
+     * that proves the target exists, when the mask would reduce a reference carrying a
+     * field-local filter and thereby erase its admission boundary, or when the projection
+     * selects a recursive association whose derived child cannot be partially reduced; the
+     * caller declines instead of manufacturing the target or corrupting the recursion
      * @throws IllegalArgumentException when the mask does not match the selected
      * fetcher or lists content it does not select
      */
@@ -232,6 +233,11 @@ final class CacheContentMask {
             throw new IllegalArgumentException(
                     "The object-cache content mask lists content that the selected fetcher does not select"
             );
+        }
+        // Native recursion derives children from the parent projection; reducing it
+        // would also drop unapproved descendant fields.
+        if (hasRecursiveProjection(projection)) {
+            return null;
         }
         Set<List<ImmutableProp>> keepEmbedded = new LinkedHashSet<>();
         collectZeroingEmbedded(projection, mask, new ArrayList<>(), sqlClient, keepEmbedded);
@@ -273,6 +279,19 @@ final class CacheContentMask {
                 return true;
             }
             if (hasReducedFieldLocalFilter(childFetcher, childNode)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasRecursiveProjection(Fetcher<?> projection) {
+        for (Field field : projection.getFieldMap().values()) {
+            if (field.getRecursionStrategy() != null) {
+                return true;
+            }
+            Fetcher<?> childFetcher = field.getChildFetcher();
+            if (childFetcher != null && hasRecursiveProjection(childFetcher)) {
                 return true;
             }
         }

@@ -35,6 +35,9 @@ import org.babyfish.jimmer.sql.model.BookStoreTable;
 import org.babyfish.jimmer.sql.model.BookTable;
 import org.babyfish.jimmer.sql.model.BookTableEx;
 import org.babyfish.jimmer.sql.model.Country;
+import org.babyfish.jimmer.sql.model.TreeNode;
+import org.babyfish.jimmer.sql.model.TreeNodeFetcher;
+import org.babyfish.jimmer.sql.model.TreeNodeTable;
 import org.babyfish.jimmer.sql.model.dto.ReusableBookStoreView;
 import org.babyfish.jimmer.sql.model.embedded.LocationDraft;
 import org.babyfish.jimmer.sql.model.embedded.LocationFetcher;
@@ -2940,6 +2943,180 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     "Alex", "Banks", alexId
             );
             authorCache.delete(alexId);
+        }
+    }
+
+    /**
+     * A recursive parent projection with a root-name-only hint: the approved root name may
+     * be a valid cached or fresh value, but the unapproved ancestor names are SQL facts and
+     * every natural level must stay loaded and current (never regenerated as id-only).
+     */
+    @Test
+    public void testContentFetcherRecursiveParentKeepsAncestorNamesFresh() {
+        MapCache<TreeNode> nodeCache = new MapCache<>(ImmutableType.get(TreeNode.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == TreeNode.class ? nodeCache : null);
+        TreeNodeTable table = TreeNodeTable.$;
+        List<Long> ids = Arrays.asList(4L, 7L);
+        List<Long> warmIds = Arrays.asList(1L, 2L, 3L, 4L, 6L, 7L);
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(TreeNode.class, warmIds));
+        nodeCache.clearHistory();
+        JSqlClient oracle = createClient(type -> null);
+        try {
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-1", 1L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-2", 2L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-3", 3L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-4", 4L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-6", 6L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-7", 7L);
+            // The cache-disabled recursive projection is the fresh-tree reference oracle.
+            clearExecutions();
+            List<TreeNode> fresh = new ArrayList<>();
+            jdbc(con -> fresh.addAll(
+                    oracle.createQuery(table)
+                            .where(table.id().in(ids))
+                            .orderBy(table.id())
+                            .select(table.fetch(TreeNodeFetcher.$.name().recursiveParent()))
+                            .execute(con)
+            ));
+            assertEquals(2, fresh.size(), "the ordinary recursive projection defines the membership");
+            assertEquals(4L, fresh.get(0).id());
+            assertEquals("F-4", fresh.get(0).name());
+            assertEquals("F-3", fresh.get(0).parent().name());
+            assertEquals("F-2", fresh.get(0).parent().parent().name());
+            assertEquals("F-1", fresh.get(0).parent().parent().parent().name());
+            clearExecutions();
+            List<TreeNode> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(ids))
+                            .orderBy(table.id())
+                            .select(table.fetch(TreeNodeFetcher.$.name().recursiveParent()))
+                            .useObjectCache(TreeNodeFetcher.$.name())
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size(), "the hinted page must keep the recursive membership");
+            TreeNode coca = rows.get(0);
+            assertEquals(4L, coca.id());
+            assertTrue(
+                    "Coca Cola".equals(coca.name()) || "F-4".equals(coca.name()),
+                    "the approved root name must be a valid cached or fresh value: " + coca.name()
+            );
+            assertEquals(3L, coca.parent().id());
+            assertEquals("F-3", coca.parent().name());
+            assertEquals(2L, coca.parent().parent().id());
+            assertEquals("F-2", coca.parent().parent().name());
+            assertEquals(1L, coca.parent().parent().parent().id());
+            assertEquals("F-1", coca.parent().parent().parent().name());
+            assertNull(coca.parent().parent().parent().parent());
+            TreeNode baguette = rows.get(1);
+            assertEquals(7L, baguette.id());
+            assertTrue(
+                    "Baguette".equals(baguette.name()) || "F-7".equals(baguette.name()),
+                    "the approved root name must be a valid cached or fresh value: " + baguette.name()
+            );
+            assertEquals(6L, baguette.parent().id());
+            assertEquals("F-6", baguette.parent().name());
+            assertEquals(2L, baguette.parent().parent().id());
+            assertEquals("F-2", baguette.parent().parent().name());
+            assertEquals(1L, baguette.parent().parent().parent().id());
+            assertEquals("F-1", baguette.parent().parent().parent().name());
+            assertNull(baguette.parent().parent().parent().parent());
+        } finally {
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Home", 1L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Food", 2L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Drinks", 3L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Coca Cola", 4L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Bread", 6L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Baguette", 7L);
+            for (Long id : warmIds) {
+                nodeCache.delete(id);
+            }
+        }
+    }
+
+    /**
+     * A recursive child-node projection with a root-name-only hint: the approved root name
+     * may be cached or fresh, but the unapproved descendant names are SQL facts at every
+     * natural depth, and the getters must read them without an unloaded/id-only shape.
+     */
+    @Test
+    public void testContentFetcherRecursiveChildNodesKeepDescendantNamesFresh() {
+        MapCache<TreeNode> nodeCache = new MapCache<>(ImmutableType.get(TreeNode.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == TreeNode.class ? nodeCache : null);
+        TreeNodeTable table = TreeNodeTable.$;
+        List<Long> ids = Collections.singletonList(2L);
+        List<Long> warmIds = Arrays.asList(2L, 3L, 4L, 5L, 6L, 7L, 8L);
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(TreeNode.class, warmIds));
+        nodeCache.clearHistory();
+        JSqlClient oracle = createClient(type -> null);
+        try {
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-2", 2L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-3", 3L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-4", 4L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-5", 5L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-6", 6L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-7", 7L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-8", 8L);
+            // The cache-disabled recursive projection is the fresh-tree reference oracle.
+            clearExecutions();
+            List<TreeNode> fresh = new ArrayList<>();
+            jdbc(con -> fresh.addAll(
+                    oracle.createQuery(table)
+                            .where(table.id().in(ids))
+                            .select(table.fetch(TreeNodeFetcher.$.name().recursiveChildNodes()))
+                            .execute(con)
+            ));
+            assertEquals(1, fresh.size(), "the ordinary recursive projection defines the membership");
+            assertEquals("F-2", fresh.get(0).name());
+            assertEquals(2, fresh.get(0).childNodes().size());
+            clearExecutions();
+            List<TreeNode> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(ids))
+                            .select(table.fetch(TreeNodeFetcher.$.name().recursiveChildNodes()))
+                            .useObjectCache(TreeNodeFetcher.$.name())
+                            .execute(con)
+            ));
+            assertEquals(1, rows.size(), "the hinted page must keep the recursive membership");
+            TreeNode food = rows.get(0);
+            assertEquals(2L, food.id());
+            assertTrue(
+                    "Food".equals(food.name()) || "F-2".equals(food.name()),
+                    "the approved root name must be a valid cached or fresh value: " + food.name()
+            );
+            List<TreeNode> children = food.childNodes();
+            assertEquals(2, children.size(), "childNodes ordered by id");
+            TreeNode drinks = children.get(0);
+            assertEquals(3L, drinks.id());
+            assertEquals("F-3", drinks.name());
+            TreeNode bread = children.get(1);
+            assertEquals(6L, bread.id());
+            assertEquals("F-6", bread.name());
+            List<TreeNode> drinksChildren = drinks.childNodes();
+            assertEquals(2, drinksChildren.size());
+            assertEquals(4L, drinksChildren.get(0).id());
+            assertEquals("F-4", drinksChildren.get(0).name());
+            assertEquals(5L, drinksChildren.get(1).id());
+            assertEquals("F-5", drinksChildren.get(1).name());
+            List<TreeNode> breadChildren = bread.childNodes();
+            assertEquals(2, breadChildren.size());
+            assertEquals(7L, breadChildren.get(0).id());
+            assertEquals("F-7", breadChildren.get(0).name());
+            assertEquals(8L, breadChildren.get(1).id());
+            assertEquals("F-8", breadChildren.get(1).name());
+            assertTrue(drinksChildren.get(0).childNodes().isEmpty(), "the leaf level must be terminal");
+        } finally {
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Food", 2L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Drinks", 3L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Coca Cola", 4L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Fanta", 5L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Bread", 6L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Baguette", 7L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Ciabatta", 8L);
+            for (Long id : warmIds) {
+                nodeCache.delete(id);
+            }
         }
     }
 

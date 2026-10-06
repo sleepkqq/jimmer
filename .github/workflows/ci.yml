@@ -89,7 +89,9 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherApprovedJvmFormulaAcceptsEmbeddedDependencyClosure' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherApprovedJvmFormulaOnlyKeepsImplicitEmbeddedClosure' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherFieldLocalReferenceFilterAdmissionKeepsRootMembershipFresh' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 65 \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherRecursiveParentKeepsAncestorNamesFresh' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherRecursiveChildNodesKeepDescendantNamesFresh' \
+            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 67 \
             org.babyfish.jimmer.sql.cache.ObjectCacheTest 18 \
             org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7
           python3 scripts/verify-test-results.py project/jimmer-sql-kotlin/build/test-results/test \
