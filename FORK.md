@@ -102,6 +102,12 @@ projection once on a cache-disabled client. This fresh-graph policy also applies
 command, reselected, streaming and `forEach` reads. Cached content is eventual, not a statement
 snapshot, and the caller owns which content is acceptable to serve stale.
 
+### Republishing the 1.1.3 feature set as 1.1.4
+
+1.1.4 republishes the 1.1.3 feature set with no Java/Kotlin behavior change; the 1.1.3
+JitPack build failed before compilation on an external Maven Central HTTP 429. Verify the
+tagged artifacts before adopting them.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -140,10 +146,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.3`, replace
+For version `1.1.4`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.3`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.3`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.4`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.4`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
@@ -182,18 +188,18 @@ public artifacts before any GitHub release: it requires the dispatched version t
 and test XML. Dispatch it after pushing the tag:
 
 ```bash
-gh workflow run ci.yml --ref 1.1.3 -f publicReleaseVersion=1.1.3
+gh workflow run ci.yml --ref 1.1.4 -f publicReleaseVersion=1.1.4
 ```
 
 For each release, update the fork version and consumer snippets, pass CI, commit and
-push `main`, then create and push an immutable semver tag (for example `1.1.3`).
+push `main`, then create and push an immutable semver tag (for example `1.1.4`).
 JitPack's root `jitpack.yml` runs `publishToMavenLocal` from `project/` without signing.
 Request the tagged POM to trigger the public build, then check
-`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.3/build.log` and run:
+`https://jitpack.io/com/github/sleepkqq/jimmer/1.1.4/build.log` and run:
 
 ```bash
-python3 scripts/verify-publication.py https://jitpack.io 1.1.3
-project/gradlew -p smoke-tests clean build -PforkVersion=1.1.3 --refresh-dependencies
+python3 scripts/verify-publication.py https://jitpack.io 1.1.4
+project/gradlew -p smoke-tests clean build -PforkVersion=1.1.4 --refresh-dependencies
 ```
 
 The same verification remains reproducible against an isolated repository as a generic
@@ -202,8 +208,8 @@ operator reference:
 ```bash
 project/gradlew -p project build
 project/gradlew -p project publishToMavenLocal -Dmaven.repo.local=/tmp/jimmer-m2
-python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.3
-project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.3
+python3 scripts/verify-publication.py /tmp/jimmer-m2 1.1.4
+project/gradlew -p smoke-tests build -PforkRepository=file:///tmp/jimmer-m2 -PforkVersion=1.1.4
 ```
 
 `smoke-tests` is a separate Gradle build: it reuses the integration-test sources but
