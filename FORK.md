@@ -102,11 +102,17 @@ projection once on a cache-disabled client. This fresh-graph policy also applies
 command, reselected, streaming and `forEach` reads. Cached content is eventual, not a statement
 snapshot, and the caller owns which content is acceptable to serve stale.
 
-### Republishing the 1.1.3 feature set as 1.1.4
+### Native cache-mask corrections in 1.1.4
 
-1.1.4 republishes the 1.1.3 feature set with no Java/Kotlin behavior change; the 1.1.3
-JitPack build failed before compilation on an external Maven Central HTTP 429. Verify the
-tagged artifacts before adopting them.
+1.1.4 extends cached-content masks to native single-table `forType` branches while
+preserving native polymorphic DTO conversion. SQL remains authoritative for concrete
+types and unapproved values. Existing decline conditions and whole-query fallback remain
+unchanged. Collections cannot be approved by a mask; unapproved collections stay SQL-fresh.
+Fetchers without the native metadata required for reduction use the original fresh read.
+
+The `1.1.3` tag (`a021104`) is immutable; its JitPack build failed before compilation on an
+external Maven Central HTTP 429. `1.1.4` is prepared but not yet tagged or verified: verify
+the tagged artifacts before adopting them.
 
 ### Reference IDs in bulk update-returning in 1.0.7
 

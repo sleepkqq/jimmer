@@ -7,6 +7,7 @@ import org.babyfish.jimmer.sql.kt.KSqlClient
 import org.babyfish.jimmer.sql.kt.ast.expression.asc
 import org.babyfish.jimmer.sql.kt.ast.expression.eq
 import org.babyfish.jimmer.sql.kt.ast.expression.value
+import org.babyfish.jimmer.sql.kt.ast.expression.valueIn
 import org.babyfish.jimmer.sql.kt.common.AbstractQueryTest
 import org.babyfish.jimmer.sql.kt.common.AbstractTest
 import org.babyfish.jimmer.sql.kt.common.createCache
@@ -22,6 +23,15 @@ import org.babyfish.jimmer.sql.kt.model.filter.id
 import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.Employee
 import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.`by`
 import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.id
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.KClient
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.KOrganization
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.KPerson
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.`by`
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.firstName
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.id
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.lastName
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.name
+import org.babyfish.jimmer.sql.kt.model.inheritance.singletable.taxCode
 import org.babyfish.jimmer.sql.kt.toKSqlClient
 import org.babyfish.jimmer.sql.runtime.ConnectionManager
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor
@@ -30,6 +40,7 @@ import java.util.function.Function
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -111,7 +122,6 @@ class ObjectCacheHintTest : AbstractQueryTest() {
 
     @Test
     fun testContentFetcherServesOnlyApprovedFieldFromCache() {
-        // Warm the object cache with the full entity through the ordinary path.
         nontransactional { con ->
             _sqlClient.entities.forConnection(con).findById(Book::class, 3L)
         }
@@ -125,10 +135,6 @@ class ObjectCacheHintTest : AbstractQueryTest() {
             assertEquals(3L, rows[0].id)
             assertEquals("Learning GraphQL", rows[0].name)
         }
-        // The explicit whitelist serves only NAME from the warm cache, so the
-        // skeleton must omit NAME and keep the unapproved PRICE column
-        // SQL-authoritative. A no-op wrapper or whole-query fallback still emits
-        // NAME, and a wholesale cached entity drops PRICE; both fail here.
         val sql = executions.single().sql
         assertFalse(sql.contains("NAME"), sql)
         assertTrue(sql.contains("PRICE"), sql)
@@ -206,6 +212,23 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         }
         // The decline is observable: ordinary SQL re-reads the entity columns even
         // though the object cache is warm.
+        assertTrue(executions.single().sql.contains("PRICE"), executions.single().sql)
+    }
+
+    @Test
+    fun testContentFetcherHintDeclinedInsideLocalJdbcTransaction() {
+        nontransactional { con ->
+            _sqlClient.entities.forConnection(con).findById(Book::class, 3L)
+        }
+        clearExecutions()
+        jdbc { con ->
+            val rows = _sqlClient.createQuery(Book::class) {
+                where(table.id eq 3L)
+                select(table)
+            }.useObjectCache(newFetcher(Book::class).by { name() }).execute(con)
+            assertEquals(1, rows.size)
+            assertEquals("Learning GraphQL", rows[0].name)
+        }
         assertTrue(executions.single().sql.contains("PRICE"), executions.single().sql)
     }
 
@@ -308,6 +331,74 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         assertFalse(executions[0].sql.contains("FULL_NAME"), executions[0].sql)
     }
 
+    @Test
+    fun testBranchContentFetcherServesApprovedSubtypeLeafFromCache() {
+        val visibleIds = listOf(100L, 101L)
+        val underlying = sqlClient {
+            setConnectionManager(AutoCommitConnectionManager())
+            setCacheFactory(
+                object : KCacheFactory {
+                    override fun createObjectCache(type: ImmutableType): Cache<*, *> =
+                        createCache<Any, Any>(type)
+                }
+            )
+        }
+        val delegated: KSqlClient = object : AbstractJSqlClientDelegate() {
+            override fun sqlClient(): JSqlClientImplementor = underlying.javaClient
+        }.toKSqlClient()
+        nontransactional { con ->
+            delegated.entities.forConnection(con).findById(KClient::class, 100L)
+            delegated.entities.forConnection(con).findById(KClient::class, 101L)
+        }
+        try {
+            rawUpdate(
+                "update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?",
+                "STALE-100", "STALE-TAX-100", 100L
+            )
+            rawUpdate(
+                "update CLIENT set NAME = ?, FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                "STALE-101", "STALE-FIRST", "STALE-LAST", 101L
+            )
+            clearExecutions()
+            var rows: List<KClient> = emptyList()
+            nontransactional { con ->
+                rows = delegated.createQuery(KClient::class) {
+                    where(table.id valueIn visibleIds)
+                    orderBy(table.id)
+                    select(
+                        table.fetchBy {
+                            name()
+                            forType(KOrganization::class) { taxCode() }
+                            forType(KPerson::class) { firstName(); lastName() }
+                        }
+                    )
+                }.useObjectCache(
+                    newFetcher(KClient::class).by {
+                        name()
+                        forType(KOrganization::class) { taxCode() }
+                    }
+                ).execute(con)
+            }
+            assertEquals(2, rows.size)
+            val organization = assertIs<KOrganization>(rows[0])
+            assertEquals("Acme", organization.name)
+            assertEquals("ACME-001", organization.taxCode)
+            val person = assertIs<KPerson>(rows[1])
+            assertEquals("Bob", person.name)
+            assertEquals("STALE-FIRST", person.firstName)
+            assertEquals("STALE-LAST", person.lastName)
+        } finally {
+            rawUpdate(
+                "update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001', FIRST_NAME = null, LAST_NAME = null where ID = ?",
+                100L
+            )
+            rawUpdate(
+                "update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob', LAST_NAME = 'Brown' where ID = ?",
+                101L
+            )
+        }
+    }
+
     /**
      * Runs the block on a fresh, unmodified test connection with auto-commit enabled.
      * These bodies only read, so nothing is committed; the connection is closed by
@@ -317,6 +408,18 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         AbstractTest.jdbc(rollback = false) { con ->
             con.autoCommit = true
             block(con)
+        }
+    }
+
+    /** Commits a raw JDBC mutation the object cache does not observe. */
+    private fun rawUpdate(sql: String, vararg args: Any) {
+        AbstractTest.jdbc(rollback = false) { con ->
+            con.prepareStatement(sql).use { st ->
+                for (i in args.indices) {
+                    st.setObject(i + 1, args[i])
+                }
+                st.executeUpdate()
+            }
         }
     }
 

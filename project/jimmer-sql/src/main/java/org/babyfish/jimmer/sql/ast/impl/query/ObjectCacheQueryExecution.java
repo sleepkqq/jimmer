@@ -48,18 +48,11 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * <p>Optional object-cache execution for {@link ConfigurableRootQueryImpl}: the query
- * still executes SQL for membership, ordering, pagination and any fresh (uncacheable)
- * slot, but each cacheable entity slot is seeded with an id-only skeleton selection and
- * then read from the configured object cache instead of re-reading entity columns.</p>
- *
- * <p>This is deliberately conservative. The skeleton always re-queries SQL, so it is
- * <b>not</b> a membership/query cache and gives no same-statement snapshot guarantee
- * beyond the object cache's own eventual consistency. A slot is cached only when its
- * table is the root table or an ordinary non-polymorphic to-one join whose default
- * id-only machinery preserves existence/nullability/multiplicity; every other entity
- * slot stays a fresh full selection. Any missing cache entry, unknown transaction
- * state or unproven shape falls back to the ordinary SQL execution exactly once.</p>
+ * Optional object-cache execution for {@link ConfigurableRootQueryImpl}. SQL stays
+ * authoritative for membership, ordering, pagination and every fresh slot; cacheable
+ * entity slots are seeded id-only and hydrated from the object cache. This is eventual
+ * content, not a query-result snapshot: any missing entry or unproven shape falls back
+ * to the ordinary SQL execution exactly once.
  */
 final class ObjectCacheQueryExecution {
 
@@ -123,12 +116,17 @@ final class ObjectCacheQueryExecution {
 
                 // --- Fetcher selection: an entity or DTO slot ------------------
                 if (selection instanceof FetcherSelection<?>) {
-                    FetcherSelection<?> fetcherSelection = (FetcherSelection<?>) selection;
+                    // The selected table (and path) is only exposed by the native
+                    // implementation; any other FetcherSelection shape is declined.
+                    if (!(selection instanceof FetcherSelectionImpl<?>)) {
+                        return null;
+                    }
+                    FetcherSelectionImpl<?> fetcherSelection = (FetcherSelectionImpl<?>) selection;
                     if (fetcherSelection.getEmbeddedPropExpression() != null) {
                         // Embedded projections are not part of the entity slot model.
                         return null;
                     }
-                    Table<?> selectedTable = ((FetcherSelectionImpl<?>) selection).getTable();
+                    Table<?> selectedTable = fetcherSelection.getTable();
                     TableImplementor<?> tableImplementor = TableProxies.resolve(selectedTable, astContext);
                     boolean root = tableImplementor == rootImplementor;
                     Fetcher<?> fetcher = fetcherSelection.getFetcher();
@@ -162,12 +160,7 @@ final class ObjectCacheQueryExecution {
                 }
 
                 // --- Bare table selection: a fetched entity without a fetcher --
-                Table<?> selectedTable = null;
-                if (selection instanceof Table<?>) {
-                    selectedTable = (Table<?>) selection;
-                } else if (selection instanceof KTable<?>) {
-                    selectedTable = ((KTable<?>) selection).getImplementor();
-                }
+                Table<?> selectedTable = tableOf(selection);
                 if (selectedTable == null) {
                     // Fresh scalar / expression slot, retained verbatim.
                     slots[i] = Slot.scalar();
@@ -359,20 +352,11 @@ final class ObjectCacheQueryExecution {
     }
 
     /**
-     * <p>Recursive content-mask execution: SQL reads the caller's projection with
-     * only the whitelisted stored leaves removed, so membership, ordering, pagination,
-     * current FK edges, concrete types and every non-whitelisted scalar stay fresh;
-     * the whitelisted leaves are then filled from the configured reference object
-     * caches. Association edges are never served from cache, and the cached payload is
-     * never merged as a whole.</p>
-     *
-     * <p>The retained read runs on a locally derived, cache-disabled client so no
-     * association loader can accidentally serve a cached whole target or property
-     * edge; that client is used consistently for rendering, reading and every
-     * loader-created target query. The original client is used only for the explicit
-     * cache content loads, which reuse the authenticated seed bridge. Any missing,
-     * negative or incompatible cached value falls back to the whole original query,
-     * which keeps running on the original client.</p>
+     * Recursive content-mask execution. The retained read renders, reads and loads on a
+     * locally cache-disabled derived client, so no loader can serve a cached whole
+     * target/edge; only the explicit content loads use the caller's client. Any missing,
+     * negative or incompatible cached value returns {@code null}, and the caller re-runs
+     * the whole projection on a cache-disabled derived client ({@code executeBypassed}).
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static <T extends org.babyfish.jimmer.sql.ast.table.spi.TableLike<?>, R> List<R> tryExecuteWithContent(
@@ -426,11 +410,16 @@ final class ObjectCacheQueryExecution {
             for (int i = 0; i < size; i++) {
                 Selection<?> selection = selections.get(i);
                 if (selection instanceof FetcherSelection<?>) {
-                    FetcherSelection<?> fetcherSelection = (FetcherSelection<?>) selection;
+                    if (!(selection instanceof FetcherSelectionImpl<?>)) {
+                        // The retained/selected table is only exposed by the native
+                        // implementation; any other shape is declined.
+                        return null;
+                    }
+                    FetcherSelectionImpl<?> fetcherSelection = (FetcherSelectionImpl<?>) selection;
                     if (fetcherSelection.getEmbeddedPropExpression() != null) {
                         return null;
                     }
-                    Table<?> selectedTable = ((FetcherSelectionImpl<?>) selection).getTable();
+                    Table<?> selectedTable = fetcherSelection.getTable();
                     TableImplementor<?> tableImplementor =
                             TableProxies.resolve(selectedTable, astContext);
                     Fetcher<?> fetcher = fetcherSelection.getFetcher();
@@ -447,7 +436,7 @@ final class ObjectCacheQueryExecution {
                             node.hasCacheableLeaves(sqlClient) &&
                             !node.hasJoinedInheritanceCacheable(sqlClient)) {
                         slots[i] = MaskSlot.masked(node, fetcher, fetcherSelection.getConverter());
-                        retainedSelections.add(retainedSelection(fetcherSelection, retained));
+                        retainedSelections.add(withFetcher(fetcherSelection, retained));
                         maskedCount++;
                     } else {
                         slots[i] = MaskSlot.fresh(fetcherSelection.getConverter());
@@ -455,12 +444,7 @@ final class ObjectCacheQueryExecution {
                     }
                     continue;
                 }
-                Table<?> selectedTable = null;
-                if (selection instanceof Table<?>) {
-                    selectedTable = (Table<?>) selection;
-                } else if (selection instanceof KTable<?>) {
-                    selectedTable = ((KTable<?>) selection).getImplementor();
-                }
+                Table<?> selectedTable = tableOf(selection);
                 if (selectedTable == null) {
                     slots[i] = MaskSlot.scalar();
                     retainedSelections.add(selection);
@@ -480,8 +464,7 @@ final class ObjectCacheQueryExecution {
                 // tuple slots, so only this node's own leaves apply.
                 CacheContentMask bareMask = node.withoutChildren();
                 Fetcher<?> all = allTableFieldsFetcher(tableImplementor.getImmutableType());
-                Fetcher<?> retained = all != null ?
-                        CacheContentMask.retainedFetcher(all, bareMask, sqlClient) : null;
+                Fetcher<?> retained = CacheContentMask.retainedFetcher(all, bareMask, sqlClient);
                 if (retained != null &&
                         bareMask.hasCacheableLeaves(sqlClient) &&
                         !bareMask.hasJoinedInheritanceCacheable(sqlClient)) {
@@ -658,10 +641,8 @@ final class ObjectCacheQueryExecution {
     }
 
     /**
-     * Maps a selected table to the mask node reached by its join path from the root
-     * table, so a whitelist entry for an association applies to whichever selected
-     * slot targets that association. Returns {@code null} for a table that is not a
-     * plain to-one join descent of the root or whose path is not whitelisted.
+     * The mask node reached by a selected table's join path from the root, or {@code null}
+     * when the path is not a plain whitelisted to-one descent.
      */
     private static CacheContentMask maskNodeFor(
             CacheContentMask rootMask,
@@ -683,12 +664,28 @@ final class ObjectCacheQueryExecution {
         }
         CacheContentMask node = rootMask;
         for (ImmutableProp prop : path) {
+            // Base children only. A join prop declared inside a type branch must not be
+            // resolved from the join path alone: an absent (unselected) parent cannot
+            // prove its subtype branch here, so an ambiguous branch target stays a fresh
+            // selection instead of an unsound reduction. The selected child's own
+            // concrete type is still proven per id by the fresh read before any overlay.
             node = node.getChildren().get(prop);
             if (node == null) {
                 return null;
             }
         }
         return node;
+    }
+
+    /** The bare table selected by a Table/KTable selection, or null for any other slot. */
+    private static Table<?> tableOf(Selection<?> selection) {
+        if (selection instanceof Table<?>) {
+            return (Table<?>) selection;
+        }
+        if (selection instanceof KTable<?>) {
+            return ((KTable<?>) selection).getImplementor();
+        }
+        return null;
     }
 
     private static final class MaskSlot {
@@ -732,16 +729,12 @@ final class ObjectCacheQueryExecution {
     }
 
     /**
-     * Loads one node's cached entities through the authenticated seed bridge. Proof is
-     * per exact id: an id recorded in {@code provenIds} (with the same concrete type)
-     * was admitted by the executing SQL, so the visibility-skipping seed is minted for
-     * it. Every other id keeps its fresh per-id visibility read (the actual target read
-     * boundary), so a deleted or filtered-out target is never resurrected from a warm
-     * payload - including when a sibling joined slot proved a different id of the same
-     * node. The cache owner is the declared type when it has a cache, otherwise each
-     * concrete type's own cache; a vanished cache or any missing entry returns
-     * {@code null} so the caller declines the whole optimization instead of shortening
-     * the page.
+     * Loads one node's cached entities through the authenticated seed bridge. An id in
+     * {@code provenIds} with the same concrete type was admitted by the executing SQL, so
+     * only its visibility re-check is skipped; every other id keeps its fresh per-id read,
+     * so a deleted/filtered target is never resurrected from a warm payload. The cache
+     * owner is the declared type when cached, else each concrete type's own cache; any
+     * missing entry returns {@code null} so the caller declines rather than shortening.
      */
     private static Map<Object, ImmutableSpi> loadCacheContent(
             JSqlClientImplementor sqlClient,
@@ -789,7 +782,6 @@ final class ObjectCacheQueryExecution {
         return result;
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static void loadCacheGroup(
             JSqlClientImplementor sqlClient,
             Connection con,
@@ -807,9 +799,9 @@ final class ObjectCacheQueryExecution {
         ObjectCacheQuerySeed admission = proven ?
                 new ObjectCacheQuerySeed(sqlClient, con, connectionManager, requestedType, owner, ids) :
                 null;
-        Map<Object, Object> loaded = (Map<Object, Object>) entitiesImpl.findMapByIdsForQuery(
+        Map<Object, Object> loaded = entitiesImpl.<Object, Object>findMapByIdsForQuery(
                 requestedType,
-                (Fetcher) null,
+                null,
                 owner,
                 ids.keySet(),
                 ids,
@@ -823,28 +815,23 @@ final class ObjectCacheQueryExecution {
     }
 
     /**
-     * Copies a {@link FetcherSelection} with a different (retained) fetcher and its
-     * converter removed, keeping the table and path intact.
+     * A copy of {@code selection} with a different fetcher and no converter, keeping its
+     * table and path. Shared by the retained projection and the converter-stripped skeleton.
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Selection<?> retainedSelection(FetcherSelection<?> selection, Fetcher<?> retained) {
-        FetcherSelectionImpl<?> impl = (FetcherSelectionImpl<?>) selection;
-        Table<?> table = impl.getTable();
+    private static Selection<?> withFetcher(FetcherSelectionImpl<?> selection, Fetcher<?> fetcher) {
         FetchPath path = selection.getPath();
         if (path != null) {
-            return new FetcherSelectionImpl(table, path, retained);
+            return new FetcherSelectionImpl(selection.getTable(), path, fetcher);
         }
-        return new FetcherSelectionImpl(table, retained, (Function) null);
+        return new FetcherSelectionImpl(selection.getTable(), fetcher, (Function) null);
     }
 
     /**
-     * Whether the entity slot can be served from the object cache with an id-only
-     * skeleton seed. The root table keeps the existing behaviour (single-table
-     * polymorphism and subtype-only caches included) except for a root
-     * joined-inheritance projection, which is declined until the existing reader is
-     * proven for the id-only seed. A non-root slot is admitted only as an ordinary
-     * non-polymorphic to-one join without a target filter; the entity projection
-     * retains that join so existence/nullability/multiplicity are unchanged.
+     * Whether the entity slot can be served from the object cache with an id-only skeleton
+     * seed. The root table is admitted except for a JOINED inheritance projection; a
+     * non-root slot only as an ordinary non-polymorphic to-one join without a target
+     * filter, whose join the projection retains to preserve existence/multiplicity.
      */
     private static boolean isCacheableSlot(
             boolean root,
@@ -900,51 +887,21 @@ final class ObjectCacheQueryExecution {
         return new FetcherImpl<>(entityType.getJavaClass());
     }
 
-    /**
-     * The all-table-property projection a bare entity-table selection fetches. Reusing
-     * the existing fetcher machinery keeps its partial retained form identical to an
-     * explicit {@code fetch(allTableFields())}, so the mask can remove approved leaves
-     * while membership and the remaining columns stay SQL.
-     */
+    /** The all-table-property projection a bare entity-table selection fetches. */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static Fetcher<?> allTableFieldsFetcher(ImmutableType entityType) {
-        try {
-            return new FetcherImpl<>(entityType.getJavaClass()).allTableFields();
-        } catch (RuntimeException ex) {
-            return null;
-        }
+        return new FetcherImpl<>(entityType.getJavaClass()).allTableFields();
+    }
+
+    /** The converter-less skeleton selection; unchanged when it has no converter. */
+    private static Selection<?> stripConverter(FetcherSelectionImpl<?> selection) {
+        return selection.getConverter() == null ? selection : withFetcher(selection, selection.getFetcher());
     }
 
     /**
-     * Copies a fresh {@link FetcherSelection} with its DTO converter removed while
-     * keeping the table, path, fetcher and joins intact, so the skeleton returns the
-     * raw entity and the converter can run after cache validation.
-     */
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static Selection<?> stripConverter(FetcherSelection<?> selection) {
-        if (selection.getConverter() == null) {
-            return selection;
-        }
-        FetcherSelectionImpl<?> impl = (FetcherSelectionImpl<?>) selection;
-        Table<?> table = impl.getTable();
-        Fetcher<?> fetcher = selection.getFetcher();
-        FetchPath path = selection.getPath();
-        if (path != null) {
-            return new FetcherSelectionImpl(table, path, fetcher);
-        }
-        return new FetcherSelectionImpl(table, fetcher, (Function) null);
-    }
-
-    /**
-     * Detects an <em>effective</em> join-fetch in the projection by reusing the
-     * same visitor the renderer uses: whenever the renderer would actually join
-     * (respecting the configured max join-fetch depth and the type-branch
-     * predicate), the projection is declined. Those joins shape membership and
-     * row multiplicity, so the id-only skeleton cannot retain them.
-     *
-     * <p>SELECT-loaded associations are deliberately not declined: they are
-     * hydrated after the skeleton query. The old shallow "any target filter"
-     * check is intentionally not used.</p>
+     * Declines an effective join-fetch (same visitor the renderer uses, respecting depth
+     * and the branch predicate); such joins shape membership/multiplicity. SELECT-loaded
+     * associations are not declined.
      */
     private static boolean hasEffectiveJoinFetch(Fetcher<?> fetcher, JSqlClientImplementor sqlClient) {
         final boolean[] found = {false};

@@ -12,10 +12,13 @@ import org.babyfish.jimmer.sql.InheritanceType;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.Field;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherFactory;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherImplementor;
 import org.babyfish.jimmer.sql.fetcher.impl.JoinFetchFieldVisitor;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -23,23 +26,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * <p>A recursive, path-specific whitelist of object-cache content for
- * {@link ObjectCacheQueryExecution}. Stored scalar leaves, embedded leaves and the
- * stored dependency closure of an approved JVM formula are served from the owning
- * entity's object cache. Association entries navigate into the child entity content;
- * they never authorize caching the edge itself. Collections, id-views, remote and
- * SQL-formula properties are rejected, and optimistic-lock / logical-delete protected
- * properties are rejected by metadata rather than by name.</p>
- *
- * <p>{@link #retainedFetcher} derives the SQL projection by removing only a node's own
- * approved leaves when that node's owning entity actually has an object cache, so SQL
- * still supplies every fresh scalar, FK edge, membership, nullability and concrete
- * type. An embedded value is never reduced to zero columns: a whole-embedded approval
- * and a nullable embedded keep their SQL columns, and a required embedded whose every
- * selected leaf would be removed keeps at least its original projection. This preserves
- * the current presence/nullability that a zero-field reader would fabricate as absent.
- * {@link #overlay} then fills exactly the removed leaves from the cached payloads and
- * never merges a cache payload as a whole.</p>
+ * Recursive, path-specific whitelist of object-cache content for
+ * {@link ObjectCacheQueryExecution}. Only stored scalars/embedded leaves and the stored
+ * dependency closure of an approved JVM formula are served from the owning entity's
+ * object cache; associations navigate into child content and never authorize the edge.
+ * Collections, id-views, remote and SQL formulas are rejected, as are optimistic-lock
+ * and logical-delete properties. {@link #retainedFetcher} removes approved leaves from
+ * the SQL projection (a whole or nullable embedded is never reduced to zero columns,
+ * which would fabricate absence) and {@link #overlay} fills exactly those leaves from
+ * the cached payload. A single-table fetcher's {@code forType(Subtype, ...)} branches
+ * are child nodes keyed by branch type, sharing the declaring entity's cache owner.
  */
 final class CacheContentMask {
 
@@ -60,6 +56,9 @@ final class CacheContentMask {
     /** Whitelisted JVM formulas: removed from the retained projection but never cached. */
     private final Set<ImmutableProp> formulas;
 
+    /** STI type branches of this entity, keyed by branch type; empty when non-polymorphic. */
+    private final Map<ImmutableType, CacheContentMask> typeBranches;
+
     private CacheContentMask(
             ImmutableType type,
             boolean embedded,
@@ -67,7 +66,8 @@ final class CacheContentMask {
             ImmutableType cacheOwnerType,
             Map<ImmutableProp, CacheContentMask> children,
             Set<ImmutableProp> leaves,
-            Set<ImmutableProp> formulas
+            Set<ImmutableProp> formulas,
+            Map<ImmutableType, CacheContentMask> typeBranches
     ) {
         this.type = type;
         this.embedded = embedded;
@@ -76,6 +76,7 @@ final class CacheContentMask {
         this.children = children;
         this.leaves = leaves;
         this.formulas = formulas;
+        this.typeBranches = typeBranches;
     }
 
     ImmutableType getType() {
@@ -95,7 +96,7 @@ final class CacheContentMask {
             throw new IllegalArgumentException("The object-cache content mask cannot be null");
         }
         ImmutableType type = fetcher.getImmutableType();
-        ImmutableType cacheOwnerType = embedded ? ownerType : type;
+        ImmutableType cacheOwnerType = ownerType != null ? ownerType : type;
         Map<ImmutableProp, CacheContentMask> children = new LinkedHashMap<>();
         Set<ImmutableProp> leaves = new LinkedHashSet<>();
         Set<ImmutableProp> formulas = new LinkedHashSet<>();
@@ -115,14 +116,9 @@ final class CacheContentMask {
                             "The object-cache content mask cannot cache SQL formula \"" + prop + "\""
                     );
                 }
-                // A JVM formula is removed from SQL and recomputed by its getter. Its
-                // stored dependency closure is already expanded by the native fetcher
-                // (FetcherImpl#getFieldMap), including nested stored paths and
-                // formula-to-formula edges, so the implicit dependency fields present
-                // here are approved as ordinary stored leaves below - no homemade
-                // expander is needed, and a native closure that cannot be stored
-                // (association edge, SQL formula, protected prop) is rejected by the
-                // same generic branch.
+                // A JVM formula is removed from SQL and recomputed by its getter. The
+                // native fetcher already expands its stored dependency closure into the
+                // field map, so those inputs are approved below as ordinary leaves.
                 formulas.add(prop);
                 continue;
             }
@@ -172,6 +168,12 @@ final class CacheContentMask {
             }
             leaves.add(prop);
         }
+        // STI subtype content lives in native branches, not the field map; each is a
+        // child node sharing this entity's cache owner.
+        Map<ImmutableType, CacheContentMask> typeBranches = new LinkedHashMap<>();
+        for (Map.Entry<ImmutableType, Fetcher<?>> e : typeBranchFetchers(fetcher).entrySet()) {
+            typeBranches.put(e.getKey(), of(e.getValue(), false, false, cacheOwnerType));
+        }
         return new CacheContentMask(
                 type,
                 embedded,
@@ -179,14 +181,15 @@ final class CacheContentMask {
                 cacheOwnerType,
                 children,
                 leaves,
-                formulas
+                formulas,
+                typeBranches
         );
     }
 
     /**
-     * A copy of this mask with all navigated children dropped, keeping only this node's
-     * own leaves. Used for a bare entity-table selection, whose partial form cannot
-     * express association content selected by other tuple slots.
+     * A copy with all navigated children and branches dropped, keeping only this node's
+     * own leaves (for a bare entity-table selection whose partial form cannot express
+     * association content selected by other tuple slots).
      */
     CacheContentMask withoutChildren() {
         return new CacheContentMask(
@@ -196,24 +199,17 @@ final class CacheContentMask {
                 cacheOwnerType,
                 new LinkedHashMap<>(),
                 leaves,
-                formulas
+                formulas,
+                new LinkedHashMap<>()
         );
     }
 
     /**
-     * Builds the SQL projection for the retained (fresh) read: the caller's projection
-     * with every approved stored leaf of a cacheable node removed. Associations are kept
-     * (as an empty id-only child when all of their content is approved) so their edges
-     * stay SQL-authoritative.
+     * The SQL projection with every approved leaf of a cacheable node removed; associations
+     * stay as edges. Returns {@code null} when reducing would drop a proving join, erase a
+     * field-local filter, corrupt native recursion, or hit an unsupported mask shape.
      *
-     * @return the retained fetcher, or {@code null} when a whitelisted nested association
-     * resolves to an effective SQL join whose reduction to id-only would drop the join
-     * that proves the target exists, when the mask would reduce a reference carrying a
-     * field-local filter and thereby erase its admission boundary, or when the projection
-     * selects a recursive association whose derived child cannot be partially reduced; the
-     * caller declines instead of manufacturing the target or corrupting the recursion
-     * @throws IllegalArgumentException when the mask does not match the selected
-     * fetcher or lists content it does not select
+     * @throws IllegalArgumentException when the mask does not match the selected fetcher
      */
     static Fetcher<?> retainedFetcher(
             Fetcher<?> projection,
@@ -241,7 +237,7 @@ final class CacheContentMask {
         }
         Set<List<ImmutableProp>> keepEmbedded = new LinkedHashSet<>();
         collectZeroingEmbedded(projection, mask, new ArrayList<>(), sqlClient, keepEmbedded);
-        if (hasJoinedNestedMask(projection, mask, new ArrayList<>(), sqlClient)) {
+        if (hasJoinedNestedMask(projection, mask, sqlClient)) {
             return null;
         }
         if (hasReducedFieldLocalFilter(projection, mask)) {
@@ -249,20 +245,19 @@ final class CacheContentMask {
         }
         // Filter the native-expanded field map, not the declaration chain: the stored
         // dependency containers of a removed JVM formula only exist in the expanded map,
-        // so a chain filter would drop them and leave the formula getter unloaded.
+        // so a chain filter would drop them and leave the formula getter unloaded. The
+        // predicate is scoped to the current fetcher's type, so a branch approval is
+        // judged in that branch's scope, not the root's.
         return FetcherFactory.filterExpanded(
                 projection,
-                (prop, path) -> isPrefixOfAny(keepEmbedded, path) ||
-                        !mask.isRemovedAt(sqlClient, path, prop)
+                (type, prop, path) -> isPrefixOfAny(keepEmbedded, path) ||
+                        !mask.isRemovedAt(sqlClient, type, path, prop)
         );
     }
 
     /**
-     * Whether the mask would reduce a reference whose projection carries a field-local
-     * filter to an id-only edge. That reduction erases the filter's admission boundary:
-     * the id-only reference is no longer a filtered target read, so a warm or
-     * freshly-loaded target would bypass the filter and be fabricated from the parent
-     * foreign key. Decline the whole hint rather than erase the boundary.
+     * Whether reducing an approved reference that carries a field-local filter to an id-only
+     * edge would erase its admission boundary; such a hint is declined.
      */
     private static boolean hasReducedFieldLocalFilter(Fetcher<?> projection, CacheContentMask node) {
         for (Field field : projection.getFieldMap().values()) {
@@ -282,6 +277,12 @@ final class CacheContentMask {
                 return true;
             }
         }
+        for (Map.Entry<ImmutableType, CacheContentMask> e : node.typeBranches.entrySet()) {
+            Fetcher<?> branchFetcher = branchProjection(projection, e.getKey());
+            if (branchFetcher != null && hasReducedFieldLocalFilter(branchFetcher, e.getValue())) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -292,6 +293,11 @@ final class CacheContentMask {
             }
             Fetcher<?> childFetcher = field.getChildFetcher();
             if (childFetcher != null && hasRecursiveProjection(childFetcher)) {
+                return true;
+            }
+        }
+        for (Fetcher<?> branch : typeBranchFetchers(projection).values()) {
+            if (hasRecursiveProjection(branch)) {
                 return true;
             }
         }
@@ -308,12 +314,9 @@ final class CacheContentMask {
     }
 
     /**
-     * Records the paths of embedded values whose every selected leaf (including nested
-     * embedded descendants) would be removed, so the retained fetcher must keep their
-     * original SQL columns. Otherwise a zero-field reader would turn a currently present
-     * (or NULL) embedded into an absent one, and a nullable parent whose only columns come
-     * from such a child could itself be fabricated as absent. A nullable embedded's own
-     * leaves are never removed, so it is recorded only through this nested protection.
+     * Records embedded paths whose every selected leaf would be removed, so the retained
+     * fetcher keeps their SQL columns instead of fabricating absence. A nullable embedded's
+     * own leaves are never removed, so it is recorded only through this nested protection.
      */
     private static void collectZeroingEmbedded(
             Fetcher<?> fetcher,
@@ -334,12 +337,8 @@ final class CacheContentMask {
                     // reduced to a zero-field reader.
                     continue;
                 }
-                // Descend through a nullable embedded too: its own columns are never
-                // removed, but a required embedded nested below it can still have every
-                // selected leaf removed. Such a value must keep its SQL columns or a
-                // zero-field reader would turn a currently present value into an absent
-                // one (and, when the nullable parent has no direct column, the parent
-                // would be fabricated as absent as well).
+                // Descend through a nullable embedded too: a required embedded nested below
+                // it can still lose every leaf, which must keep its columns.
                 List<ImmutableProp> childPath = new ArrayList<>(path);
                 childPath.add(prop);
                 if (isContentFullyRemoved(childFetcher, childPath, rootMask, sqlClient)) {
@@ -351,6 +350,11 @@ final class CacheContentMask {
                 childPath.add(prop);
                 collectZeroingEmbedded(childFetcher, rootMask, childPath, sqlClient, out);
             }
+        }
+        // A branch shares the declaring entity's path, so its embedded values use the
+        // same root mask and relative path.
+        for (Fetcher<?> branch : typeBranchFetchers(fetcher).values()) {
+            collectZeroingEmbedded(branch, rootMask, path, sqlClient, out);
         }
     }
 
@@ -375,43 +379,175 @@ final class CacheContentMask {
                 return false;
             }
         }
+        for (Map.Entry<ImmutableType, CacheContentMask> e : mask.typeBranches.entrySet()) {
+            Fetcher<?> branchFetcher = typeBranchFetchers(projection).get(e.getKey());
+            if (branchFetcher == null || !isSubset(branchFetcher, e.getValue())) {
+                return false;
+            }
+        }
         return true;
     }
 
     private boolean isRemovedAt(
             JSqlClientImplementor sqlClient,
+            ImmutableType currentType,
             List<ImmutableProp> path,
             ImmutableProp prop
     ) {
         CacheContentMask node = this;
         for (ImmutableProp step : path) {
-            node = node.children.get(step);
+            node = node.childFor(step);
             if (node == null) {
                 return false;
             }
         }
-        if (node.embedded && node.nullable) {
-            // A nullable embedded's presence is a function of all of its columns;
-            // removing any of them from SQL could fabricate an absent value.
+        // The owning node is the one whose type matches the current fetcher: the node
+        // itself for a base fetcher, the branch node for a type-branch fetcher. A scope
+        // that cannot be resolved unambiguously keeps the column fresh.
+        CacheContentMask owner = node.branchFor(currentType);
+        if (owner == null) {
             return false;
         }
-        if (!node.isCacheableNode(sqlClient)) {
+        if (owner.embedded && owner.nullable) {
+            // A nullable embedded's presence depends on all of its columns; removing any
+            // could fabricate absence.
             return false;
         }
-        if (node.leaves.contains(prop)) {
-            // A whole-embedded leaf carries no nested loadedness; keep its columns.
-            return !prop.isEmbedded(EmbeddedLevel.SCALAR);
+        if (!owner.isCacheableNode(sqlClient)) {
+            return false;
         }
-        return prop.isFormula() &&
-                prop.getSqlTemplate() == null &&
-                node.formulas.contains(prop);
+        if (owner.hasWholeEmbeddedLeaf(prop)) {
+            // Whole-embedded leaves carry no nested loadedness; keep their columns.
+            return false;
+        }
+        if (owner.leaves.contains(prop)) {
+            return true;
+        }
+        if (owner.formulas.contains(prop)) {
+            return prop.getSqlTemplate() == null;
+        }
+        // Branch-only approval must cover every concrete type in this fetcher's scope that
+        // can carry the property; a universal column approved for one subtype alone stays
+        // for its siblings.
+        return owner.approvesEveryCarrier(currentType, prop);
+    }
+
+    /** This node or the subtype branch of the given type, or null when absent. */
+    private CacheContentMask branchFor(ImmutableType branchType) {
+        if (type == branchType) {
+            return this;
+        }
+        for (CacheContentMask branch : typeBranches.values()) {
+            CacheContentMask found = branch.branchFor(branchType);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /** Whether this node or a subtype branch approves {@code prop} as a whole-embedded leaf. */
+    private boolean hasWholeEmbeddedLeaf(ImmutableProp prop) {
+        if (leaves.contains(prop) && prop.isEmbedded(EmbeddedLevel.SCALAR)) {
+            return true;
+        }
+        for (CacheContentMask branch : typeBranches.values()) {
+            if (branch.hasWholeEmbeddedLeaf(prop)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * Whether this node has at least one approved own leaf that can actually be served
-     * from a cache: an entity node with its own object cache, or an embedded node whose
-     * owning entity has one.
+     * Whether every concrete type in {@code scopeType} that can carry {@code prop} approves
+     * it, by this node or a branch assignable from that type (never a sibling union).
      */
+    private boolean approvesEveryCarrier(ImmutableType scopeType, ImmutableProp prop) {
+        InheritanceInfo inheritanceInfo = scopeType.getInheritanceInfo();
+        Collection<ImmutableType> concreteTypes = inheritanceInfo != null ?
+                inheritanceInfo.getConcreteTypes(scopeType) :
+                Collections.<ImmutableType>singleton(scopeType);
+        boolean any = false;
+        for (ImmutableType concreteType : concreteTypes) {
+            if (!prop.getDeclaringType().isAssignableFrom(concreteType)) {
+                continue;
+            }
+            any = true;
+            if (!approvesForConcreteType(concreteType, prop)) {
+                return false;
+            }
+        }
+        return any;
+    }
+
+    private boolean approvesForConcreteType(ImmutableType concreteType, ImmutableProp prop) {
+        if (leaves.contains(prop) || formulas.contains(prop)) {
+            return true;
+        }
+        for (CacheContentMask branch : typeBranches.values()) {
+            if (branch.type.isAssignableFrom(concreteType) &&
+                    branch.approvesForConcreteType(concreteType, prop)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Resolves a path step through this node's children, then through its subtype branches.
+     * When more than one branch can reach the step the owning scope is ambiguous, so the
+     * caller keeps the column fresh rather than trusting a first match.
+     */
+    private CacheContentMask childFor(ImmutableProp step) {
+        CacheContentMask child = children.get(step);
+        if (child != null) {
+            return child;
+        }
+        CacheContentMask found = null;
+        for (CacheContentMask branch : typeBranches.values()) {
+            CacheContentMask candidate = branch.childFor(step);
+            if (candidate != null) {
+                if (found != null) {
+                    return null;
+                }
+                found = candidate;
+            }
+        }
+        return found;
+    }
+
+    /** Native type branches of a fetcher, or empty for a non-native fetcher. */
+    private static Map<ImmutableType, Fetcher<?>> typeBranchFetchers(Fetcher<?> fetcher) {
+        if (fetcher instanceof FetcherImplementor<?>) {
+            return ((FetcherImplementor<?>) fetcher).__getTypeBranchFetcherMap();
+        }
+        return Collections.emptyMap();
+    }
+
+    /**
+     * Subtype branches whose type is assignable from {@code concreteType}, mirroring
+     * {@code ObjectReader.TypeBranchReader}; non-matching branches stay SQL-fresh.
+     */
+    private static List<CacheContentMask> applicableBranches(CacheContentMask node, ImmutableType concreteType) {
+        if (node.typeBranches.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<CacheContentMask> result = new ArrayList<>();
+        for (CacheContentMask branch : node.typeBranches.values()) {
+            if (branch.type.isAssignableFrom(concreteType)) {
+                result.add(branch);
+            }
+        }
+        return result;
+    }
+
+    /** The projection fetcher for a subtype branch, or null when the projection misses it. */
+    private static Fetcher<?> branchProjection(Fetcher<?> projection, ImmutableType branchType) {
+        return typeBranchFetchers(projection).get(branchType);
+    }
+
+    /** Whether this node's own approved leaves can be served from a cache. */
     boolean isCacheableNode(JSqlClientImplementor sqlClient) {
         return isCacheable(sqlClient, cacheOwnerType);
     }
@@ -422,6 +558,11 @@ final class CacheContentMask {
         }
         for (CacheContentMask child : children.values()) {
             if (child.embedded && child.hasStoredLeaves()) {
+                return true;
+            }
+        }
+        for (CacheContentMask branch : typeBranches.values()) {
+            if (branch.hasStoredLeaves()) {
                 return true;
             }
         }
@@ -443,14 +584,17 @@ final class CacheContentMask {
                 return true;
             }
         }
+        for (CacheContentMask branch : typeBranches.values()) {
+            if (branch.hasCacheableLeaves(sqlClient)) {
+                return true;
+            }
+        }
         return false;
     }
 
     /**
-     * Whether any cacheable node in this subtree uses joined inheritance, whose partial
-     * projection needs per-branch physical joins the ordinary path already covers, so the
-     * hint declines. Single-table inheritance is supported because the fresh discriminator
-     * stays SQL and the payload type is validated before shaping.
+     * Whether any cacheable node uses JOINED inheritance, whose partial projection needs
+     * per-branch physical joins; such a hint declines. SINGLE_TABLE stays supported.
      */
     boolean hasJoinedInheritanceCacheable(JSqlClientImplementor sqlClient) {
         if (!embedded && isCacheableNode(sqlClient) && hasStoredLeaves()) {
@@ -464,25 +608,43 @@ final class CacheContentMask {
                 return true;
             }
         }
+        for (CacheContentMask branch : typeBranches.values()) {
+            if (branch.hasJoinedInheritanceCacheable(sqlClient)) {
+                return true;
+            }
+        }
         return false;
     }
 
     /**
-     * Detects a whitelisted nested association whose reduction to id-only would turn an
-     * effective SQL join into a parent-FK reference, losing the join's
-     * existence/nullability/membership semantics. Only a fully removed FAKE-FK join
-     * declines: a real FK still guarantees the target, and a partly retained child keeps
-     * enough target columns for its loader to prove existence. The join decision uses the
-     * original client, not the cache-disabled derived client, because it is the original
-     * configured/effective join whose semantics must be preserved.
+     * Declines a whitelisted nested association whose reduction to id-only would drop an
+     * effective join that proves the target exists. Only a fully removed FAKE-FK join
+     * declines; the decision uses the original (cache-enabled) client's join semantics.
      */
     private static boolean hasJoinedNestedMask(
             Fetcher<?> projection,
-            CacheContentMask rootMask,
-            List<ImmutableProp> path,
+            CacheContentMask node,
             JSqlClientImplementor sqlClient
     ) {
-        for (Map.Entry<ImmutableProp, CacheContentMask> e : rootMask.children.entrySet()) {
+        if (hasJoinedNestedChildren(projection, node, sqlClient)) {
+            return true;
+        }
+        // A branch shares the declaring entity's path; check its associations from the branch.
+        for (CacheContentMask branch : node.typeBranches.values()) {
+            Fetcher<?> branchFetcher = branchProjection(projection, branch.type);
+            if (branchFetcher != null && hasJoinedNestedMask(branchFetcher, branch, sqlClient)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasJoinedNestedChildren(
+            Fetcher<?> projection,
+            CacheContentMask node,
+            JSqlClientImplementor sqlClient
+    ) {
+        for (Map.Entry<ImmutableProp, CacheContentMask> e : node.children.entrySet()) {
             ImmutableProp prop = e.getKey();
             CacheContentMask childNode = e.getValue();
             if (childNode.embedded) {
@@ -492,17 +654,19 @@ final class CacheContentMask {
             if (field == null || field.getChildFetcher() == null) {
                 continue;
             }
-            List<ImmutableProp> childPath = new ArrayList<>(path);
+            // The path is relative to {@code node}; the recursive call rebases its mask,
+            // so it must not carry this node's path forward.
+            List<ImmutableProp> childPath = new ArrayList<>();
             childPath.add(prop);
             boolean fakeUnfiltered =
                     !prop.isTargetForeignKeyReal(sqlClient.getMetadataStrategy()) &&
                             sqlClient.getFilters().getTargetFilter(prop) == null;
             if (fakeUnfiltered &&
                     JoinFetchFieldVisitor.isJoinField(field, sqlClient) &&
-                    isContentFullyRemoved(field.getChildFetcher(), childPath, rootMask, sqlClient)) {
+                    isContentFullyRemoved(field.getChildFetcher(), childPath, node, sqlClient)) {
                 return true;
             }
-            if (hasJoinedNestedMask(field.getChildFetcher(), childNode, childPath, sqlClient)) {
+            if (hasJoinedNestedMask(field.getChildFetcher(), childNode, sqlClient)) {
                 return true;
             }
         }
@@ -510,9 +674,8 @@ final class CacheContentMask {
     }
 
     /**
-     * Whether every selectable field of {@code fetcher} is removed by the mask, so the
-     * retained fetcher would collapse to an id-only reference. An id-only nested join
-     * drops the physical join; an id-only nested SELECT loses the target existence read.
+     * Whether every selectable field is removed, so the retained fetcher would collapse to
+     * an id-only reference and lose the join/existence proof.
      */
     private static boolean isContentFullyRemoved(
             Fetcher<?> fetcher,
@@ -549,11 +712,36 @@ final class CacheContentMask {
                 }
                 continue;
             }
-            if (!rootMask.isRemovedAt(sqlClient, path, prop)) {
+            if (!rootMask.isRemovedAt(sqlClient, fetcher.getImmutableType(), path, prop)) {
+                allRemoved = false;
+            }
+        }
+        for (Fetcher<?> branch : typeBranchFetchers(fetcher).values()) {
+            if (!hasSelectableContent(branch)) {
+                continue;
+            }
+            any = true;
+            if (!isContentFullyRemoved(branch, path, rootMask, sqlClient)) {
                 allRemoved = false;
             }
         }
         return any && allRemoved;
+    }
+
+    /** Whether a fetcher, through its fields or any branch, selects any content. */
+    private static boolean hasSelectableContent(Fetcher<?> fetcher) {
+        for (Field field : fetcher.getFieldMap().values()) {
+            ImmutableProp prop = field.getProp();
+            if (!prop.isId() && !prop.isDiscriminator()) {
+                return true;
+            }
+        }
+        for (Fetcher<?> branch : typeBranchFetchers(fetcher).values()) {
+            if (hasSelectableContent(branch)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isCacheable(JSqlClientImplementor sqlClient, ImmutableType type) {
@@ -573,22 +761,12 @@ final class CacheContentMask {
     // ---------------------------------------------------------------------
 
     /**
-     * Walks the fresh retained graph and records, per cacheable entity node, the
-     * id-to-concrete-type group that must be loaded from that node's object cache.
+     * Walks the fresh retained graph and records, per cacheable node, the id-to-concrete-type
+     * group to load from its cache. An id is proven only when the fresh read establishes that
+     * exact id and concrete type; other ids keep their fresh per-id existence read so a FAKE
+     * FK can never resurrect a warm but deleted target.
      *
-     * <p>A navigated node's id is recorded as proven only when the fresh read itself
-     * establishes that exact id <em>and</em> its concrete type: a real foreign key
-     * without a target filter proves existence, and a polymorphic target additionally
-     * requires its freshly read discriminator. Proof is tracked per exact id, never per
-     * node, because different slots (a joined slot and a navigated FAKE-FK reference) can
-     * reach the same node with different ids. Any unproven id keeps its fresh per-id
-     * existence read, so a FAKE foreign key can never resurrect a warm but deleted target
-     * through a sibling slot's proof.
-     *
-     * @return {@code false} when a cacheable navigated target's concrete type cannot be
-     * established from the fresh read (a polymorphic target reached through a plain FK
-     * whose discriminator was not read); the caller must then fall back to the whole
-     * original query instead of trusting a declared-only type
+     * @return {@code false} when a navigated target's concrete type is not established
      */
     static boolean collectSeeds(
             ImmutableSpi fresh,
@@ -631,6 +809,13 @@ final class CacheContentMask {
                 return false;
             }
         }
+        // Only the branch matching the fresh concrete type applies, sharing this entity's
+        // payload; its navigated children are seeded from the same fresh row.
+        for (CacheContentMask branch : applicableBranches(node, fresh.__type())) {
+            if (!collectSeeds(fresh, branch, seeds, provenSeeds, sqlClient)) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -640,12 +825,9 @@ final class CacheContentMask {
     }
 
     /**
-     * Whether the fresh value establishes its own concrete type. A non-polymorphic type
-     * is exact by construction. Any type that belongs to an inheritance hierarchy is
-     * only concrete when the freshly read value carries its discriminator: an id-only
-     * reference reader manufactures the declared type from the physical FK and must not
-     * be accepted as concrete-type proof, or a stale cached sibling subtype would be
-     * admitted.
+     * Whether the fresh value proves its own concrete type: exact for a non-polymorphic
+     * type, and for an inheritance hierarchy only when its discriminator was read (an
+     * id-only FK reader must not be accepted as subtype proof).
      */
     private static boolean isConcreteTypeEstablished(ImmutableSpi fresh) {
         ImmutableType type = fresh.__type();
@@ -658,9 +840,8 @@ final class CacheContentMask {
 
     /**
      * Validates that every approved leaf missing from the fresh value has a loaded cached
-     * counterpart, and that every navigated entity edge matches its cached target by
-     * concrete type and id. A {@code false} result makes the caller fall back to the whole
-     * original query exactly once.
+     * counterpart and every navigated edge matches its cached target by concrete type and
+     * id; {@code false} makes the caller fall back to the whole original query once.
      */
     static boolean validate(
             ImmutableSpi fresh,
@@ -683,6 +864,16 @@ final class CacheContentMask {
         if (needsCache && cached == null) {
             return false;
         }
+        return validateContent(fresh, node, cached, cachedByNode, sqlClient);
+    }
+
+    private static boolean validateContent(
+            ImmutableSpi fresh,
+            CacheContentMask node,
+            ImmutableSpi cached,
+            Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
+            JSqlClientImplementor sqlClient
+    ) {
         if (cached != null) {
             if (cached.__type() != fresh.__type()) {
                 return false;
@@ -694,6 +885,13 @@ final class CacheContentMask {
                 if (!cached.__isLoaded(leaf.getId())) {
                     return false;
                 }
+            }
+        }
+        // A branch shares this entity's payload, so its leaves validate against the same
+        // cached concrete-type value.
+        for (CacheContentMask branch : applicableBranches(node, fresh.__type())) {
+            if (!validateContent(fresh, branch, cached, cachedByNode, sqlClient)) {
+                return false;
             }
         }
         for (Map.Entry<ImmutableProp, CacheContentMask> e : node.children.entrySet()) {
@@ -743,17 +941,19 @@ final class CacheContentMask {
                 return true;
             }
         }
+        for (CacheContentMask branch : applicableBranches(node, fresh.__type())) {
+            if (hasMissingLeaves(fresh, branch)) {
+                return true;
+            }
+        }
         return false;
     }
 
     /**
-     * Copies only the cacheable approved leaves that SQL did not load into the fresh
-     * value, preserving every fresh scalar, edge and concrete type. Embedded values are
-     * merged leaf-by-leaf so unapproved siblings stay fresh. The cache payload is never
-     * merged as a whole. Finally each approved leaf's and formula's serialization
-     * visibility is restored from the original projection fetcher: a JVM formula's
-     * implicit input stays hidden, but a dependency the projection selected explicitly
-     * stays visible, and the formula itself stays visible.
+     * Copies only the approved leaves SQL did not load into the fresh value (SQL wins
+     * overlaps), merging embedded values leaf-by-leaf and never the cache payload as a
+     * whole. Approved leaves'/formulas' serialization visibility is restored from the
+     * original projection, so explicit selections stay visible and implicit ones hidden.
      */
     static ImmutableSpi overlay(
             ImmutableSpi fresh,
@@ -767,14 +967,23 @@ final class CacheContentMask {
                 fresh.__type(),
                 fresh,
                 true,
-                draft -> overlayNode((DraftSpi) draft, fresh, projection, node, cached, cachedByNode, sqlClient)
+                draft -> overlayContent(
+                        (DraftSpi) draft, fresh, projection, projection, node, cached, cachedByNode, sqlClient
+                )
         );
     }
 
-    private static void overlayNode(
+    /**
+     * {@code entityProjection} is the whole fetcher for this entity (base plus branches),
+     * used for visibility; {@code nodeProjection} is the current base or branch fetcher,
+     * used to descend. Visibility follows the native explicit-over-implicit rule across all
+     * applicable branches, so a branch's implicit field cannot hide a base explicit one.
+     */
+    private static void overlayContent(
             DraftSpi draft,
             ImmutableSpi fresh,
-            Fetcher<?> projection,
+            Fetcher<?> entityProjection,
+            Fetcher<?> nodeProjection,
             CacheContentMask node,
             ImmutableSpi cached,
             Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
@@ -789,16 +998,25 @@ final class CacheContentMask {
                 draft.__set(leaf.getId(), cached.__get(leaf.getId()));
             }
         }
-        // Visibility is a property of the original projection, not of the cache mask: a
-        // stored input the mask approves because a JVM formula needs it is hidden only
-        // when the projection itself left it implicit. Applying both directions keeps a
-        // projection that also selected the input explicitly visible, while a truly
-        // implicit dependency (re-derived in the retained fetcher) is re-hidden.
         for (ImmutableProp leaf : node.leaves) {
-            restoreVisibility(draft, projection, leaf);
+            restoreVisibility(draft, entityProjection, fresh.__type(), leaf);
         }
         for (ImmutableProp formula : node.formulas) {
-            restoreVisibility(draft, projection, formula);
+            restoreVisibility(draft, entityProjection, fresh.__type(), formula);
+        }
+        // A branch shares this payload/draft; overlay from the same cached value through
+        // its own projection while visibility stays scoped to the whole entity.
+        for (CacheContentMask branch : applicableBranches(node, fresh.__type())) {
+            overlayContent(
+                    draft,
+                    fresh,
+                    entityProjection,
+                    branchProjection(nodeProjection, branch.type),
+                    branch,
+                    cached,
+                    cachedByNode,
+                    sqlClient
+            );
         }
         for (Map.Entry<ImmutableProp, CacheContentMask> e : node.children.entrySet()) {
             ImmutableProp prop = e.getKey();
@@ -810,7 +1028,7 @@ final class CacheContentMask {
                 continue;
             }
             CacheContentMask childNode = e.getValue();
-            Fetcher<?> childProjection = childProjection(projection, prop);
+            Fetcher<?> childProjection = childProjection(nodeProjection, prop);
             if (childNode.embedded) {
                 ImmutableSpi cachedChild = cached != null && cached.__isLoaded(prop.getId()) ?
                         (ImmutableSpi) cached.__get(prop.getId()) : null;
@@ -829,11 +1047,42 @@ final class CacheContentMask {
         }
     }
 
-    private static void restoreVisibility(DraftSpi draft, Fetcher<?> projection, ImmutableProp prop) {
-        Field field = projection != null ? projection.getFieldMap().get(prop.getName()) : null;
-        if (field != null) {
-            draft.__show(prop.getId(), !field.isImplicit());
+    /**
+     * Restores a leaf's or formula's serialization visibility from the whole entity
+     * projection: explicit wins over implicit across the base and every applicable branch;
+     * a property absent from that projection is left untouched.
+     */
+    private static void restoreVisibility(
+            DraftSpi draft,
+            Fetcher<?> entityProjection,
+            ImmutableType concreteType,
+            ImmutableProp prop
+    ) {
+        Boolean explicit = explicitSelection(entityProjection, concreteType, prop);
+        if (explicit != null) {
+            draft.__show(prop.getId(), explicit);
         }
+    }
+
+    private static Boolean explicitSelection(Fetcher<?> projection, ImmutableType concreteType, ImmutableProp prop) {
+        Boolean result = null;
+        Field field = projection.getFieldMap().get(prop.getName());
+        if (field != null) {
+            result = !field.isImplicit();
+        }
+        for (Map.Entry<ImmutableType, Fetcher<?>> e : typeBranchFetchers(projection).entrySet()) {
+            if (!e.getKey().isAssignableFrom(concreteType)) {
+                continue;
+            }
+            Boolean branch = explicitSelection(e.getValue(), concreteType, prop);
+            if (Boolean.TRUE.equals(branch)) {
+                return Boolean.TRUE;
+            }
+            if (Boolean.FALSE.equals(branch) && result == null) {
+                result = Boolean.FALSE;
+            }
+        }
+        return result;
     }
 
     private static Fetcher<?> childProjection(Fetcher<?> projection, ImmutableProp prop) {
@@ -853,7 +1102,9 @@ final class CacheContentMask {
                 fresh.__type(),
                 fresh,
                 true,
-                draft -> overlayNode((DraftSpi) draft, fresh, projection, node, cached, cachedByNode, sqlClient)
+                draft -> overlayContent(
+                        (DraftSpi) draft, fresh, projection, projection, node, cached, cachedByNode, sqlClient
+                )
         );
     }
 

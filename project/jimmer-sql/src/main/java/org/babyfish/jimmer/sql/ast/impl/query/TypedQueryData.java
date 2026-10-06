@@ -456,12 +456,14 @@ class TypedQueryData {
             Table<?> table = null;
             if (selection instanceof FetcherSelection<?>) {
                 Fetcher<?> fetcher = ((FetcherSelection<?>) selection).getFetcher();
-                if (hasNonIdFieldOrTypeBranch(fetcher)) {
+                // Only the native selection exposes its table; any other shape leaves the
+                // id-only expression unresolved, so the caller keeps the full projection.
+                if (hasNonIdFieldOrTypeBranch(fetcher) && selection instanceof FetcherSelectionImpl<?>) {
                     table = ((FetcherSelectionImpl<?>) selection).getTable();
                 }
             } else if (selection instanceof Table<?>){
                 table = (Table<?>) selection;
-            } else if (selection instanceof KTable) {
+            } else if (selection instanceof KTable<?>) {
                 table = ((KTable<?>) selection).getImplementor();
             }
             if (table != null && table.getImmutableType().getSelectableProps().size() > 1) {

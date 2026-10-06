@@ -88,37 +88,72 @@ public class FetcherFactory {
     }
 
     /**
-     * Like {@link #filter}, but walks the fetcher's native-expanded field map - which
-     * includes the implicit dependency fields {@link FetcherImpl#getFieldMap()} synthesizes
-     * for a JVM formula - instead of the raw declaration chain. A caller that removes a
-     * formula must use this: filtering the declaration chain alone silently drops the
-     * formula's stored dependency containers, because they only exist in the expanded map.
+     * Like {@link #filter}, but walks the native-expanded field map (including the implicit
+     * dependency fields of a JVM formula) instead of the raw declaration chain, and filters
+     * native subtype branches with the same predicate. The predicate receives the current
+     * fetcher's {@link ImmutableType} so a branch-scoped decision is made in that branch's
+     * scope rather than the root's.
      */
     public static <E> Fetcher<E> filterExpanded(
             Fetcher<E> self,
-            BiPredicate<ImmutableProp, List<ImmutableProp>> propPredicate
+            PropFilter propPredicate
     ) {
         if (self == null) {
+            return null;
+        }
+        // Reduction rebuilds the fetcher tree and requires the native implementation at
+        // every node, including children and branches. A forwarding or custom fetcher is
+        // declined so the caller keeps the whole fresh projection; the ordinary scalar
+        // fetch contract is untouched.
+        if (!isNativeFetcherTree(self)) {
             return null;
         }
         return filterExpandedImpl((FetcherImpl<E>) self, propPredicate, new LinkedList<>());
     }
 
+    private static boolean isNativeFetcherTree(Fetcher<?> fetcher) {
+        if (!(fetcher instanceof FetcherImpl)) {
+            return false;
+        }
+        for (Field field : fetcher.getFieldMap().values()) {
+            Fetcher<?> child = field.getChildFetcher();
+            if (child != null && !isNativeFetcherTree(child)) {
+                return false;
+            }
+        }
+        for (Fetcher<?> branch : ((FetcherImplementor<?>) fetcher).__getTypeBranchFetcherMap().values()) {
+            if (!isNativeFetcherTree(branch)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static <E> FetcherImpl<E> filterExpandedImpl(
             FetcherImpl<E> self,
-            BiPredicate<ImmutableProp, List<ImmutableProp>> propPredicate,
+            PropFilter propPredicate,
             LinkedList<ImmutableProp> path
     ) {
         FetcherImpl<E> result = new FetcherImpl<>(self.getJavaClass());
+        // filterExpanded proved the whole tree native, so these casts are total.
         for (Fetcher<?> typeBranchFetcher : self.__getTypeBranchFetcherMap().values()) {
-            result = (FetcherImpl<E>) result.__forType(typeBranchFetcher);
+            FetcherImpl<?> filteredTypeBranchFetcher = filterExpandedImpl(
+                    (FetcherImpl<?>) typeBranchFetcher,
+                    propPredicate,
+                    path
+            );
+            result = (FetcherImpl<E>) result.__forType(filteredTypeBranchFetcher);
         }
         for (Field field : self.getFieldMap().values()) {
             ImmutableProp prop = field.getProp();
             if (prop.isId()) {
                 continue;
             }
-            if (propPredicate != null && !propPredicate.test(prop, Collections.unmodifiableList(path))) {
+            if (propPredicate != null && !propPredicate.test(
+                    self.getImmutableType(),
+                    prop,
+                    Collections.unmodifiableList(path)
+            )) {
                 continue;
             }
             path.addLast(prop);

@@ -62,14 +62,20 @@ import org.babyfish.jimmer.sql.model.inheritance.AdministratorFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.AdministratorTable;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.Client;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientProject;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientProjectFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientProjectTable;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientTable;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.Organization;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationDraft;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationProject;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationProjectFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationProjectTable;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.Person;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.PersonDraft;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.PersonFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.dto.ClientDefaultView;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.dto.ClientImplicitCatchAllView;
 import org.babyfish.jimmer.sql.model.issue1252.TreeNode2;
 import org.babyfish.jimmer.sql.model.issue1252.TreeNode2Fetcher;
@@ -82,6 +88,7 @@ import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.tuple.EntityTuple;
 import org.babyfish.jimmer.sql.tuple.EntityTupleMapper;
+import org.babyfish.jimmer.support.ProxyRecorder;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -130,6 +137,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     private static final List<Long> CLIENT_IDS = Arrays.asList(100L, 101L);
 
     private static final AtomicInteger STORE_CONVERSIONS = new AtomicInteger();
+
+    private static final AtomicInteger CLIENT_CONVERSIONS = new AtomicInteger();
 
     private static final String CLIENT_SKELETON_SQL =
             "select tb_1_.ID, tb_1_.CLIENT_TYPE from CLIENT tb_1_ where tb_1_.ID in (?, ?)";
@@ -936,10 +945,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         return rows;
     }
 
-    // useObjectCache(Fetcher) approves a path-specific whitelist of stored display
-    // leaves. Warm the cache, mutate the DB behind it (raw JDBC, no invalidation),
-    // then assert only whitelisted content may be stale.
-
     @Test
     public void testContentFetcherStaleApprovedLeafKeepsUnapprovedPropsFresh() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -962,15 +967,11 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            // The approved stored leaf is served from the (stale) object cache.
             assertEquals("O'REILLY", rows.get(0).name());
-            // Unapproved props and the optimistic-lock version stay fresh SQL.
             assertEquals("STALE-DB-WEBSITE", rows.get(0).website());
             assertEquals(7, rows.get(0).version());
             assertCacheTouched(storeCache, oreillyId);
 
-            // The same public DTO shape is preserved; the converter runs after the
-            // whitelisted leaf is overlaid.
             clearExecutions();
             List<ReusableBookStoreView> views = new ArrayList<>();
             jdbc(con -> views.addAll(
@@ -1014,8 +1015,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     .findByIds(BookStore.class, Collections.singletonList(oreillyId));
         });
         try {
-            // The child display leaf is stale in the cache while the parent FK in
-            // SQL still selects the same target: the edge/id is fresh, the name cached.
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "STALE-DB-NAME", oreillyId);
             clearExecutions();
             Book book = hintedBook(client, table);
@@ -1025,16 +1024,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals("O'REILLY", book.store().name());
             assertCacheTouched(storeCache, oreillyId);
 
-            // The current parent FK now selects a different target. The stale cached
-            // edge must never be used: the fresh edge wins even though the new
-            // target's content is not in the cache.
             rawUpdate("update BOOK set STORE_ID = ? where ID = ?", manningId, learningGraphQLId1);
             clearExecutions();
             Book moved = hintedBook(client, table);
             assertEquals(manningId, moved.store().id());
             assertEquals("MANNING", moved.store().name());
 
-            // A cleared nullable edge stays null.
             rawUpdate("update BOOK set STORE_ID = null where ID = ?", learningGraphQLId1);
             clearExecutions();
             Book cleared = hintedBook(client, table);
@@ -1049,10 +1044,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
 
     @Test
     public void testContentFetcherChildCacheWithoutRootCache() {
-        // Only the child reference type has an object cache; the root Book has none.
-        // There is no global prerequisite that the root itself be cacheable: root
-        // display fields must stay fresh SQL while the child display leaf is served
-        // from the child cache with the current SQL edge.
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == BookStore.class ? storeCache : null);
         BookTable table = BookTable.$;
@@ -1063,9 +1054,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             clearExecutions();
             Book book = hintedBook(client, table);
             assertEquals(learningGraphQLId1, book.id());
-            // Root display field stays SQL because the root has no cache.
             assertEquals("Learning GraphQL", book.name());
-            // Child edge/id stays fresh SQL; child display leaf comes from its cache.
             assertEquals(oreillyId, book.store().id());
             assertEquals("O'REILLY", book.store().name());
             assertCacheTouched(storeCache, oreillyId);
@@ -1113,8 +1102,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             rawUpdate("update BOOK set STORE_ID = ? where ID = ?", manningId, learningGraphQLId1);
             clearExecutions();
             Book book = hintedBook(client, table);
-            // The target admission filter stays fresh SQL, so an invisible target is
-            // never admitted from a warm cache entry.
             assertNull(book.store(), "a filtered-out target must not be served from the object cache");
         } finally {
             rawUpdate("update BOOK set STORE_ID = ? where ID = ?", oreillyId, learningGraphQLId1);
@@ -1145,8 +1132,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .useObjectCache(AuthorFetcher.$.firstName())
                             .execute(con)
             ));
-            // No selected formula re-adds the dependency, so the approved stored leaf
-            // is served stale from the cache.
             assertEquals(1, rows.size());
             assertEquals("Alex", rows.get(0).firstName());
             assertCacheTouched(authorCache, alexId);
@@ -1182,11 +1167,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            // The unwhitelisted SQL formula keeps the current SQL dependency values,
-            // so it stays fresh even though the mask lists one of its stored columns.
             assertEquals("Zed Zulu", rows.get(0).fullName2());
-            // The whitelisted stored leaf itself may still be served stale; the SQL
-            // formula's fresh value overlaps it independently.
             assertEquals("Alex", rows.get(0).firstName());
         } finally {
             rawUpdate(
@@ -1220,12 +1201,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            // The approved JVM formula approves its stored dependency closure, so the
-            // getter recomputes from the cached inputs and the whole formula is stale.
             assertEquals("Alex Banks", rows.get(0).fullName());
-            // Visibility must match the original fetcher: the formula is shown, its
-            // implicit stored dependencies are loaded but hidden.
-            ImmutableSpi spi = (ImmutableSpi) rows.get(0);
+            ImmutableSpi spi = assertInstanceOf(ImmutableSpi.class, rows.get(0));
             assertTrue(spi.__isVisible("fullName"), "the approved formula must stay visible");
             assertTrue(spi.__isLoaded("firstName"), "the implicit dependency must still be loaded");
             assertFalse(spi.__isVisible("firstName"), "an implicit formula dependency must stay hidden");
@@ -1262,8 +1239,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            // The JVM formula is not approved, so SQL wins for its dependency closure
-            // even though one dependency is whitelisted: both stay current.
             assertEquals("Zed Zulu", rows.get(0).fullName());
             assertEquals("Zed", rows.get(0).firstName());
         } finally {
@@ -1275,11 +1250,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * An approved formula's nested embedded closure is expanded by the native fetcher,
-     * not a direct-scalar-only expander. An unapproved sibling keeps the required
-     * embedded present, so the approved location.host is genuinely served from cache.
-     */
     @Test
     public void testContentFetcherApprovedJvmFormulaAcceptsEmbeddedDependencyClosure() {
         MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
@@ -1305,9 +1275,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, rows.size());
             Machine machine = rows.get(0);
             assertEquals(1L, machine.id());
-            // The formula recomputes from its dependency closure: the approved
-            // location.host is served from the cache while the nullable
-            // secondaryLocation.host stays fresh SQL.
             assertEquals(Arrays.asList("localhost", "fresh-secondary-host"), machine.hosts());
             assertEquals(
                     "localhost",
@@ -1328,11 +1295,11 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     machine.secondaryLocation().host(),
                     "a nullable embedded dependency stays fresh SQL"
             );
-            ImmutableSpi machineSpi = (ImmutableSpi) machine;
+            ImmutableSpi machineSpi = assertInstanceOf(ImmutableSpi.class, machine);
             assertTrue(machineSpi.__isVisible("hosts"), "the approved formula must stay visible");
             assertTrue(machineSpi.__isVisible("location"), "an explicitly selected dependency must stay visible");
             assertFalse(machineSpi.__isVisible("secondaryLocation"), "an implicit formula dependency stays hidden");
-            ImmutableSpi locationSpi = (ImmutableSpi) machine.location();
+            ImmutableSpi locationSpi = assertInstanceOf(ImmutableSpi.class, machine.location());
             assertFalse(locationSpi.__isVisible("host"), "an implicit formula dependency stays hidden");
             assertTrue(locationSpi.__isVisible("port"), "an explicitly selected sibling stays visible");
             assertCacheTouched(machineCache, 1L);
@@ -1345,18 +1312,11 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A formula-only projection declares no dependency container explicitly: the implicit
-     * location/secondaryLocation exist only in the native field map. The retained read must
-     * load them so the getter evaluates the complete current shape, and fresh presence must
-     * stay authoritative over the warm container payload.
-     */
     @Test
     public void testContentFetcherApprovedJvmFormulaOnlyKeepsImplicitEmbeddedClosure() {
         MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == Machine.class ? machineCache : null);
         MachineTable table = MachineTable.$;
-        // Warm the cache with the original shape: secondaryLocation absent.
         jdbc(con -> client.getEntities().forConnection(con)
                 .findByIds(Machine.class, Collections.singletonList(1L)));
         machineCache.clearHistory();
@@ -1366,7 +1326,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     "update MACHINE set HOST = ?, PORT = ?, SECONDARY_HOST = ?, SECONDARY_PORT = ? where ID = ?",
                     "fresh-host", 9090, "fresh-secondary-host", 7070, 1L
             );
-            // The cache-disabled ordinary query is the display fact for the current shape.
             List<Machine> fresh = new ArrayList<>();
             jdbc(con -> fresh.addAll(
                     oracle.createQuery(table)
@@ -1389,25 +1348,21 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, rows.size(), "the ordinary root membership must be preserved");
             Machine machine = rows.get(0);
             assertEquals(1L, machine.id());
-            // The implicit containers must be loaded, not fabricated from the cached
-            // absence: the current SQL presence wins.
             assertNotNull(machine.location(), "the implicit required container must be loaded");
             assertNotNull(machine.secondaryLocation(), "fresh presence must not be fabricated absent");
             assertEquals("fresh-secondary-host", machine.secondaryLocation().host());
             List<String> hosts = machine.hosts();
             assertEquals(2, hosts.size());
             assertEquals("fresh-secondary-host", hosts.get(1));
-            // The approved closure leaf may be served from the cache or kept fresh in SQL
-            // when the required embedded forces its columns to be retained.
             assertTrue(
                     "fresh-host".equals(hosts.get(0)) || "localhost".equals(hosts.get(0)),
                     "the approved closure leaf must be a legitimate current or cached value: " + hosts
             );
-            ImmutableSpi machineSpi = (ImmutableSpi) machine;
+            ImmutableSpi machineSpi = assertInstanceOf(ImmutableSpi.class, machine);
             assertTrue(machineSpi.__isVisible("hosts"), "the approved formula must stay visible");
             assertFalse(machineSpi.__isVisible("location"), "an implicit dependency container stays hidden");
             assertFalse(machineSpi.__isVisible("secondaryLocation"), "an implicit dependency container stays hidden");
-            ImmutableSpi locationSpi = (ImmutableSpi) machine.location();
+            ImmutableSpi locationSpi = assertInstanceOf(ImmutableSpi.class, machine.location());
             assertFalse(locationSpi.__isVisible("host"), "an implicit dependency leaf stays hidden");
         } finally {
             rawUpdate(
@@ -1418,11 +1373,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A field-local to-one filter is an admission rule, not a global filter: reducing the
-     * reference to id-only or hydrating it from a warm cache must not bypass it. Only the
-     * target type has an object cache; the root has none.
-     */
     @Test
     public void testContentFetcherFieldLocalReferenceFilterAdmissionKeepsRootMembershipFresh() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -1438,7 +1388,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                         .filter(args -> args.where(args.getTable().id().eq(manningId)))
         );
         try {
-            // Ordinary: the local filter excludes the FK target.
             List<Book> fresh = new ArrayList<>();
             jdbc(con -> fresh.addAll(
                     oracle.createQuery(table)
@@ -1460,7 +1409,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, rows.size(), "the root membership and full page must be preserved");
             assertEquals(learningGraphQLId1, rows.get(0).id());
             assertNull(rows.get(0).store(), "a warm target must not be admitted past the local field filter");
-            // Non-noop control: the same filter admits the matching FK target.
             List<Book> allowed = new ArrayList<>();
             jdbc(con -> allowed.addAll(
                     client.createQuery(table)
@@ -1486,8 +1434,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 .findByIds(Machine.class, Collections.singletonList(1L)));
         machineCache.clearHistory();
         try {
-            // Both the approved embedded host and the unapproved sibling port change
-            // behind the cache.
             rawUpdate("update MACHINE set HOST = ?, PORT = ? where ID = ?", "stale-host", 9090, 1L);
             clearExecutions();
             List<Machine> rows = new ArrayList<>();
@@ -1503,8 +1449,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            // Only the approved embedded leaf is served stale; its unapproved sibling
-            // stays fresh SQL instead of being copied as part of a whole embedded value.
             assertEquals("localhost", rows.get(0).location().host());
             assertEquals(9090, rows.get(0).location().port().intValue());
             assertCacheTouched(machineCache, 1L);
@@ -1525,14 +1469,11 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "STALE-ROOT", 2L);
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "STALE-PARENT", 1L);
 
-            // Whitelist only the root path: the root leaf is cached, the same-type
-            // parent path stays fresh.
             clearExecutions();
             TreeNode2 rootOnly = hintedNode(client, table, TreeNode2Fetcher.$.name());
             assertEquals("Food", rootOnly.name());
             assertEquals("STALE-PARENT", rootOnly.parent().name());
 
-            // Whitelist only the parent path: the very same leaf name is path-specific.
             clearExecutions();
             TreeNode2 parentOnly = hintedNode(
                     client, table, TreeNode2Fetcher.$.parent(TreeNode2Fetcher.$.name())
@@ -1555,7 +1496,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         BookStoreTable table = BookStoreTable.$;
         jdbc(con -> client.getEntities().forConnection(con)
                 .findByIds(BookStore.class, Collections.singletonList(oreillyId)));
-        // A stored negative entry (an explicit null), distinct from an eviction.
         storeCache.put(oreillyId, null);
         Function<BookStore, BookStore> converter = store -> {
             STORE_CONVERSIONS.incrementAndGet();
@@ -1575,8 +1515,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                         .useObjectCache(BookStoreFetcher.$.name())
                         .execute(con)
         ));
-        // The unresolved whitelisted leaf invalidates the whole query exactly once:
-        // the page is never shortened and the DTO converter runs once per row.
         assertEquals(1, rows.size());
         assertEquals("O'REILLY", rows.get(0).name());
         assertEquals(1, STORE_CONVERSIONS.get());
@@ -1602,8 +1540,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(2, rows.size());
-            // A warm single-table row is still cacheable: the approved NAME is served
-            // stale while the concrete discriminator type stays current SQL.
             Organization organization = assertInstanceOf(Organization.class, rows.get(0));
             assertEquals("Acme", organization.name());
             assertInstanceOf(Person.class, rows.get(1));
@@ -1620,7 +1556,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
         ClientTable table = ClientTable.$;
         jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
-        // id 100 is an Organization in the database, but the cache holds a Person.
         clientCache.put(100L, PersonDraft.$.produce(draft -> draft.setId(100L)));
         clientCache.clearHistory();
         clearExecutions();
@@ -1635,9 +1570,611 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertEquals(2, rows.size());
         assertInstanceOf(Organization.class, rows.get(0));
         assertInstanceOf(Person.class, rows.get(1));
-        // The polymorphic mask path must attempt the cache and reject the cached
-        // concrete type, not decline the whole shape before consulting the cache.
         assertCacheTouched(clientCache, 100L);
+    }
+
+    @Test
+    public void testContentFetcherBranchMaskServesApprovedSubtypeLeaf() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        Fetcher<Client> projection =
+                ClientFetcher.$
+                        .name()
+                        .forType(OrganizationFetcher.$.taxCode())
+                        .forType(PersonFetcher.$.firstName().lastName());
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate(
+                    "update CLIENT set NAME = ?, FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                    "STALE-101", "STALE-FIRST", "STALE-LAST", 101L
+            );
+            clearExecutions();
+            List<Client> branchOnly = new ArrayList<>();
+            jdbc(con -> branchOnly.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, branchOnly.size());
+            Organization branchOrganization = assertInstanceOf(Organization.class, branchOnly.get(0));
+            assertEquals("ACME-001", branchOrganization.taxCode());
+            assertEquals("STALE-100", branchOrganization.name());
+            Person branchPerson = assertInstanceOf(Person.class, branchOnly.get(1));
+            assertEquals("STALE-101", branchPerson.name());
+            assertEquals("STALE-FIRST", branchPerson.firstName());
+            assertEquals("STALE-LAST", branchPerson.lastName());
+            assertCacheTouched(clientCache, 100L);
+
+            clearExecutions();
+            List<Client> mixed = new ArrayList<>();
+            jdbc(con -> mixed.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(
+                                    ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode())
+                            )
+                            .execute(con)
+            ));
+            assertEquals(2, mixed.size());
+            Organization mixedOrganization = assertInstanceOf(Organization.class, mixed.get(0));
+            assertEquals("Acme", mixedOrganization.name());
+            assertEquals("ACME-001", mixedOrganization.taxCode());
+            Person mixedPerson = assertInstanceOf(Person.class, mixed.get(1));
+            assertEquals("Bob", mixedPerson.name());
+            assertEquals("STALE-FIRST", mixedPerson.firstName());
+            assertCacheTouched(clientCache, 100L);
+        } finally {
+            rawUpdate(
+                    "update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001', FIRST_NAME = null, LAST_NAME = null where ID = ?",
+                    100L
+            );
+            rawUpdate(
+                    "update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob', LAST_NAME = 'Brown' where ID = ?",
+                    101L
+            );
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchMaskDtoAndTupleParity() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ? where ID = ?", "STALE-101", 101L);
+            clearExecutions();
+            List<Tuple2<ClientImplicitCatchAllView, String>> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(
+                                    table.fetch(ClientImplicitCatchAllView.class),
+                                    table.type()
+                            )
+                            .useObjectCache(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            assertEquals("ORG", rows.get(0).get_2());
+            assertEquals("Person", rows.get(1).get_2());
+            ClientImplicitCatchAllView.Organization organization =
+                    assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0).get_1());
+            assertEquals(100L, organization.getId());
+            assertEquals("Acme", organization.getName());
+            assertEquals("ACME-001", organization.getTaxCode());
+            ClientImplicitCatchAllView.Default person =
+                    assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1).get_1());
+            assertEquals(101L, person.getId());
+            assertEquals("Bob", person.getName());
+
+            clearExecutions();
+            Function<Client, Client> converter = value -> {
+                CLIENT_CONVERSIONS.incrementAndGet();
+                return value;
+            };
+            CLIENT_CONVERSIONS.set(0);
+            List<Client> converted = new ArrayList<>();
+            jdbc(con -> converted.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(new FetcherSelectionImpl<Client>(
+                                    table,
+                                    ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()),
+                                    converter
+                            ))
+                            .useObjectCache(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, converted.size());
+            assertEquals(2, CLIENT_CONVERSIONS.get());
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchWrongConcreteTypeAndSubtypeChangeFallBack() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        Fetcher<Client> projection =
+                ClientFetcher.$
+                        .name()
+                        .forType(OrganizationFetcher.$.taxCode())
+                        .forType(PersonFetcher.$.firstName().lastName());
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            // The DB row is an Organization; the cache holds a Person.
+            clientCache.put(100L, PersonDraft.$.produce(draft -> draft.setId(100L)));
+            clearExecutions();
+            List<Client> wrong = new ArrayList<>();
+            jdbc(con -> wrong.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, wrong.size());
+            Organization organization = assertInstanceOf(Organization.class, wrong.get(0));
+            assertEquals("Acme", organization.name());
+            assertEquals("ACME-001", organization.taxCode());
+            assertInstanceOf(Person.class, wrong.get(1));
+            assertCacheTouched(clientCache, 100L);
+
+            clientCache.put(
+                    100L,
+                    OrganizationDraft.$.produce(draft -> {
+                        draft.setId(100L);
+                        draft.setName("Acme");
+                        draft.setTaxCode("ACME-001");
+                    })
+            );
+            rawUpdate(
+                    "update CLIENT set CLIENT_TYPE = ?, FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                    "Person", "Changed", "Person", 100L
+            );
+            clearExecutions();
+            List<Client> changed = new ArrayList<>();
+            jdbc(con -> changed.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, changed.size());
+            // Fresh discriminator wins over the cached Organization branch.
+            Person changedPerson = assertInstanceOf(Person.class, changed.get(0));
+            assertEquals("Changed", changedPerson.firstName());
+            assertInstanceOf(Person.class, changed.get(1));
+        } finally {
+            rawUpdate(
+                    "update CLIENT set CLIENT_TYPE = 'ORG', NAME = 'Acme', TAX_CODE = 'ACME-001', " +
+                            "FIRST_NAME = null, LAST_NAME = null where ID = ?",
+                    100L
+            );
+            rawUpdate(
+                    "update CLIENT set CLIENT_TYPE = 'Person', NAME = 'Bob', FIRST_NAME = 'Bob', LAST_NAME = 'Brown' " +
+                            "where ID = ?",
+                    101L
+            );
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchMaskRejectsProtectedAndUnselectedContent() {
+        org.babyfish.jimmer.sql.model.inheritance.logical.singletable.ClientTable logicalTable =
+                org.babyfish.jimmer.sql.model.inheritance.logical.singletable.ClientTable.$;
+        IllegalArgumentException[] logicalFailure = new IllegalArgumentException[1];
+        jdbc(con -> logicalFailure[0] = assertThrows(
+                IllegalArgumentException.class,
+                () -> sqlClient.createQuery(logicalTable)
+                        .where(logicalTable.id().eq(400L))
+                        .select(logicalTable.fetch(
+                                org.babyfish.jimmer.sql.model.inheritance.logical.singletable.ClientFetcher.$
+                                        .name()
+                                        .forType(
+                                                org.babyfish.jimmer.sql.model.inheritance.logical.singletable.OrganizationFetcher.$
+                                                        .taxCode()
+                                                        .deleted()
+                                        )
+                        ))
+                        .useObjectCache(
+                                org.babyfish.jimmer.sql.model.inheritance.logical.singletable.ClientFetcher.$
+                                        .forType(
+                                                org.babyfish.jimmer.sql.model.inheritance.logical.singletable.OrganizationFetcher.$
+                                                        .deleted()
+                                        )
+                        )
+                        .execute(con)
+        ));
+        assertNotNull(logicalFailure[0]);
+        assertTrue(
+                logicalFailure[0].getMessage().contains("protected property"),
+                logicalFailure[0].getMessage()
+        );
+
+        org.babyfish.jimmer.sql.model.inheritance.joinedtable.cascade.ClientTable versionTable =
+                org.babyfish.jimmer.sql.model.inheritance.joinedtable.cascade.ClientTable.$;
+        IllegalArgumentException[] versionFailure = new IllegalArgumentException[1];
+        jdbc(con -> versionFailure[0] = assertThrows(
+                IllegalArgumentException.class,
+                () -> sqlClient.createQuery(versionTable)
+                        .where(versionTable.id().eq(1L))
+                        .select(versionTable.fetch(
+                                org.babyfish.jimmer.sql.model.inheritance.joinedtable.cascade.ClientFetcher.$
+                                        .name()
+                                        .forType(
+                                                org.babyfish.jimmer.sql.model.inheritance.joinedtable.cascade.OrganizationFetcher.$
+                                                        .version()
+                                        )
+                        ))
+                        .useObjectCache(
+                                org.babyfish.jimmer.sql.model.inheritance.joinedtable.cascade.ClientFetcher.$
+                                        .forType(
+                                                org.babyfish.jimmer.sql.model.inheritance.joinedtable.cascade.OrganizationFetcher.$
+                                                        .version()
+                                        )
+                        )
+                        .execute(con)
+        ));
+        assertNotNull(versionFailure[0]);
+        assertTrue(
+                versionFailure[0].getMessage().contains("protected property"),
+                versionFailure[0].getMessage()
+        );
+
+        ClientTable table = ClientTable.$;
+        IllegalArgumentException[] subsetFailure = new IllegalArgumentException[1];
+        jdbc(con -> subsetFailure[0] = assertThrows(
+                IllegalArgumentException.class,
+                () -> sqlClient.createQuery(table)
+                        .where(table.id().eq(100L))
+                        .select(table.fetch(ClientFetcher.$.name()))
+                        .useObjectCache(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()))
+                        .execute(con)
+        ));
+        assertNotNull(subsetFailure[0]);
+        assertTrue(
+                subsetFailure[0].getMessage().contains("does not select"),
+                subsetFailure[0].getMessage()
+        );
+    }
+
+    @Test
+    public void testContentFetcherBranchMaskKeepsUniversallySelectedBaseNameFresh() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        Fetcher<Client> projection =
+                ClientFetcher.$
+                        .name()
+                        .forType(OrganizationFetcher.$.name().taxCode())
+                        .forType(PersonFetcher.$.firstName());
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ?, FIRST_NAME = ? where ID = ?", "STALE-101", "STALE-FIRST", 101L);
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.name().taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            // A universal base column stays fresh; fresh SQL wins the branch overlap.
+            assertEquals("STALE-100", organization.name());
+            assertEquals("ACME-001", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals("STALE-101", person.name());
+            assertEquals("STALE-FIRST", person.firstName());
+            assertCacheTouched(clientCache, 100L);
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchInheritedLeafApprovalKeepsSiblingsFresh() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        Fetcher<Client> projection =
+                ClientFetcher.$
+                        .forType(OrganizationFetcher.$.name().taxCode())
+                        .forType(PersonFetcher.$.firstName());
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ?, FIRST_NAME = ? where ID = ?", "STALE-101", "STALE-FIRST", 101L);
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.name()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            assertEquals("Acme", organization.name());
+            assertEquals("STALE-TAX-100", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals("STALE-FIRST", person.firstName());
+            assertCacheTouched(clientCache, 100L);
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchDefaultDtoSqlReduction() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ? where ID = ?", "STALE-101", 101L);
+            clearExecutions();
+            List<ClientDefaultView> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(ClientDefaultView.class))
+                            .useObjectCache(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            ClientDefaultView.Organization organization =
+                    assertInstanceOf(ClientDefaultView.Organization.class, rows.get(0));
+            assertEquals(100L, organization.getId());
+            assertEquals("Acme", organization.getName());
+            assertEquals("ACME-001", organization.getTaxCode());
+            ClientDefaultView.Other person =
+                    assertInstanceOf(ClientDefaultView.Other.class, rows.get(1));
+            assertEquals(101L, person.getId());
+            assertEquals("Bob", person.getName());
+            String sql = getExecutions().get(0).getSql();
+            assertFalse(sql.contains("tb_1_.NAME"), sql);
+            assertFalse(sql.contains("TAX_CODE"), sql);
+            assertCacheTouched(clientCache, 100L);
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherBranchLateBadPayloadFallsBackBeforeConverter() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        Fetcher<Client> projection =
+                ClientFetcher.$
+                        .name()
+                        .forType(OrganizationFetcher.$.taxCode())
+                        .forType(PersonFetcher.$.firstName().lastName());
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            // The later id's warm payload is incomplete (no name loaded).
+            clientCache.put(101L, PersonDraft.$.produce(draft -> draft.setId(101L)));
+            Function<Client, Client> converter = value -> {
+                CLIENT_CONVERSIONS.incrementAndGet();
+                return value;
+            };
+            CLIENT_CONVERSIONS.set(0);
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(new FetcherSelectionImpl<Client>(
+                                    table,
+                                    projection,
+                                    converter
+                            ))
+                            .useObjectCache(ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            assertEquals("Acme", organization.name());
+            assertEquals("ACME-001", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals("Bob", person.name());
+            assertEquals("Bob", person.firstName());
+            assertEquals(2, CLIENT_CONVERSIONS.get());
+            assertCacheTouched(clientCache, 100L);
+        } finally {
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @Test
+    public void testContentFetcherNestedPolymorphicChildBranchStaysConcreteTypeScoped() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientProjectTable table = ClientProjectTable.$;
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+        try {
+            rawUpdate("update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?", "STALE-100", "STALE-TAX-100", 100L);
+            rawUpdate("update CLIENT set NAME = ? where ID = ?", "STALE-101", 101L);
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(Arrays.asList(1000L, 1002L)))
+                            .orderBy(table.id())
+                            .select(table.client().fetch(
+                                    ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode())
+                            ))
+                            .useObjectCache(
+                                    ClientProjectFetcher.$.client(
+                                            ClientFetcher.$.name().forType(OrganizationFetcher.$.taxCode())
+                                    )
+                            )
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            assertEquals("Acme", organization.name());
+            assertEquals("ACME-001", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals("Bob", person.name());
+            assertCacheTouched(clientCache, 100L);
+        } finally {
+            rawUpdate("update CLIENT set NAME = 'Acme', TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate("update CLIENT set NAME = 'Bob' where ID = ?", 101L);
+            clientCache.delete(100L);
+            clientCache.delete(101L);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testContentFetcherUnsupportedPublicFetcherProjectionDeclinesSafely() {
+        MapCache<Book> bookCache = new MapCache<>(ImmutableType.get(Book.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Book.class ? bookCache : null);
+        BookTable table = BookTable.$;
+        Object forwardProxy = ProxyRecorder.of(Fetcher.class)
+                .delegatesTo(BookFetcher.$.name())
+                .proxy();
+        // Fetcher.class.cast is the checked narrowing; the element cast is erased generics.
+        Fetcher<Book> forward = (Fetcher<Book>) Fetcher.class.cast(forwardProxy);
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Book.class, Collections.singletonList(learningGraphQLId1)));
+        bookCache.clearHistory();
+        try {
+            rawUpdate("update BOOK set NAME = ? where ID = ?", "FRESH-NAME", learningGraphQLId1);
+            clearExecutions();
+            List<Book> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(learningGraphQLId1))
+                            .select(table.fetch(forward))
+                            .useObjectCache(BookFetcher.$.name())
+                            .execute(con)
+            ));
+            assertEquals(1, rows.size());
+            assertEquals("FRESH-NAME", rows.get(0).name());
+            // The unsupported projection is declined before any cache access.
+            assertTrue(bookCache.getAllKeys.isEmpty());
+        } finally {
+            rawUpdate("update BOOK set NAME = ? where ID = ?", "Learning GraphQL", learningGraphQLId1);
+            bookCache.delete(learningGraphQLId1);
+        }
+    }
+
+    @Test
+    public void testContentFetcherDepth2FakeFkJoinPolicyDeclinesWholeFresh() {
+        MapCache<TreeNode2> nodeCache = new MapCache<>(ImmutableType.get(TreeNode2.class));
+        JSqlClient client = getSqlClient(builder -> {
+            builder.setConnectionManager(NON_TX_MANAGER);
+            builder.setForeignKeyEnabledByDefault(false);
+            builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return type.getJavaClass() == TreeNode2.class ? nodeCache : null;
+                }
+            }));
+        });
+        // Precondition: the AUTO to-one is FAKE under this client metadata, not a real FK.
+        assertFalse(
+                ImmutableType.get(TreeNode2.class).getProp("parent").isTargetForeignKeyReal(
+                        assertInstanceOf(JSqlClientImplementor.class, client).getMetadataStrategy()
+                )
+        );
+        TreeNode2Table table = TreeNode2Table.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(TreeNode2.class, Arrays.asList(3L, 2L, 1L)));
+        nodeCache.clearHistory();
+        try {
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "FRESH-CHILD", 3L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "FRESH-PARENT", 2L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "FRESH-GRANDPARENT", 1L);
+            clearExecutions();
+            List<TreeNode2> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(3L))
+                            .select(table.fetch(
+                                    TreeNode2Fetcher.$.name().parent(
+                                            TreeNode2Fetcher.$.name().parent(TreeNode2Fetcher.$.name())
+                                    )
+                            ))
+                            .useObjectCache(
+                                    TreeNode2Fetcher.$.parent(
+                                            TreeNode2Fetcher.$.parent(TreeNode2Fetcher.$.name())
+                                    )
+                            )
+                            .execute(con)
+            ));
+            assertEquals(1, rows.size());
+            assertEquals("FRESH-CHILD", rows.get(0).name());
+            TreeNode2 parent = rows.get(0).parent();
+            assertNotNull(parent);
+            assertEquals("FRESH-PARENT", parent.name());
+            TreeNode2 grandparent = parent.parent();
+            assertNotNull(grandparent);
+            assertEquals("FRESH-GRANDPARENT", grandparent.name());
+            // The depth-2 fake-FK join is not reduced to an id-only reference: whole fresh.
+            assertTrue(nodeCache.getAllKeys.isEmpty());
+        } finally {
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Drinks", 3L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Food", 2L);
+            rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "Home", 1L);
+            nodeCache.delete(3L);
+            nodeCache.delete(2L);
+            nodeCache.delete(1L);
+        }
     }
 
     @Test
@@ -1666,8 +2203,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                         .useObjectCache(BookFetcher.$.name())
                         .execute(con)
         ));
-        // Exact membership/order parity with ordinary SQL, including the duplicated
-        // many-to-many rows the non-zero offset cuts into.
         List<String> ordinaryRows = new ArrayList<>();
         for (Book row : ordinary) {
             ordinaryRows.add(row.id() + "|" + row.name());
@@ -1723,13 +2258,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, hinted.size());
-            // Joined child slot carries the path mask: cached NAME, fresh id/edge.
             assertEquals(oreillyId, hinted.get(0).get_2().id());
             assertEquals("O'REILLY", hinted.get(0).get_2().name());
             assertCacheTouched(storeCache, oreillyId);
             assertEquals(0, hinted.get(0).get_1().price().compareTo(new BigDecimal("999")));
-            // Bare root entity: the approved NAME must be cacheable too, not only the
-            // separate joined child slot.
             assertEquals("Learning GraphQL", hinted.get(0).get_1().name());
             List<Execution> executions = getExecutions();
             assertEquals(1, executions.size());
@@ -1751,8 +2283,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
 
     @Test
     public void testContentFetcherExplicitSelectChildStaysConsistent() {
-        // Explicit SELECT post-fetch must be consistent with the AUTO/effective-join
-        // path: the path-masked child content is cached and its edge/id stays SQL.
         MapCache<Book> bookCache = new MapCache<>(ImmutableType.get(Book.class));
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
         JSqlClient client = createClient(type -> {
@@ -1856,8 +2386,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            // Approved display content is served from the warm cache while the current
-            // committed FK edge stays authoritative SQL.
             assertEquals("Learning GraphQL", rows.get(0).name());
             assertEquals(oreillyId, rows.get(0).store().id());
             assertEquals("O'REILLY", rows.get(0).store().name());
@@ -1884,11 +2412,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A FAKE-FK child display whitelist must not manufacture the target from the parent
-     * FK. Control: the target is present, so the mask is supported and serves the
-     * approved cached content with the current edge.
-     */
     @Test
     public void testFakeFkChildMaskWarmTargetServesApprovedContent() {
         MapCache<Issue1434User> userCache = new MapCache<>(ImmutableType.get(Issue1434User.class));
@@ -1921,11 +2444,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * Deleting a FAKE-FK target (no DB constraint) must never resurrect the warm cached
-     * target: the current FK/join is authoritative. The explicit JOIN shape additionally
-     * proves the join is not collapsed into a manufactured FK reference.
-     */
     @Test
     public void testFakeFkChildMaskDeletedTargetIsNotResurrected() {
         MapCache<Issue1434User> userCache = new MapCache<>(ImmutableType.get(Issue1434User.class));
@@ -2011,13 +2529,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         ));
     }
 
-    /**
-     * A valid first row and an incomplete later payload must fall back to the whole
-     * original query, so no converter has run before the page is known valid and each
-     * runs exactly once on the fresh full page. The SQL order forces the complete
-     * oreilly (d38c...) row before the incomplete manning (2fa3...) row independently of
-     * dialect UUID collation, so this cannot degenerate into a bad-first page.
-     */
     @Test
     public void testContentFetcherLateIncompletePayloadFallsBackWholePageOnce() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -2033,8 +2544,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             return store;
         };
         try {
-            // Distinct fresh names per id: BOOK_STORE.NAME is unique, so one shared
-            // fresh name would violate UQ_BOOK_STORE before the cache path runs.
+            // NAME is unique, so each id needs its own fresh value.
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-OREILLY", oreillyId);
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-MANNING", manningId);
             clearExecutions();
@@ -2065,11 +2575,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A cache payload that does not carry its own id, or carries a different id than the
-     * requested key, must decline the whole optimization instead of throwing while the
-     * payload is mapped.
-     */
     @Test
     public void testContentFetcherMalformedCachedIdFallsBackWholeQuery() {
         assertCorruptCachePayloadFallsBack(
@@ -2130,14 +2635,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         ));
     }
 
-    /**
-     * An inapplicable content mask (wrong root type, or content the projection does not
-     * select) must never be silently mis-applied. The safe contract admits either a clear
-     * validation error or a conservative whole-fresh fallback; both preserve fresh
-     * authorization/edges/presence and the original shape. Serving cached or unapproved
-     * content, or shortening the page, is what is forbidden. This test deliberately does
-     * not pin which of the two safe behaviours is chosen.
-     */
     @Test
     public void testContentFetcherInapplicableMaskNeverMisapplied() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -2156,6 +2653,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
+    // An inapplicable mask may either raise a clear validation error or fall back fresh; both are safe.
     private static void assertInapplicableMaskSafe(JSqlClient client, BookStoreTable table, Fetcher<?> mask) {
         List<BookStore> rows = new ArrayList<>();
         try {
@@ -2167,18 +2665,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
         } catch (IllegalArgumentException expected) {
-            // A clear validation error is an acceptable safe alternative.
             return;
         }
-        // Conservative fallback: fresh facts and the original shape are preserved.
         assertEquals(1, rows.size());
         assertEquals("FRESH-DB-NAME", rows.get(0).name());
     }
 
-    /**
-     * An unsupported execution shape (aggregation) is conservatively fresh, distinct from
-     * an invalid mask, so it must not raise a validation error.
-     */
     @Test
     public void testContentFetcherAggregateShapeStaysFresh() {
         BookStoreTable table = BookStoreTable.$;
@@ -2194,10 +2686,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertEquals(2L, counts.get(0).longValue());
     }
 
-    /**
-     * Same-type payloads swapped across owners must never be remapped by each payload's
-     * own id: the page falls back whole, in SQL order, with each converter running once.
-     */
     @Test
     public void testContentFetcherSwappedSameTypePayloadsFallBackWholePageOnce() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -2220,8 +2708,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             return store;
         };
         try {
-            // Distinct fresh names per id: BOOK_STORE.NAME is unique, so one shared
-            // fresh name would violate UQ_BOOK_STORE before the cache path runs.
+            // NAME is unique, so each id needs its own fresh value.
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-OREILLY", oreillyId);
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-MANNING", manningId);
             clearExecutions();
@@ -2240,8 +2727,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .useObjectCache(BookStoreFetcher.$.name())
                             .execute(con)
             ));
-            // The whole page falls back in deterministic SQL order with the real root ids,
-            // never remapped by each payload's own swapped id.
             assertEquals(Arrays.asList(oreillyId, manningId), idsOf(rows));
             assertEquals(2, rows.size());
             assertEquals(2, conversions.get(), "the whole fallback must run each converter exactly once");
@@ -2255,10 +2740,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A cached null embedded value must not hide a currently present one: the fallback is
-     * allowed, the cached null is not.
-     */
     @Test
     public void testContentFetcherCachedNullEmbeddedDoesNotHideCurrentPresence() {
         MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
@@ -2290,18 +2771,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * The converse presence direction: presence is a SQL-authoritative fact, so a stale
-     * cached embedded value must not hide a currently absent nullable embedded. The warm
-     * cache holds a present secondaryLocation while the committed columns are NULL.
-     */
     @Test
     public void testContentFetcherStalePresentEmbeddedDoesNotHideCurrentAbsence() {
         MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == Machine.class ? machineCache : null);
         MachineTable table = MachineTable.$;
         try {
-            // Warm the cache while the nullable embedded is currently present.
             rawUpdate(
                     "update MACHINE set SECONDARY_HOST = ?, SECONDARY_PORT = ? where ID = ?",
                     "cached-secondary", 9091, 1L
@@ -2309,7 +2784,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             jdbc(con -> client.getEntities().forConnection(con)
                     .findByIds(Machine.class, Collections.singletonList(1L)));
             machineCache.clearHistory();
-            // The committed columns are now NULL, behind the warm cache.
             rawUpdate("update MACHINE set SECONDARY_HOST = null, SECONDARY_PORT = null where ID = ?", 1L);
             clearExecutions();
             List<Machine> rows = new ArrayList<>();
@@ -2331,33 +2805,34 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A whole-embedded approval with a null child fetcher must validate the nested
-     * loadedness of the cached value; an incomplete cached Location falls back whole.
-     */
     @Test
     public void testContentFetcherIncompleteCachedEmbeddedFallsBackWholeQuery() {
         MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == Machine.class ? machineCache : null);
         MachineTable table = MachineTable.$;
-        jdbc(con -> client.getEntities().forConnection(con).findByIds(Machine.class, Collections.singletonList(1L)));
+        // The warm embedded omits the approved host leaf, so it cannot satisfy the reduced read.
+        machineCache.put(1L, MachineDraft.$.produce(draft -> {
+            draft.setId(1L);
+            draft.setLocation(LocationDraft.$.produce(location -> location.setPort(1234)));
+        }));
         machineCache.clearHistory();
         try {
+            rawUpdate("update MACHINE set HOST = ?, PORT = ? where ID = ?", "fresh-host", 9090, 1L);
             clearExecutions();
             List<Machine> rows = new ArrayList<>();
             jdbc(con -> rows.addAll(
                     client.createQuery(table)
                             .where(table.id().eq(1L))
                             .select(table.fetch(MachineFetcher.$.location(LocationFetcher.$.host().port())))
-                            .useObjectCache(MachineFetcher.$.location(LocationFetcher.$.host().port()))
+                            .useObjectCache(MachineFetcher.$.location(LocationFetcher.$.host()))
                             .execute(con)
             ));
             assertEquals(1, rows.size());
-            assertNotNull(rows.get(0).location(), "an approved required embedded must not zero out");
-            assertEquals("localhost", rows.get(0).location().host());
-            assertEquals(8080, rows.get(0).location().port().intValue());
+            assertEquals("fresh-host", rows.get(0).location().host());
+            assertEquals(9090, rows.get(0).location().port().intValue());
             assertCacheTouched(machineCache, 1L);
         } finally {
+            rawUpdate("update MACHINE set HOST = ?, PORT = ? where ID = ?", "localhost", 8080, 1L);
             machineCache.delete(1L);
         }
     }
@@ -2393,11 +2868,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * An explicit local to-one join fetch (JOIN_ALWAYS / JOIN_IF_NO_CACHE) must still serve
-     * the approved child content: root has no cache, the child cache is warm, the FK edge
-     * and the unapproved version stay fresh SQL.
-     */
     @Test
     public void testContentFetcherExplicitJoinFetchChildCacheStillServed() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -2434,13 +2904,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A reselect after a valid content mask must not silently re-enable the legacy
-     * cache-enabled whole-entity graph: the reselected projection selects a
-     * SELECT-loaded child whose facts are not approved by the original mask, so the
-     * unapproved child content must stay fresh SQL instead of being served from the
-     * warm child cache.
-     */
     @Test
     public void testContentFetcherReselectAfterMaskKeepsUnapprovedNestedChildFresh() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -2470,7 +2933,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(learningGraphQLId1, rows.get(0).id());
             assertEquals("Learning GraphQL", rows.get(0).name());
             assertEquals(oreillyId, rows.get(0).store().id());
-            // Unapproved SELECT-loaded child content stays fresh, not the warm cache.
             assertEquals("STALE-STORE", rows.get(0).store().name());
             assertEquals(9, rows.get(0).store().version());
         } finally {
@@ -2479,13 +2941,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * forEach and stream are not object-cache paths: even with a mask present and both
-     * the root and child caches warm, the default forEach, the explicit batch forEach and
-     * stream return the fresh full graph, never an old cached root or child value. The
-     * child is JOIN_ALWAYS because {@code stream} rejects post-fetch selections, and the
-     * JOIN decision is independent of the object-cache hint.
-     */
     @Test
     public void testContentFetcherForEachAndStreamStayFresh() {
         MapCache<Book> bookCache = new MapCache<>(ImmutableType.get(Book.class));
@@ -2545,13 +3000,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A command (non-QUERY) purpose never runs the content mask, and its cache-bypassing
-     * fallback must also cover SELECT-loaded associations: an entity-bearing nested child
-     * whose target type has a warm object cache must be read fresh from SQL, never from
-     * the cache. A root-only scalar projection would be fresh even on a cache-enabled
-     * fallback and could not expose that.
-     */
     @Test
     @SuppressWarnings("unchecked")
     public void testContentFetcherCommandPurposeFallbackKeepsNestedChildFresh() {
@@ -2564,7 +3012,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "STALE-DB-NAME", oreillyId);
             clearExecutions();
             ConfigurableRootQuery<Table<?>, Book> query = Queries.createQuery(
-                    (JSqlClientImplementor) client,
+                    assertInstanceOf(JSqlClientImplementor.class, client),
                     ImmutableType.get(Book.class),
                     ExecutionPurpose.command(QueryReason.NONE),
                     FilterLevel.DEFAULT,
@@ -2592,12 +3040,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * Locking, distinct and a bare root are unsupported/ambiguous execution shapes for the
-     * hint; an inapplicable mask must still never be mis-applied. As above, either a clear
-     * validation error or a conservative fresh fallback is acceptable, and this test does
-     * not pin which.
-     */
     @Test
     public void testContentFetcherInapplicableMaskSafeUnderLockingDistinctAndBareRoot() {
         BookStoreTable store = BookStoreTable.$;
@@ -2614,7 +3056,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, locked.size());
             assertEquals("O'REILLY", locked.get(0).name());
         } catch (IllegalArgumentException expected) {
-            // A clear validation error is an acceptable safe alternative.
         }
         List<BookStore> distinct = new ArrayList<>();
         try {
@@ -2629,7 +3070,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, distinct.size());
             assertEquals("O'REILLY", distinct.get(0).name());
         } catch (IllegalArgumentException expected) {
-            // A clear validation error is an acceptable safe alternative.
         }
         BookTable book = BookTable.$;
         List<Book> bare = new ArrayList<>();
@@ -2644,17 +3084,9 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, bare.size());
             assertEquals(learningGraphQLId1, bare.get(0).id());
         } catch (IllegalArgumentException expected) {
-            // A clear validation error is an acceptable safe alternative.
         }
     }
 
-    /**
-     * A field-filter callback runs inside the ambient {@code FetcherContext} of the outer
-     * query. A nested masked query executed there must complete its own SELECT-loaded
-     * unapproved child before the callback observes it, instead of deferring that child
-     * into the outer cache-enabled context. The nested query captures the enclosing
-     * connection; no new context plumbing or recursive callback is involved.
-     */
     @Test
     public void testContentFetcherNestedQueryInsideFieldFilterCompletesChildFresh() {
         MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
@@ -2694,13 +3126,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * Per-id, not per-node, existence proof across two user-selection shapes. A live
-     * joined sibling proves the shared user node for its own id only; the id-only
-     * reference manufactured from another row's FAKE FK must still take its fresh
-     * per-id read, so a warm but deleted target is never resurrected. The live child
-     * display stays cache-eligible.
-     */
     @Test
     public void testFakeFkSiblingJoinedProofDoesNotAdmitDeletedReferenceTarget() {
         MapCache<Issue1434User> userCache = new MapCache<>(ImmutableType.get(Issue1434User.class));
@@ -2712,11 +3137,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             jdbc(con -> client.getEntities().forConnection(con)
                     .findByIds(Issue1434User.class, Arrays.asList(1L, 2L)));
             userCache.clearHistory();
-            // Delete the second target behind the warm cache, leaving the FAKE FK.
             rawUpdate("delete from ISSUE_1434_USER where ID = ?", 2L);
             clearExecutions();
-            // The cache-disabled copy of the same projection is the SQL membership
-            // oracle: the explicit LEFT join, not the nullable property, keeps the page.
             JSqlClient oracle = createClient(type -> null);
             List<Tuple2<Issue1434Message, Issue1434User>> baseline = new ArrayList<>();
             jdbc(con -> baseline.addAll(
@@ -2756,10 +3178,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(2, rows.size(), "the full page and its order must be preserved");
             assertEquals(1L, rows.get(0).get_1().id());
             assertEquals(2L, rows.get(1).get_1().id());
-            // The live joined child remains a legitimate cached display.
             assertNotNull(rows.get(0).get_2(), "the live sibling child must stay present");
             assertEquals("user-1", rows.get(0).get_2().name());
-            // Neither shape may admit the deleted FAKE-FK target.
             assertNull(
                     rows.get(1).get_1().user(),
                     "a deleted FAKE-FK target must not be admitted for a non-proving id"
@@ -2773,17 +3193,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A real FK proves the row exists but never a single-table-inheritance concrete
-     * type: the physical FK column outlives a discriminator change. A warm
-     * Organization must not be admitted for a declared Organization reference once the
-     * CLIENT row is a Person; the fresh original projection is the oracle.
-     */
     @Test
     public void testRealFkSingleTableSubtypeChangeDoesNotAdmitStaleTarget() {
         MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == Organization.class ? organizationCache : null);
-        // A cache-disabled client is the SQL-authoritative oracle for the same projection.
         JSqlClient oracleClient = createClient(type -> null);
         OrganizationProjectTable table = OrganizationProjectTable.$;
         jdbc(con -> client.getEntities().forConnection(con)
@@ -2794,7 +3207,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     "update CLIENT set CLIENT_TYPE = ?, FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
                     "Person", "Changed", "Person", 100L
             );
-            // Oracle: the fresh, cache-disabled query sees a Person, not an Organization.
             List<OrganizationProject> fresh = new ArrayList<>();
             jdbc(con -> fresh.addAll(
                     oracleClient.createQuery(table)
@@ -2806,7 +3218,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ));
             assertEquals(1, fresh.size());
             assertNull(fresh.get(0).organization(), "the fresh row is no longer an Organization");
-            // The hinted query must match the fresh projection, never the stale Org.
             clearExecutions();
             List<OrganizationProject> hinted = new ArrayList<>();
             jdbc(con -> hinted.addAll(
@@ -2834,12 +3245,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A required embedded grandchild under a nullable embedded ancestor must keep its
-     * SQL columns: removing its only approved leaves would fabricate a zero-field
-     * reader and turn a currently present target into NULL. SQL presence stays
-     * authoritative in both directions.
-     */
     @Test
     public void testNullableAncestorRequiredEmbeddedGrandchildPresenceStaysSqlAuthoritative() {
         MapCache<Transform> transformCache = new MapCache<>(ImmutableType.get(Transform.class));
@@ -2851,8 +3256,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         jdbc(con -> client.getEntities().forConnection(con)
                 .findByIds(Transform.class, Arrays.asList(1L, 2L)));
         transformCache.clearHistory();
-        // Deliberately warm the cache with a present target for the row whose
-        // committed target columns are all NULL.
+        // Warm a present target for the row whose committed target columns are all NULL.
         transformCache.put(2L, TransformDraft.$.produce(draft -> {
             draft.setId(2L);
             draft.setTarget(RectDraft.$.produce(rect -> rect.setLeftTop(
@@ -2874,10 +3278,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                             .execute(con)
             ));
             assertEquals(2, rows.size());
-            // Row 1: target columns present -> the required grandchild must survive.
             assertNotNull(rows.get(0).target(), "a present target must not be zeroed out");
             assertNotNull(rows.get(0).target().leftTop(), "the required grandchild must stay present");
-            // Row 2: target columns NULL -> SQL presence wins over the warm cache.
             assertNull(rows.get(1).target(), "a cached present target must not hide current absence");
         } finally {
             transformCache.delete(1L);
@@ -2885,12 +3287,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * Explicitly selected dependencies stay visible across JVM-formula masks. An
-     * approved formula hides only its implicit inputs; a sibling the caller selected is
-     * visible. An unapproved formula keeps its closure fresh while an explicitly
-     * selected dependency stays visible even though the retained expansion re-derives it.
-     */
     @Test
     public void testContentFetcherExplicitDependencyVisibilityAcrossFormulaMasks() {
         MapCache<Author> authorCache = new MapCache<>(ImmutableType.get(Author.class));
@@ -2904,8 +3300,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     "update AUTHOR set FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
                     "Zed", "Zulu", alexId
             );
-            // Approved formula: implicit inputs stay hidden, the explicitly selected
-            // sibling stays visible.
             List<Author> approved = new ArrayList<>();
             jdbc(con -> approved.addAll(
                     client.createQuery(table)
@@ -2916,12 +3310,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ));
             assertEquals(1, approved.size());
             assertEquals("Alex Banks", approved.get(0).fullName());
-            ImmutableSpi approvedSpi = (ImmutableSpi) approved.get(0);
+            ImmutableSpi approvedSpi = assertInstanceOf(ImmutableSpi.class, approved.get(0));
             assertTrue(approvedSpi.__isVisible("firstName"), "explicitly selected dependency must stay visible");
             assertTrue(approvedSpi.__isVisible("fullName"), "the approved formula must stay visible");
             assertFalse(approvedSpi.__isVisible("lastName"), "an implicit formula dependency stays hidden");
-            // Unapproved formula: SQL keeps its closure fresh, the explicit dependency
-            // stays visible.
             clearExecutions();
             List<Author> unapproved = new ArrayList<>();
             jdbc(con -> unapproved.addAll(
@@ -2934,7 +3326,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, unapproved.size());
             assertEquals("Zed Zulu", unapproved.get(0).fullName());
             assertEquals("Zed", unapproved.get(0).firstName());
-            ImmutableSpi unapprovedSpi = (ImmutableSpi) unapproved.get(0);
+            ImmutableSpi unapprovedSpi = assertInstanceOf(ImmutableSpi.class, unapproved.get(0));
             assertTrue(unapprovedSpi.__isVisible("firstName"), "explicitly selected dependency must stay visible");
             assertTrue(unapprovedSpi.__isVisible("fullName"), "the unapproved formula must stay visible");
         } finally {
@@ -2946,11 +3338,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A recursive parent projection with a root-name-only hint: the approved root name may
-     * be a valid cached or fresh value, but the unapproved ancestor names are SQL facts and
-     * every natural level must stay loaded and current (never regenerated as id-only).
-     */
     @Test
     public void testContentFetcherRecursiveParentKeepsAncestorNamesFresh() {
         MapCache<TreeNode> nodeCache = new MapCache<>(ImmutableType.get(TreeNode.class));
@@ -2968,7 +3355,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-4", 4L);
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-6", 6L);
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-7", 7L);
-            // The cache-disabled recursive projection is the fresh-tree reference oracle.
             clearExecutions();
             List<TreeNode> fresh = new ArrayList<>();
             jdbc(con -> fresh.addAll(
@@ -3034,11 +3420,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
-    /**
-     * A recursive child-node projection with a root-name-only hint: the approved root name
-     * may be cached or fresh, but the unapproved descendant names are SQL facts at every
-     * natural depth, and the getters must read them without an unloaded/id-only shape.
-     */
     @Test
     public void testContentFetcherRecursiveChildNodesKeepDescendantNamesFresh() {
         MapCache<TreeNode> nodeCache = new MapCache<>(ImmutableType.get(TreeNode.class));
@@ -3057,7 +3438,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-6", 6L);
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-7", 7L);
             rawUpdate("update TREE_NODE set NAME = ? where NODE_ID = ?", "F-8", 8L);
-            // The cache-disabled recursive projection is the fresh-tree reference oracle.
             clearExecutions();
             List<TreeNode> fresh = new ArrayList<>();
             jdbc(con -> fresh.addAll(
@@ -3247,7 +3627,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             map.put(key, value);
         }
 
-        /** Drops the recorded {@code getAll} history so a later observation excludes warm reads. */
+        /** Drops recorded {@code getAll} history so a later observation excludes warm reads. */
         void clearHistory() {
             getAllKeys.clear();
         }
