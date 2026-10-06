@@ -1,6 +1,5 @@
 package org.babyfish.jimmer.sql.ast.impl.query;
 
-import org.babyfish.jimmer.meta.Dependency;
 import org.babyfish.jimmer.meta.EmbeddedLevel;
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
@@ -58,9 +57,6 @@ final class CacheContentMask {
 
     private final Set<ImmutableProp> leaves;
 
-    /** Approved stored leaves that must stay hidden, e.g. the inputs of an approved JVM formula. */
-    private final Set<ImmutableProp> implicitLeaves;
-
     /** Whitelisted JVM formulas: removed from the retained projection but never cached. */
     private final Set<ImmutableProp> formulas;
 
@@ -71,7 +67,6 @@ final class CacheContentMask {
             ImmutableType cacheOwnerType,
             Map<ImmutableProp, CacheContentMask> children,
             Set<ImmutableProp> leaves,
-            Set<ImmutableProp> implicitLeaves,
             Set<ImmutableProp> formulas
     ) {
         this.type = type;
@@ -80,7 +75,6 @@ final class CacheContentMask {
         this.cacheOwnerType = cacheOwnerType;
         this.children = children;
         this.leaves = leaves;
-        this.implicitLeaves = implicitLeaves;
         this.formulas = formulas;
     }
 
@@ -104,7 +98,6 @@ final class CacheContentMask {
         ImmutableType cacheOwnerType = embedded ? ownerType : type;
         Map<ImmutableProp, CacheContentMask> children = new LinkedHashMap<>();
         Set<ImmutableProp> leaves = new LinkedHashSet<>();
-        Set<ImmutableProp> implicitLeaves = new LinkedHashSet<>();
         Set<ImmutableProp> formulas = new LinkedHashSet<>();
         for (Field field : fetcher.getFieldMap().values()) {
             ImmutableProp prop = field.getProp();
@@ -122,7 +115,14 @@ final class CacheContentMask {
                             "The object-cache content mask cannot cache SQL formula \"" + prop + "\""
                     );
                 }
-                approveJvmFormula(prop, leaves, implicitLeaves);
+                // A JVM formula is removed from SQL and recomputed by its getter. Its
+                // stored dependency closure is already expanded by the native fetcher
+                // (FetcherImpl#getFieldMap), including nested stored paths and
+                // formula-to-formula edges, so the implicit dependency fields present
+                // here are approved as ordinary stored leaves below - no homemade
+                // expander is needed, and a native closure that cannot be stored
+                // (association edge, SQL formula, protected prop) is rejected by the
+                // same generic branch.
                 formulas.add(prop);
                 continue;
             }
@@ -179,52 +179,8 @@ final class CacheContentMask {
                 cacheOwnerType,
                 children,
                 leaves,
-                implicitLeaves,
                 formulas
         );
-    }
-
-    /**
-     * An approved JVM formula approves its stored dependency closure, because the
-     * formula is dropped from SQL and recomputed by the getter from the cached inputs.
-     * Those inputs must stay hidden to match the original fetcher's serialization shape.
-     */
-    private static void approveJvmFormula(
-            ImmutableProp formula,
-            Set<ImmutableProp> leaves,
-            Set<ImmutableProp> implicitLeaves
-    ) {
-        for (Dependency dependency : formula.getDependencies()) {
-            List<ImmutableProp> props = dependency.getProps();
-            if (props.size() != 1) {
-                throw new IllegalArgumentException(
-                        "The object-cache content mask cannot approve JVM formula \"" +
-                                formula +
-                                "\" because its dependency is not a direct stored property"
-                );
-            }
-            ImmutableProp dep = props.get(0);
-            if (!dep.hasStorage() || dep.isFormula() || dep.isAssociation(TargetLevel.PERSISTENT)) {
-                throw new IllegalArgumentException(
-                        "The object-cache content mask cannot approve JVM formula \"" +
-                                formula +
-                                "\" because dependency \"" +
-                                dep +
-                                "\" is not a stored scalar"
-                );
-            }
-            if (dep.isVersion() || dep.isLogicalDeleted()) {
-                throw new IllegalArgumentException(
-                        "The object-cache content mask cannot approve JVM formula \"" +
-                                formula +
-                                "\" because dependency \"" +
-                                dep +
-                                "\" is a protected property"
-                );
-            }
-            leaves.add(dep);
-            implicitLeaves.add(dep);
-        }
     }
 
     /**
@@ -240,7 +196,6 @@ final class CacheContentMask {
                 cacheOwnerType,
                 new LinkedHashMap<>(),
                 leaves,
-                implicitLeaves,
                 formulas
         );
     }
@@ -253,8 +208,9 @@ final class CacheContentMask {
      *
      * @return the retained fetcher, or {@code null} when a whitelisted nested association
      * resolves to an effective SQL join whose reduction to id-only would drop the join
-     * that proves the target exists, so the caller declines instead of manufacturing
-     * the target from the parent FAKE foreign key
+     * that proves the target exists, or when the mask would reduce a reference carrying a
+     * field-local filter and thereby erase its admission boundary; the caller declines
+     * instead of manufacturing the target or bypassing the filter
      * @throws IllegalArgumentException when the mask does not match the selected
      * fetcher or lists content it does not select
      */
@@ -282,12 +238,45 @@ final class CacheContentMask {
         if (hasJoinedNestedMask(projection, mask, new ArrayList<>(), sqlClient)) {
             return null;
         }
-        return FetcherFactory.filter(
+        if (hasReducedFieldLocalFilter(projection, mask)) {
+            return null;
+        }
+        // Filter the native-expanded field map, not the declaration chain: the stored
+        // dependency containers of a removed JVM formula only exist in the expanded map,
+        // so a chain filter would drop them and leave the formula getter unloaded.
+        return FetcherFactory.filterExpanded(
                 projection,
-                null,
                 (prop, path) -> isPrefixOfAny(keepEmbedded, path) ||
                         !mask.isRemovedAt(sqlClient, path, prop)
         );
+    }
+
+    /**
+     * Whether the mask would reduce a reference whose projection carries a field-local
+     * filter to an id-only edge. That reduction erases the filter's admission boundary:
+     * the id-only reference is no longer a filtered target read, so a warm or
+     * freshly-loaded target would bypass the filter and be fabricated from the parent
+     * foreign key. Decline the whole hint rather than erase the boundary.
+     */
+    private static boolean hasReducedFieldLocalFilter(Fetcher<?> projection, CacheContentMask node) {
+        for (Field field : projection.getFieldMap().values()) {
+            ImmutableProp prop = field.getProp();
+            if (prop.isId() || prop.isDiscriminator()) {
+                continue;
+            }
+            CacheContentMask childNode = node.children.get(prop);
+            Fetcher<?> childFetcher = field.getChildFetcher();
+            if (childNode == null || childFetcher == null) {
+                continue;
+            }
+            if (prop.isAssociation(TargetLevel.PERSISTENT) && field.getFilter() != null) {
+                return true;
+            }
+            if (hasReducedFieldLocalFilter(childFetcher, childNode)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isPrefixOfAny(Set<List<ImmutableProp>> paths, List<ImmutableProp> candidate) {
@@ -300,9 +289,12 @@ final class CacheContentMask {
     }
 
     /**
-     * Records the paths of required embedded values whose every selected leaf would be
-     * removed. Such a value must keep its original SQL columns, otherwise a zero-field
-     * reader would turn a currently present (or NULL) embedded into an absent one.
+     * Records the paths of embedded values whose every selected leaf (including nested
+     * embedded descendants) would be removed, so the retained fetcher must keep their
+     * original SQL columns. Otherwise a zero-field reader would turn a currently present
+     * (or NULL) embedded into an absent one, and a nullable parent whose only columns come
+     * from such a child could itself be fabricated as absent. A nullable embedded's own
+     * leaves are never removed, so it is recorded only through this nested protection.
      */
     private static void collectZeroingEmbedded(
             Fetcher<?> fetcher,
@@ -318,11 +310,17 @@ final class CacheContentMask {
             }
             Fetcher<?> childFetcher = field.getChildFetcher();
             if (prop.isEmbedded(EmbeddedLevel.SCALAR)) {
-                if (prop.isNullable() || childFetcher == null) {
-                    // Whole-embedded leaves and nullable embedded values keep their SQL
-                    // columns, so they can never be reduced to a zero-field reader.
+                if (childFetcher == null) {
+                    // A whole-embedded leaf keeps its SQL columns, so it can never be
+                    // reduced to a zero-field reader.
                     continue;
                 }
+                // Descend through a nullable embedded too: its own columns are never
+                // removed, but a required embedded nested below it can still have every
+                // selected leaf removed. Such a value must keep its SQL columns or a
+                // zero-field reader would turn a currently present value into an absent
+                // one (and, when the nullable parent has no direct column, the parent
+                // would be fabricated as absent as well).
                 List<ImmutableProp> childPath = new ArrayList<>(path);
                 childPath.add(prop);
                 if (isContentFullyRemoved(childFetcher, childPath, rootMask, sqlClient)) {
@@ -512,7 +510,16 @@ final class CacheContentMask {
             }
             any = true;
             if (prop.isEmbedded(EmbeddedLevel.SCALAR)) {
-                allRemoved = false;
+                if (field.getChildFetcher() == null) {
+                    // A whole-embedded leaf is never removed from SQL.
+                    allRemoved = false;
+                    continue;
+                }
+                List<ImmutableProp> childPath = new ArrayList<>(path);
+                childPath.add(prop);
+                if (!isContentFullyRemoved(field.getChildFetcher(), childPath, rootMask, sqlClient)) {
+                    allRemoved = false;
+                }
                 continue;
             }
             if (prop.isAssociation(TargetLevel.PERSISTENT) && field.getChildFetcher() != null) {
@@ -548,17 +555,27 @@ final class CacheContentMask {
 
     /**
      * Walks the fresh retained graph and records, per cacheable entity node, the
-     * id-to-concrete-type group that must be loaded from that node's object cache. A
-     * navigated node is additionally marked as proven only when its SQL edge itself
-     * establishes the target's existence: a real foreign key without a target filter.
-     * Every other navigated node keeps a fresh per-id existence read before its cache is
-     * consulted, so a FAKE foreign key can never resurrect a warm but deleted target.
+     * id-to-concrete-type group that must be loaded from that node's object cache.
+     *
+     * <p>A navigated node's id is recorded as proven only when the fresh read itself
+     * establishes that exact id <em>and</em> its concrete type: a real foreign key
+     * without a target filter proves existence, and a polymorphic target additionally
+     * requires its freshly read discriminator. Proof is tracked per exact id, never per
+     * node, because different slots (a joined slot and a navigated FAKE-FK reference) can
+     * reach the same node with different ids. Any unproven id keeps its fresh per-id
+     * existence read, so a FAKE foreign key can never resurrect a warm but deleted target
+     * through a sibling slot's proof.
+     *
+     * @return {@code false} when a cacheable navigated target's concrete type cannot be
+     * established from the fresh read (a polymorphic target reached through a plain FK
+     * whose discriminator was not read); the caller must then fall back to the whole
+     * original query instead of trusting a declared-only type
      */
-    static void collectSeeds(
+    static boolean collectSeeds(
             ImmutableSpi fresh,
             CacheContentMask node,
             Map<CacheContentMask, Map<Object, ImmutableType>> seeds,
-            Set<CacheContentMask> provenNodes,
+            Map<CacheContentMask, Map<Object, ImmutableType>> provenSeeds,
             JSqlClientImplementor sqlClient
     ) {
         for (Map.Entry<ImmutableProp, CacheContentMask> e : node.children.entrySet()) {
@@ -572,23 +589,52 @@ final class CacheContentMask {
             }
             ImmutableSpi childSpi = (ImmutableSpi) child;
             CacheContentMask childNode = e.getValue();
+            // A navigated entity whose concrete type is not established by the fresh read
+            // must not be seeded or descended into: a declared-only id reference cannot
+            // prove its subtype, so the whole hint declines rather than navigate a
+            // fabricated type.
+            if (!childNode.embedded && !isConcreteTypeEstablished(childSpi)) {
+                return false;
+            }
             if (childNode.hasCacheableOwnLeaves(sqlClient)) {
                 Object id = childSpi.__get(childNode.type.getIdProp().getId());
                 if (id != null) {
+                    ImmutableType concreteType = childSpi.__type();
                     seeds.computeIfAbsent(childNode, it -> new LinkedHashMap<>())
-                            .put(id, childSpi.__type());
+                            .put(id, concreteType);
                     if (isExistenceProven(prop, sqlClient)) {
-                        provenNodes.add(childNode);
+                        provenSeeds.computeIfAbsent(childNode, it -> new LinkedHashMap<>())
+                                .put(id, concreteType);
                     }
                 }
             }
-            collectSeeds(childSpi, childNode, seeds, provenNodes, sqlClient);
+            if (!collectSeeds(childSpi, childNode, seeds, provenSeeds, sqlClient)) {
+                return false;
+            }
         }
+        return true;
     }
 
     private static boolean isExistenceProven(ImmutableProp prop, JSqlClientImplementor sqlClient) {
         return prop.isTargetForeignKeyReal(sqlClient.getMetadataStrategy()) &&
                 sqlClient.getFilters().getTargetFilter(prop) == null;
+    }
+
+    /**
+     * Whether the fresh value establishes its own concrete type. A non-polymorphic type
+     * is exact by construction. Any type that belongs to an inheritance hierarchy is
+     * only concrete when the freshly read value carries its discriminator: an id-only
+     * reference reader manufactures the declared type from the physical FK and must not
+     * be accepted as concrete-type proof, or a stale cached sibling subtype would be
+     * admitted.
+     */
+    private static boolean isConcreteTypeEstablished(ImmutableSpi fresh) {
+        ImmutableType type = fresh.__type();
+        InheritanceInfo inheritanceInfo = type.getInheritanceInfo();
+        if (inheritanceInfo == null) {
+            return true;
+        }
+        return fresh.__isLoaded(inheritanceInfo.getDiscriminatorProp(type).getId());
     }
 
     /**
@@ -685,12 +731,14 @@ final class CacheContentMask {
      * Copies only the cacheable approved leaves that SQL did not load into the fresh
      * value, preserving every fresh scalar, edge and concrete type. Embedded values are
      * merged leaf-by-leaf so unapproved siblings stay fresh. The cache payload is never
-     * merged as a whole. Finally the original fetcher's serialization shape is restored
-     * for the approved JVM formulas: their hidden inputs stay hidden and the formula
-     * itself stays visible.
+     * merged as a whole. Finally each approved leaf's and formula's serialization
+     * visibility is restored from the original projection fetcher: a JVM formula's
+     * implicit input stays hidden, but a dependency the projection selected explicitly
+     * stays visible, and the formula itself stays visible.
      */
     static ImmutableSpi overlay(
             ImmutableSpi fresh,
+            Fetcher<?> projection,
             CacheContentMask node,
             Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
             JSqlClientImplementor sqlClient
@@ -700,13 +748,14 @@ final class CacheContentMask {
                 fresh.__type(),
                 fresh,
                 true,
-                draft -> overlayNode((DraftSpi) draft, fresh, node, cached, cachedByNode, sqlClient)
+                draft -> overlayNode((DraftSpi) draft, fresh, projection, node, cached, cachedByNode, sqlClient)
         );
     }
 
     private static void overlayNode(
             DraftSpi draft,
             ImmutableSpi fresh,
+            Fetcher<?> projection,
             CacheContentMask node,
             ImmutableSpi cached,
             Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
@@ -721,12 +770,16 @@ final class CacheContentMask {
                 draft.__set(leaf.getId(), cached.__get(leaf.getId()));
             }
         }
-        for (ImmutableProp leaf : node.implicitLeaves) {
-            // The original fetcher marks a JVM formula's stored inputs as implicit.
-            draft.__show(leaf.getId(), false);
+        // Visibility is a property of the original projection, not of the cache mask: a
+        // stored input the mask approves because a JVM formula needs it is hidden only
+        // when the projection itself left it implicit. Applying both directions keeps a
+        // projection that also selected the input explicitly visible, while a truly
+        // implicit dependency (re-derived in the retained fetcher) is re-hidden.
+        for (ImmutableProp leaf : node.leaves) {
+            restoreVisibility(draft, projection, leaf);
         }
         for (ImmutableProp formula : node.formulas) {
-            draft.__show(formula.getId(), true);
+            restoreVisibility(draft, projection, formula);
         }
         for (Map.Entry<ImmutableProp, CacheContentMask> e : node.children.entrySet()) {
             ImmutableProp prop = e.getKey();
@@ -738,24 +791,40 @@ final class CacheContentMask {
                 continue;
             }
             CacheContentMask childNode = e.getValue();
+            Fetcher<?> childProjection = childProjection(projection, prop);
             if (childNode.embedded) {
                 ImmutableSpi cachedChild = cached != null && cached.__isLoaded(prop.getId()) ?
                         (ImmutableSpi) cached.__get(prop.getId()) : null;
                 draft.__set(
                         prop.getId(),
-                        overlayEmbedded((ImmutableSpi) child, childNode, cachedChild, cachedByNode, sqlClient)
+                        overlayEmbedded(
+                                (ImmutableSpi) child, childProjection, childNode, cachedChild, cachedByNode, sqlClient
+                        )
                 );
             } else {
                 draft.__set(
                         prop.getId(),
-                        overlay((ImmutableSpi) child, childNode, cachedByNode, sqlClient)
+                        overlay((ImmutableSpi) child, childProjection, childNode, cachedByNode, sqlClient)
                 );
             }
         }
     }
 
+    private static void restoreVisibility(DraftSpi draft, Fetcher<?> projection, ImmutableProp prop) {
+        Field field = projection != null ? projection.getFieldMap().get(prop.getName()) : null;
+        if (field != null) {
+            draft.__show(prop.getId(), !field.isImplicit());
+        }
+    }
+
+    private static Fetcher<?> childProjection(Fetcher<?> projection, ImmutableProp prop) {
+        Field field = projection != null ? projection.getFieldMap().get(prop.getName()) : null;
+        return field != null ? field.getChildFetcher() : null;
+    }
+
     private static ImmutableSpi overlayEmbedded(
             ImmutableSpi fresh,
+            Fetcher<?> projection,
             CacheContentMask node,
             ImmutableSpi cached,
             Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
@@ -765,7 +834,7 @@ final class CacheContentMask {
                 fresh.__type(),
                 fresh,
                 true,
-                draft -> overlayNode((DraftSpi) draft, fresh, node, cached, cachedByNode, sqlClient)
+                draft -> overlayNode((DraftSpi) draft, fresh, projection, node, cached, cachedByNode, sqlClient)
         );
     }
 

@@ -3,6 +3,7 @@ package org.babyfish.jimmer.sql.fetcher.impl;
 import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
+import org.babyfish.jimmer.sql.fetcher.Field;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -84,6 +85,52 @@ public class FetcherFactory {
             }
         }
         return new FetcherImpl<>(filteredPrevFetcher, self, self.childFetcher);
+    }
+
+    /**
+     * Like {@link #filter}, but walks the fetcher's native-expanded field map - which
+     * includes the implicit dependency fields {@link FetcherImpl#getFieldMap()} synthesizes
+     * for a JVM formula - instead of the raw declaration chain. A caller that removes a
+     * formula must use this: filtering the declaration chain alone silently drops the
+     * formula's stored dependency containers, because they only exist in the expanded map.
+     */
+    public static <E> Fetcher<E> filterExpanded(
+            Fetcher<E> self,
+            BiPredicate<ImmutableProp, List<ImmutableProp>> propPredicate
+    ) {
+        if (self == null) {
+            return null;
+        }
+        return filterExpandedImpl((FetcherImpl<E>) self, propPredicate, new LinkedList<>());
+    }
+
+    private static <E> FetcherImpl<E> filterExpandedImpl(
+            FetcherImpl<E> self,
+            BiPredicate<ImmutableProp, List<ImmutableProp>> propPredicate,
+            LinkedList<ImmutableProp> path
+    ) {
+        FetcherImpl<E> result = new FetcherImpl<>(self.getJavaClass());
+        for (Fetcher<?> typeBranchFetcher : self.__getTypeBranchFetcherMap().values()) {
+            result = (FetcherImpl<E>) result.__forType(typeBranchFetcher);
+        }
+        for (Field field : self.getFieldMap().values()) {
+            ImmutableProp prop = field.getProp();
+            if (prop.isId()) {
+                continue;
+            }
+            if (propPredicate != null && !propPredicate.test(prop, Collections.unmodifiableList(path))) {
+                continue;
+            }
+            path.addLast(prop);
+            FetcherImpl<?> child = null;
+            Fetcher<?> childFetcher = field.getChildFetcher();
+            if (childFetcher != null) {
+                child = filterExpandedImpl((FetcherImpl<?>) childFetcher, propPredicate, path);
+            }
+            path.pollLast();
+            result = new FetcherImpl<>(result, field, child);
+        }
+        return result;
     }
 
     public static <E> Fetcher<E> excludeMicroServiceNameExceptRoot(

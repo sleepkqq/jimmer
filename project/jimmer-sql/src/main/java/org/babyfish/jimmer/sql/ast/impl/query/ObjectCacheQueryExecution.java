@@ -42,12 +42,9 @@ import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -449,7 +446,7 @@ final class ObjectCacheQueryExecution {
                     if (retained != null &&
                             node.hasCacheableLeaves(sqlClient) &&
                             !node.hasJoinedInheritanceCacheable(sqlClient)) {
-                        slots[i] = MaskSlot.masked(node, fetcherSelection.getConverter());
+                        slots[i] = MaskSlot.masked(node, fetcher, fetcherSelection.getConverter());
                         retainedSelections.add(retainedSelection(fetcherSelection, retained));
                         maskedCount++;
                     } else {
@@ -488,7 +485,7 @@ final class ObjectCacheQueryExecution {
                 if (retained != null &&
                         bareMask.hasCacheableLeaves(sqlClient) &&
                         !bareMask.hasJoinedInheritanceCacheable(sqlClient)) {
-                    slots[i] = MaskSlot.masked(bareMask, null);
+                    slots[i] = MaskSlot.masked(bareMask, all, null);
                     retainedSelections.add(((Table) selectedTable).fetch(retained));
                     maskedCount++;
                 } else {
@@ -546,11 +543,11 @@ final class ObjectCacheQueryExecution {
         // navigated children) from the fresh retained graph, then load each node's
         // cache content once through the authenticated seed bridge.
         Map<CacheContentMask, Map<Object, ImmutableType>> nodeSeeds = new LinkedHashMap<>();
-        // A slot node is proven by its own SQL selection (the guarded outer WHERE for a
-        // root table, the explicit join for a child table), so it may use the
-        // visibility-skipping seed. A deeper navigated node is only proven when its own
-        // SQL edge read the target; otherwise the bridge keeps its fresh visibility read.
-        Set<CacheContentMask> provenNodes = Collections.newSetFromMap(new IdentityHashMap<>());
+        // Proof is tracked per exact id and concrete type, never per node: a joined slot
+        // and a navigated FAKE-FK reference can reach the same node with different ids, so
+        // a node-level proof would leak the slot's admission onto the navigated id and
+        // resurrect a warm but deleted target.
+        Map<CacheContentMask, Map<Object, ImmutableType>> provenSeeds = new LinkedHashMap<>();
         for (int i = 0; i < size; i++) {
             MaskSlot slot = slots[i];
             if (slot == null || !slot.masked) {
@@ -567,12 +564,21 @@ final class ObjectCacheQueryExecution {
                 if (ownLeaves) {
                     Object id = fresh.__get(idPropId);
                     if (id != null) {
+                        // The slot's own SQL selection (the guarded outer WHERE for a
+                        // root table, the explicit join for a child table) admitted this
+                        // exact row, so its id and concrete type are proven.
+                        ImmutableType concreteType = fresh.__type();
                         nodeSeeds.computeIfAbsent(slot.node, it -> new LinkedHashMap<>())
-                                .put(id, fresh.__type());
-                        provenNodes.add(slot.node);
+                                .put(id, concreteType);
+                        provenSeeds.computeIfAbsent(slot.node, it -> new LinkedHashMap<>())
+                                .put(id, concreteType);
                     }
                 }
-                CacheContentMask.collectSeeds(fresh, slot.node, nodeSeeds, provenNodes, sqlClient);
+                if (!CacheContentMask.collectSeeds(fresh, slot.node, nodeSeeds, provenSeeds, sqlClient)) {
+                    // A cacheable navigated target's concrete type could not be
+                    // established from the fresh read; fall back whole.
+                    return null;
+                }
             }
         }
 
@@ -585,8 +591,8 @@ final class ObjectCacheQueryExecution {
                         connectionManager,
                         e.getKey().getType(),
                         e.getValue(),
-                        entitiesImpl,
-                        provenNodes.contains(e.getKey())
+                        provenSeeds.get(e.getKey()),
+                        entitiesImpl
                 );
                 if (cached == null) {
                     return null;
@@ -638,7 +644,9 @@ final class ObjectCacheQueryExecution {
                 if (value == null) {
                     continue;
                 }
-                Object overlaid = CacheContentMask.overlay((ImmutableSpi) value, slot.node, cachedByNode, sqlClient);
+                Object overlaid = CacheContentMask.overlay(
+                        (ImmutableSpi) value, slot.projection, slot.node, cachedByNode, sqlClient
+                );
                 if (slot.converter != null) {
                     overlaid = ((Function<Object, Object>) slot.converter).apply(overlaid);
                 }
@@ -691,47 +699,58 @@ final class ObjectCacheQueryExecution {
 
         final CacheContentMask node;
 
+        /** The original projection fetcher, source of truth for restored visibility. */
+        final Fetcher<?> projection;
+
         final Function<?, ?> converter;
 
-        private MaskSlot(boolean scalar, boolean masked, CacheContentMask node, Function<?, ?> converter) {
+        private MaskSlot(
+                boolean scalar,
+                boolean masked,
+                CacheContentMask node,
+                Fetcher<?> projection,
+                Function<?, ?> converter
+        ) {
             this.scalar = scalar;
             this.masked = masked;
             this.node = node;
+            this.projection = projection;
             this.converter = converter;
         }
 
         static MaskSlot scalar() {
-            return new MaskSlot(true, false, null, null);
+            return new MaskSlot(true, false, null, null, null);
         }
 
         static MaskSlot fresh(Function<?, ?> converter) {
-            return new MaskSlot(false, false, null, converter);
+            return new MaskSlot(false, false, null, null, converter);
         }
 
-        static MaskSlot masked(CacheContentMask node, Function<?, ?> converter) {
-            return new MaskSlot(false, true, node, converter);
+        static MaskSlot masked(CacheContentMask node, Fetcher<?> projection, Function<?, ?> converter) {
+            return new MaskSlot(false, true, node, projection, converter);
         }
     }
 
     /**
-     * Loads one node's cached entities through the authenticated seed bridge. When
-     * {@code proven} is true the node's SQL selection already established this exact
-     * id/type group, so the visibility-skipping seed is minted. Otherwise the bridge
-     * keeps its fresh per-id visibility read (the actual target read boundary), so a
-     * deleted or filtered-out target is never resurrected from a warm payload. The
-     * cache owner is the declared type when it has a cache, otherwise each concrete
-     * type's own cache; a vanished cache or a missing entry returns {@code null} so the
-     * caller declines the whole optimization instead of shortening the page.
+     * Loads one node's cached entities through the authenticated seed bridge. Proof is
+     * per exact id: an id recorded in {@code provenIds} (with the same concrete type)
+     * was admitted by the executing SQL, so the visibility-skipping seed is minted for
+     * it. Every other id keeps its fresh per-id visibility read (the actual target read
+     * boundary), so a deleted or filtered-out target is never resurrected from a warm
+     * payload - including when a sibling joined slot proved a different id of the same
+     * node. The cache owner is the declared type when it has a cache, otherwise each
+     * concrete type's own cache; a vanished cache or any missing entry returns
+     * {@code null} so the caller declines the whole optimization instead of shortening
+     * the page.
      */
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static Map<Object, ImmutableSpi> loadCacheContent(
             JSqlClientImplementor sqlClient,
             Connection con,
             ConnectionManager connectionManager,
             ImmutableType requestedType,
             Map<Object, ImmutableType> ids,
-            EntitiesImpl entitiesImpl,
-            boolean proven
+            Map<Object, ImmutableType> provenIds,
+            EntitiesImpl entitiesImpl
     ) {
         if (ids.isEmpty()) {
             return new LinkedHashMap<>();
@@ -747,29 +766,20 @@ final class ObjectCacheQueryExecution {
         }
         Map<Object, ImmutableSpi> result = new LinkedHashMap<>();
         for (Map.Entry<ImmutableType, Map<Object, ImmutableType>> group : groups.entrySet()) {
-            ObjectCacheQuerySeed admission = proven ?
-                    new ObjectCacheQuerySeed(
-                            sqlClient,
-                            con,
-                            connectionManager,
-                            requestedType,
-                            group.getKey(),
-                            group.getValue()
-                    ) :
-                    null;
-            Map<Object, Object> loaded = (Map<Object, Object>) entitiesImpl.findMapByIdsForQuery(
-                    requestedType,
-                    (Fetcher) null,
-                    group.getKey(),
-                    group.getValue().keySet(),
-                    group.getValue(),
-                    admission
-            );
-            for (Map.Entry<Object, Object> e : loaded.entrySet()) {
-                if (e.getValue() != null) {
-                    result.put(e.getKey(), (ImmutableSpi) e.getValue());
+            Map<Object, ImmutableType> proven = new LinkedHashMap<>();
+            Map<Object, ImmutableType> fresh = new LinkedHashMap<>();
+            for (Map.Entry<Object, ImmutableType> e : group.getValue().entrySet()) {
+                ImmutableType provenType = provenIds != null ? provenIds.get(e.getKey()) : null;
+                // Only an exact id/concrete-type match counts as proof; a mismatched or
+                // duplicate id is conservatively fresh-checked.
+                if (provenType == e.getValue()) {
+                    proven.put(e.getKey(), provenType);
+                } else {
+                    fresh.put(e.getKey(), e.getValue());
                 }
             }
+            loadCacheGroup(sqlClient, con, connectionManager, requestedType, group.getKey(), proven, true, entitiesImpl, result);
+            loadCacheGroup(sqlClient, con, connectionManager, requestedType, group.getKey(), fresh, false, entitiesImpl, result);
         }
         for (Object id : ids.keySet()) {
             if (!result.containsKey(id)) {
@@ -777,6 +787,39 @@ final class ObjectCacheQueryExecution {
             }
         }
         return result;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void loadCacheGroup(
+            JSqlClientImplementor sqlClient,
+            Connection con,
+            ConnectionManager connectionManager,
+            ImmutableType requestedType,
+            ImmutableType owner,
+            Map<Object, ImmutableType> ids,
+            boolean proven,
+            EntitiesImpl entitiesImpl,
+            Map<Object, ImmutableSpi> result
+    ) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        ObjectCacheQuerySeed admission = proven ?
+                new ObjectCacheQuerySeed(sqlClient, con, connectionManager, requestedType, owner, ids) :
+                null;
+        Map<Object, Object> loaded = (Map<Object, Object>) entitiesImpl.findMapByIdsForQuery(
+                requestedType,
+                (Fetcher) null,
+                owner,
+                ids.keySet(),
+                ids,
+                admission
+        );
+        for (Map.Entry<Object, Object> e : loaded.entrySet()) {
+            if (e.getValue() != null) {
+                result.put(e.getKey(), (ImmutableSpi) e.getValue());
+            }
+        }
     }
 
     /**

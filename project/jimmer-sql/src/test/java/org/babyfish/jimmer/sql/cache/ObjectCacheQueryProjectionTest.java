@@ -42,6 +42,14 @@ import org.babyfish.jimmer.sql.model.embedded.Machine;
 import org.babyfish.jimmer.sql.model.embedded.MachineDraft;
 import org.babyfish.jimmer.sql.model.embedded.MachineFetcher;
 import org.babyfish.jimmer.sql.model.embedded.MachineTable;
+import org.babyfish.jimmer.sql.model.embedded.PointDraft;
+import org.babyfish.jimmer.sql.model.embedded.PointFetcher;
+import org.babyfish.jimmer.sql.model.embedded.RectDraft;
+import org.babyfish.jimmer.sql.model.embedded.RectFetcher;
+import org.babyfish.jimmer.sql.model.embedded.Transform;
+import org.babyfish.jimmer.sql.model.embedded.TransformDraft;
+import org.babyfish.jimmer.sql.model.embedded.TransformFetcher;
+import org.babyfish.jimmer.sql.model.embedded.TransformTable;
 import org.babyfish.jimmer.sql.model.fetcher.Issue1434Message;
 import org.babyfish.jimmer.sql.model.fetcher.Issue1434MessageFetcher;
 import org.babyfish.jimmer.sql.model.fetcher.Issue1434MessageTable;
@@ -53,6 +61,10 @@ import org.babyfish.jimmer.sql.model.inheritance.singletable.Client;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientTable;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.Organization;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationProject;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationProjectFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.singletable.OrganizationProjectTable;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.Person;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.PersonDraft;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.dto.ClientImplicitCatchAllView;
@@ -91,6 +103,7 @@ import java.util.function.Function;
 import javax.sql.DataSource;
 
 import static org.babyfish.jimmer.sql.common.Constants.alexId;
+import static org.babyfish.jimmer.sql.common.Constants.graphQLInActionId1;
 import static org.babyfish.jimmer.sql.common.Constants.learningGraphQLId1;
 import static org.babyfish.jimmer.sql.common.Constants.learningGraphQLId2;
 import static org.babyfish.jimmer.sql.common.Constants.manningId;
@@ -1259,6 +1272,208 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }
     }
 
+    /**
+     * An approved formula's nested embedded closure is expanded by the native fetcher,
+     * not a direct-scalar-only expander. An unapproved sibling keeps the required
+     * embedded present, so the approved location.host is genuinely served from cache.
+     */
+    @Test
+    public void testContentFetcherApprovedJvmFormulaAcceptsEmbeddedDependencyClosure() {
+        MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Machine.class ? machineCache : null);
+        MachineTable table = MachineTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Machine.class, Collections.singletonList(1L)));
+        machineCache.clearHistory();
+        try {
+            rawUpdate(
+                    "update MACHINE set HOST = ?, PORT = ?, SECONDARY_HOST = ?, SECONDARY_PORT = ? where ID = ?",
+                    "fresh-host", 9090, "fresh-secondary-host", 7070, 1L
+            );
+            clearExecutions();
+            List<Machine> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(1L))
+                            .select(table.fetch(MachineFetcher.$.hosts().location(LocationFetcher.$.port())))
+                            .useObjectCache(MachineFetcher.$.hosts())
+                            .execute(con)
+            ));
+            assertEquals(1, rows.size());
+            Machine machine = rows.get(0);
+            assertEquals(1L, machine.id());
+            // The formula recomputes from its dependency closure: the approved
+            // location.host is served from the cache while the nullable
+            // secondaryLocation.host stays fresh SQL.
+            assertEquals(Arrays.asList("localhost", "fresh-secondary-host"), machine.hosts());
+            assertEquals(
+                    "localhost",
+                    machine.location().host(),
+                    "an approved embedded closure leaf is served from the cache"
+            );
+            assertEquals(
+                    9090,
+                    machine.location().port().intValue(),
+                    "an unapproved embedded sibling stays fresh SQL"
+            );
+            assertNotNull(
+                    machine.secondaryLocation(),
+                    "a currently present nullable embedded must not be fabricated absent"
+            );
+            assertEquals(
+                    "fresh-secondary-host",
+                    machine.secondaryLocation().host(),
+                    "a nullable embedded dependency stays fresh SQL"
+            );
+            ImmutableSpi machineSpi = (ImmutableSpi) machine;
+            assertTrue(machineSpi.__isVisible("hosts"), "the approved formula must stay visible");
+            assertTrue(machineSpi.__isVisible("location"), "an explicitly selected dependency must stay visible");
+            assertFalse(machineSpi.__isVisible("secondaryLocation"), "an implicit formula dependency stays hidden");
+            ImmutableSpi locationSpi = (ImmutableSpi) machine.location();
+            assertFalse(locationSpi.__isVisible("host"), "an implicit formula dependency stays hidden");
+            assertTrue(locationSpi.__isVisible("port"), "an explicitly selected sibling stays visible");
+            assertCacheTouched(machineCache, 1L);
+        } finally {
+            rawUpdate(
+                    "update MACHINE set HOST = ?, PORT = ?, SECONDARY_HOST = null, SECONDARY_PORT = null where ID = ?",
+                    "localhost", 8080, 1L
+            );
+            machineCache.delete(1L);
+        }
+    }
+
+    /**
+     * A formula-only projection declares no dependency container explicitly: the implicit
+     * location/secondaryLocation exist only in the native field map. The retained read must
+     * load them so the getter evaluates the complete current shape, and fresh presence must
+     * stay authoritative over the warm container payload.
+     */
+    @Test
+    public void testContentFetcherApprovedJvmFormulaOnlyKeepsImplicitEmbeddedClosure() {
+        MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Machine.class ? machineCache : null);
+        MachineTable table = MachineTable.$;
+        // Warm the cache with the original shape: secondaryLocation absent.
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Machine.class, Collections.singletonList(1L)));
+        machineCache.clearHistory();
+        JSqlClient oracle = createClient(type -> null);
+        try {
+            rawUpdate(
+                    "update MACHINE set HOST = ?, PORT = ?, SECONDARY_HOST = ?, SECONDARY_PORT = ? where ID = ?",
+                    "fresh-host", 9090, "fresh-secondary-host", 7070, 1L
+            );
+            // The cache-disabled ordinary query is the display fact for the current shape.
+            List<Machine> fresh = new ArrayList<>();
+            jdbc(con -> fresh.addAll(
+                    oracle.createQuery(table)
+                            .where(table.id().eq(1L))
+                            .select(table.fetch(MachineFetcher.$.hosts()))
+                            .execute(con)
+            ));
+            assertEquals(1, fresh.size());
+            assertEquals(Arrays.asList("fresh-host", "fresh-secondary-host"), fresh.get(0).hosts());
+            assertNotNull(fresh.get(0).secondaryLocation());
+            clearExecutions();
+            List<Machine> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(1L))
+                            .select(table.fetch(MachineFetcher.$.hosts()))
+                            .useObjectCache(MachineFetcher.$.hosts())
+                            .execute(con)
+            ));
+            assertEquals(1, rows.size(), "the ordinary root membership must be preserved");
+            Machine machine = rows.get(0);
+            assertEquals(1L, machine.id());
+            // The implicit containers must be loaded, not fabricated from the cached
+            // absence: the current SQL presence wins.
+            assertNotNull(machine.location(), "the implicit required container must be loaded");
+            assertNotNull(machine.secondaryLocation(), "fresh presence must not be fabricated absent");
+            assertEquals("fresh-secondary-host", machine.secondaryLocation().host());
+            List<String> hosts = machine.hosts();
+            assertEquals(2, hosts.size());
+            assertEquals("fresh-secondary-host", hosts.get(1));
+            // The approved closure leaf may be served from the cache or kept fresh in SQL
+            // when the required embedded forces its columns to be retained.
+            assertTrue(
+                    "fresh-host".equals(hosts.get(0)) || "localhost".equals(hosts.get(0)),
+                    "the approved closure leaf must be a legitimate current or cached value: " + hosts
+            );
+            ImmutableSpi machineSpi = (ImmutableSpi) machine;
+            assertTrue(machineSpi.__isVisible("hosts"), "the approved formula must stay visible");
+            assertFalse(machineSpi.__isVisible("location"), "an implicit dependency container stays hidden");
+            assertFalse(machineSpi.__isVisible("secondaryLocation"), "an implicit dependency container stays hidden");
+            ImmutableSpi locationSpi = (ImmutableSpi) machine.location();
+            assertFalse(locationSpi.__isVisible("host"), "an implicit dependency leaf stays hidden");
+        } finally {
+            rawUpdate(
+                    "update MACHINE set HOST = ?, PORT = ?, SECONDARY_HOST = null, SECONDARY_PORT = null where ID = ?",
+                    "localhost", 8080, 1L
+            );
+            machineCache.delete(1L);
+        }
+    }
+
+    /**
+     * A field-local to-one filter is an admission rule, not a global filter: reducing the
+     * reference to id-only or hydrating it from a warm cache must not bypass it. Only the
+     * target type has an object cache; the root has none.
+     */
+    @Test
+    public void testContentFetcherFieldLocalReferenceFilterAdmissionKeepsRootMembershipFresh() {
+        MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == BookStore.class ? storeCache : null);
+        BookTable table = BookTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(BookStore.class, Arrays.asList(oreillyId, manningId)));
+        storeCache.clearHistory();
+        JSqlClient oracle = createClient(type -> null);
+        Fetcher<Book> content = BookFetcher.$.store(
+                BookStoreFetcher.$.name(),
+                cfg -> cfg.fetchType(ReferenceFetchType.SELECT)
+                        .filter(args -> args.where(args.getTable().id().eq(manningId)))
+        );
+        try {
+            // Ordinary: the local filter excludes the FK target.
+            List<Book> fresh = new ArrayList<>();
+            jdbc(con -> fresh.addAll(
+                    oracle.createQuery(table)
+                            .where(table.id().eq(learningGraphQLId1))
+                            .select(table.fetch(content))
+                            .execute(con)
+            ));
+            assertEquals(1, fresh.size());
+            assertNull(fresh.get(0).store(), "the local filter excludes the FK target");
+            clearExecutions();
+            List<Book> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(learningGraphQLId1))
+                            .select(table.fetch(content))
+                            .useObjectCache(BookFetcher.$.store(BookStoreFetcher.$.name()))
+                            .execute(con)
+            ));
+            assertEquals(1, rows.size(), "the root membership and full page must be preserved");
+            assertEquals(learningGraphQLId1, rows.get(0).id());
+            assertNull(rows.get(0).store(), "a warm target must not be admitted past the local field filter");
+            // Non-noop control: the same filter admits the matching FK target.
+            List<Book> allowed = new ArrayList<>();
+            jdbc(con -> allowed.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(graphQLInActionId1))
+                            .select(table.fetch(content))
+                            .useObjectCache(BookFetcher.$.store(BookStoreFetcher.$.name()))
+                            .execute(con)
+            ));
+            assertEquals(1, allowed.size(), "the control membership must be preserved");
+            assertNotNull(allowed.get(0).store(), "the field filter admits the matching target");
+        } finally {
+            storeCache.delete(oreillyId);
+            storeCache.delete(manningId);
+        }
+    }
+
     @Test
     public void testContentFetcherEmbeddedLeafMergesSiblingSelectively() {
         MapCache<Machine> machineCache = new MapCache<>(ImmutableType.get(Machine.class));
@@ -1815,10 +2030,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             return store;
         };
         try {
-            rawUpdate(
-                    "update BOOK_STORE set NAME = ? where ID in (?, ?)",
-                    "FRESH-STORE", oreillyId, manningId
-            );
+            // Distinct fresh names per id: BOOK_STORE.NAME is unique, so one shared
+            // fresh name would violate UQ_BOOK_STORE before the cache path runs.
+            rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-OREILLY", oreillyId);
+            rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-MANNING", manningId);
             clearExecutions();
             List<BookStore> rows = new ArrayList<>();
             jdbc(con -> rows.addAll(
@@ -1837,9 +2052,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ));
             assertEquals(Arrays.asList(oreillyId, manningId), idsOf(rows), "valid-before-bad order");
             assertEquals(2, conversions.get(), "the whole fallback must run each converter exactly once");
-            for (BookStore row : rows) {
-                assertEquals("FRESH-STORE", row.name());
-            }
+            assertEquals("FRESH-OREILLY", rows.get(0).name());
+            assertEquals("FRESH-MANNING", rows.get(1).name());
         } finally {
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "O'REILLY", oreillyId);
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "MANNING", manningId);
@@ -2003,10 +2217,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             return store;
         };
         try {
-            rawUpdate(
-                    "update BOOK_STORE set NAME = ? where ID in (?, ?)",
-                    "FRESH-STORE", oreillyId, manningId
-            );
+            // Distinct fresh names per id: BOOK_STORE.NAME is unique, so one shared
+            // fresh name would violate UQ_BOOK_STORE before the cache path runs.
+            rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-OREILLY", oreillyId);
+            rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "FRESH-MANNING", manningId);
             clearExecutions();
             List<BookStore> rows = new ArrayList<>();
             jdbc(con -> rows.addAll(
@@ -2028,9 +2242,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(Arrays.asList(oreillyId, manningId), idsOf(rows));
             assertEquals(2, rows.size());
             assertEquals(2, conversions.get(), "the whole fallback must run each converter exactly once");
-            for (BookStore row : rows) {
-                assertEquals("FRESH-STORE", row.name());
-            }
+            assertEquals("FRESH-OREILLY", rows.get(0).name());
+            assertEquals("FRESH-MANNING", rows.get(1).name());
         } finally {
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "O'REILLY", oreillyId);
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "MANNING", manningId);
@@ -2475,6 +2688,235 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         } finally {
             rawUpdate("update BOOK_STORE set NAME = ? where ID = ?", "O'REILLY", oreillyId);
             storeCache.delete(oreillyId);
+        }
+    }
+
+    /**
+     * Per-id, not per-node, existence proof across two user-selection shapes. A live
+     * joined sibling proves the shared user node for its own id only; the id-only
+     * reference manufactured from another row's FAKE FK must still take its fresh
+     * per-id read, so a warm but deleted target is never resurrected. The live child
+     * display stays cache-eligible.
+     */
+    @Test
+    public void testFakeFkSiblingJoinedProofDoesNotAdmitDeletedReferenceTarget() {
+        MapCache<Issue1434User> userCache = new MapCache<>(ImmutableType.get(Issue1434User.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Issue1434User.class ? userCache : null);
+        Issue1434MessageTable table = Issue1434MessageTable.$;
+        rawUpdate("insert into ISSUE_1434_USER(ID, NAME) values(?, ?)", 2L, "user-2");
+        rawUpdate("insert into ISSUE_1434_MESSAGE(ID, USER_ID) values(?, ?)", 2L, 2L);
+        try {
+            jdbc(con -> client.getEntities().forConnection(con)
+                    .findByIds(Issue1434User.class, Arrays.asList(1L, 2L)));
+            userCache.clearHistory();
+            // Delete the second target behind the warm cache, leaving the FAKE FK.
+            rawUpdate("delete from ISSUE_1434_USER where ID = ?", 2L);
+            clearExecutions();
+            List<Tuple2<Issue1434Message, Issue1434User>> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(Arrays.asList(1L, 2L)))
+                            .orderBy(table.id())
+                            .select(
+                                    table.fetch(Issue1434MessageFetcher.$.user(
+                                            ReferenceFetchType.SELECT,
+                                            Issue1434UserFetcher.$.name()
+                                    )),
+                                    table.user().fetch(Issue1434UserFetcher.$.name())
+                            )
+                            .useObjectCache(Issue1434MessageFetcher.$.user(Issue1434UserFetcher.$.name()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size(), "the full page and its order must be preserved");
+            assertEquals(1L, rows.get(0).get_1().id());
+            assertEquals(2L, rows.get(1).get_1().id());
+            // The live joined child remains a legitimate cached display.
+            assertNotNull(rows.get(0).get_2(), "the live sibling child must stay present");
+            assertEquals("user-1", rows.get(0).get_2().name());
+            // Neither shape may admit the deleted FAKE-FK target.
+            assertNull(
+                    rows.get(1).get_1().user(),
+                    "a deleted FAKE-FK target must not be admitted for a non-proving id"
+            );
+            assertNull(rows.get(1).get_2(), "the deleted joined slot must stay NULL");
+        } finally {
+            rawUpdate("delete from ISSUE_1434_MESSAGE where ID = ?", 2L);
+            rawUpdate("delete from ISSUE_1434_USER where ID = ?", 2L);
+            userCache.delete(1L);
+            userCache.delete(2L);
+        }
+    }
+
+    /**
+     * A real FK proves the row exists but never a single-table-inheritance concrete
+     * type: the physical FK column outlives a discriminator change. A warm
+     * Organization must not be admitted for a declared Organization reference once the
+     * CLIENT row is a Person; the fresh original projection is the oracle.
+     */
+    @Test
+    public void testRealFkSingleTableSubtypeChangeDoesNotAdmitStaleTarget() {
+        MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Organization.class ? organizationCache : null);
+        // A cache-disabled client is the SQL-authoritative oracle for the same projection.
+        JSqlClient oracleClient = createClient(type -> null);
+        OrganizationProjectTable table = OrganizationProjectTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Organization.class, Collections.singletonList(100L)));
+        organizationCache.clearHistory();
+        try {
+            rawUpdate(
+                    "update CLIENT set CLIENT_TYPE = ?, FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                    "Person", "Changed", "Person", 100L
+            );
+            // Oracle: the fresh, cache-disabled query sees a Person, not an Organization.
+            List<OrganizationProject> fresh = new ArrayList<>();
+            jdbc(con -> fresh.addAll(
+                    oracleClient.createQuery(table)
+                            .where(table.id().eq(1001L))
+                            .select(table.fetch(OrganizationProjectFetcher.$.organization(
+                                    OrganizationFetcher.$.name()
+                            )))
+                            .execute(con)
+            ));
+            assertEquals(1, fresh.size());
+            assertNull(fresh.get(0).organization(), "the fresh row is no longer an Organization");
+            // The hinted query must match the fresh projection, never the stale Org.
+            clearExecutions();
+            List<OrganizationProject> hinted = new ArrayList<>();
+            jdbc(con -> hinted.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(1001L))
+                            .select(table.fetch(OrganizationProjectFetcher.$.organization(
+                                    OrganizationFetcher.$.name()
+                            )))
+                            .useObjectCache(OrganizationProjectFetcher.$.organization(
+                                    OrganizationFetcher.$.name()
+                            ))
+                            .execute(con)
+            ));
+            assertEquals(1, hinted.size());
+            assertNull(
+                    hinted.get(0).organization(),
+                    "a warm Organization must not be admitted for a changed single-table subtype"
+            );
+        } finally {
+            rawUpdate(
+                    "update CLIENT set CLIENT_TYPE = ?, FIRST_NAME = null, LAST_NAME = null where ID = ?",
+                    "ORG", 100L
+            );
+            organizationCache.delete(100L);
+        }
+    }
+
+    /**
+     * A required embedded grandchild under a nullable embedded ancestor must keep its
+     * SQL columns: removing its only approved leaves would fabricate a zero-field
+     * reader and turn a currently present target into NULL. SQL presence stays
+     * authoritative in both directions.
+     */
+    @Test
+    public void testNullableAncestorRequiredEmbeddedGrandchildPresenceStaysSqlAuthoritative() {
+        MapCache<Transform> transformCache = new MapCache<>(ImmutableType.get(Transform.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Transform.class ? transformCache : null);
+        TransformTable table = TransformTable.$;
+        Fetcher<Transform> content = TransformFetcher.$.target(
+                RectFetcher.$.leftTop(PointFetcher.$.x().y())
+        );
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Transform.class, Arrays.asList(1L, 2L)));
+        transformCache.clearHistory();
+        // Deliberately warm the cache with a present target for the row whose
+        // committed target columns are all NULL.
+        transformCache.put(2L, TransformDraft.$.produce(draft -> {
+            draft.setId(2L);
+            draft.setTarget(RectDraft.$.produce(rect -> rect.setLeftTop(
+                    PointDraft.$.produce(point -> {
+                        point.setX(800);
+                        point.setY(600);
+                    })
+            )));
+        }));
+        try {
+            clearExecutions();
+            List<Transform> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(Arrays.asList(1L, 2L)))
+                            .orderBy(table.id())
+                            .select(table.fetch(content))
+                            .useObjectCache(content)
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            // Row 1: target columns present -> the required grandchild must survive.
+            assertNotNull(rows.get(0).target(), "a present target must not be zeroed out");
+            assertNotNull(rows.get(0).target().leftTop(), "the required grandchild must stay present");
+            // Row 2: target columns NULL -> SQL presence wins over the warm cache.
+            assertNull(rows.get(1).target(), "a cached present target must not hide current absence");
+        } finally {
+            transformCache.delete(1L);
+            transformCache.delete(2L);
+        }
+    }
+
+    /**
+     * Explicitly selected dependencies stay visible across JVM-formula masks. An
+     * approved formula hides only its implicit inputs; a sibling the caller selected is
+     * visible. An unapproved formula keeps its closure fresh while an explicitly
+     * selected dependency stays visible even though the retained expansion re-derives it.
+     */
+    @Test
+    public void testContentFetcherExplicitDependencyVisibilityAcrossFormulaMasks() {
+        MapCache<Author> authorCache = new MapCache<>(ImmutableType.get(Author.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Author.class ? authorCache : null);
+        AuthorTable table = AuthorTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Author.class, Collections.singletonList(alexId)));
+        authorCache.clearHistory();
+        try {
+            rawUpdate(
+                    "update AUTHOR set FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                    "Zed", "Zulu", alexId
+            );
+            // Approved formula: implicit inputs stay hidden, the explicitly selected
+            // sibling stays visible.
+            List<Author> approved = new ArrayList<>();
+            jdbc(con -> approved.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(alexId))
+                            .select(table.fetch(AuthorFetcher.$.firstName().fullName()))
+                            .useObjectCache(AuthorFetcher.$.fullName())
+                            .execute(con)
+            ));
+            assertEquals(1, approved.size());
+            assertEquals("Alex Banks", approved.get(0).fullName());
+            ImmutableSpi approvedSpi = (ImmutableSpi) approved.get(0);
+            assertTrue(approvedSpi.__isVisible("firstName"), "explicitly selected dependency must stay visible");
+            assertTrue(approvedSpi.__isVisible("fullName"), "the approved formula must stay visible");
+            assertFalse(approvedSpi.__isVisible("lastName"), "an implicit formula dependency stays hidden");
+            // Unapproved formula: SQL keeps its closure fresh, the explicit dependency
+            // stays visible.
+            clearExecutions();
+            List<Author> unapproved = new ArrayList<>();
+            jdbc(con -> unapproved.addAll(
+                    client.createQuery(table)
+                            .where(table.id().eq(alexId))
+                            .select(table.fetch(AuthorFetcher.$.firstName().fullName()))
+                            .useObjectCache(AuthorFetcher.$.firstName())
+                            .execute(con)
+            ));
+            assertEquals(1, unapproved.size());
+            assertEquals("Zed Zulu", unapproved.get(0).fullName());
+            assertEquals("Zed", unapproved.get(0).firstName());
+            ImmutableSpi unapprovedSpi = (ImmutableSpi) unapproved.get(0);
+            assertTrue(unapprovedSpi.__isVisible("firstName"), "explicitly selected dependency must stay visible");
+            assertTrue(unapprovedSpi.__isVisible("fullName"), "the unapproved formula must stay visible");
+        } finally {
+            rawUpdate(
+                    "update AUTHOR set FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                    "Alex", "Banks", alexId
+            );
+            authorCache.delete(alexId);
         }
     }
 

@@ -82,7 +82,14 @@ jobs:
         run: |
           python3 scripts/verify-test-results.py project/jimmer-sql/build/test-results/test \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testNativePostgresCommittedRootChildEdgesAndDisplay' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 58 \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testFakeFkSiblingJoinedProofDoesNotAdmitDeletedReferenceTarget' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testRealFkSingleTableSubtypeChangeDoesNotAdmitStaleTarget' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testNullableAncestorRequiredEmbeddedGrandchildPresenceStaysSqlAuthoritative' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherExplicitDependencyVisibilityAcrossFormulaMasks' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherApprovedJvmFormulaAcceptsEmbeddedDependencyClosure' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherApprovedJvmFormulaOnlyKeepsImplicitEmbeddedClosure' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherFieldLocalReferenceFilterAdmissionKeepsRootMembershipFresh' \
+            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 65 \
             org.babyfish.jimmer.sql.cache.ObjectCacheTest 18 \
             org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7
           python3 scripts/verify-test-results.py project/jimmer-sql-kotlin/build/test-results/test \

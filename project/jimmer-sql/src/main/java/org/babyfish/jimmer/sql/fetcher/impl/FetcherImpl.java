@@ -223,6 +223,29 @@ public class FetcherImpl<E> implements FetcherImplementor<E> {
         this.typeBranchFetcher = null;
     }
 
+    /**
+     * Rebuilds a chain node from a native-expanded {@link Field}. Used to re-derive a
+     * retained projection from {@link #getFieldMap()} so the implicit dependency fields
+     * synthesized for a JVM formula survive the formula's removal; the raw declaration
+     * chain does not contain them.
+     */
+    FetcherImpl(FetcherImpl<E> prev, Field field, FetcherImpl<?> child) {
+        this.prev = prev;
+        this.immutableType = prev != null ? prev.immutableType : field.getProp().getDeclaringType();
+        this.negative = false;
+        this.implicit = field.isImplicit();
+        this.rawId = field.isRawId();
+        this.prop = field.getProp();
+        this.filter = field.getFilter();
+        this.batchSize = field.getBatchSize();
+        this.limit = field.getLimit();
+        this.offset = field.getOffset();
+        this.recursionStrategy = field.getRecursionStrategy();
+        this.fetchType = field.getFetchType();
+        this.childFetcher = child;
+        this.typeBranchFetcher = null;
+    }
+
     @SuppressWarnings("unchecked")
     @Override
     public Class<E> getJavaClass() {
