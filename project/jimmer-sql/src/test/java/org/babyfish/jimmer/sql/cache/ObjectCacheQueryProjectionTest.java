@@ -120,6 +120,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import javax.sql.DataSource;
@@ -4117,16 +4118,23 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     .useObjectCache();
             List<Book> books = new ArrayList<>(joined.execute(con));
             joined.forEach(con, 1, books::add);
-            try (Stream<Book> stream = joined.stream(con)) {
-                stream.forEach(books::add);
-            }
+            assertThrows(UnsupportedOperationException.class, () -> joined.stream(con));
             books.addAll(joined.unionAll(joined).execute(con));
             books.addAll(joined.forUpdate().execute(con));
             books.addAll(joined.distinct().execute(con));
-            assertEquals(7, books.size());
+            assertEquals(6, books.size());
             assertTrue(books.stream().allMatch(book -> book.authors().stream().anyMatch(author ->
                     alexId.equals(author.id()) && "Alex".equals(author.firstName()))));
+            try (Stream<BookStore> stream = client.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.name()))
+                    .useObjectCache()
+                    .stream(con)) {
+                assertEquals(Collections.singletonList("O'REILLY"),
+                        stream.map(BookStore::name).collect(Collectors.toList()));
+            }
         });
+        assertTrue(cache.getAllKeys.isEmpty());
         assertTrue(authorCache.getAllKeys.isEmpty());
     }
 
