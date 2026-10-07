@@ -119,6 +119,15 @@ both passed on that exact commit,
 confirming every published POM, Gradle module metadata file and the Quarkus deployment
 descriptor, and the public smoke consumer builds from JitPack alone.
 
+### Concrete-carrier cache admission (upcoming 1.1.5)
+
+Cache admission is per fresh concrete carrier, not global across every mask branch: load a
+payload only when that carrier's applicable approved leaves are absent from retained SQL.
+Other concrete rows remain fully SQL-fresh and need no cache, while traversal still reaches
+their independently masked navigated children. Missing required cache content continues to
+decline to the complete original query. This correction is covered by the targeted mixed-branch
+regression; 1.1.5 availability remains unverified.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as

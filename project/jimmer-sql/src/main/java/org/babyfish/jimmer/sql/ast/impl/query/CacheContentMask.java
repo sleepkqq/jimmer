@@ -651,6 +651,10 @@ final class CacheContentMask {
         return !embedded && isCacheableNode(sqlClient) && hasStoredLeaves();
     }
 
+    boolean needsCache(ImmutableSpi fresh, JSqlClientImplementor sqlClient) {
+        return isCacheableNode(sqlClient) && hasMissingLeaves(fresh, this);
+    }
+
     /** Whether this node or any navigated descendant has cacheable leaves. */
     boolean hasCacheableLeaves(JSqlClientImplementor sqlClient) {
         if (isCacheableNode(sqlClient) && hasStoredLeaves()) {
@@ -870,7 +874,7 @@ final class CacheContentMask {
             if (!childNode.embedded && !isConcreteTypeEstablished(childSpi)) {
                 return false;
             }
-            if (childNode.hasCacheableOwnLeaves(sqlClient)) {
+            if (!childNode.embedded && childNode.needsCache(childSpi, sqlClient)) {
                 Object id = childSpi.__get(childNode.type.getIdProp().getId());
                 if (id != null) {
                     ImmutableType concreteType = childSpi.__type();
@@ -937,8 +941,7 @@ final class CacheContentMask {
             Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
             JSqlClientImplementor sqlClient
     ) {
-        boolean needsCache = node.isCacheableNode(sqlClient) && hasMissingLeaves(fresh, node);
-        if (needsCache && cached == null) {
+        if (node.needsCache(fresh, sqlClient) && cached == null) {
             return false;
         }
         return validateContent(fresh, node, cached, cachedByNode, sqlClient);

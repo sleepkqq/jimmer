@@ -98,6 +98,7 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherRecursiveParentKeepsAncestorNamesFresh' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherRecursiveChildNodesKeepDescendantNamesFresh' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskServesApprovedSubtypeLeaf' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherOnlyLoadsApplicableMissingBranchLeaves' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskDtoAndTupleParity' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchWrongConcreteTypeAndSubtypeChangeFallBack' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskRejectsProtectedAndUnselectedContent' \
@@ -114,7 +115,7 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testOrdinaryJoinedConcreteLeafKeepsPolymorphicBaseDiscriminator' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherInheritedBranchChildSelectionStaysSafe' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testLegacyBooleanHintMatchesOrdinaryPolymorphicShape' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 83 \
+            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 84 \
             org.babyfish.jimmer.sql.cache.ObjectCacheTest 18 \
             org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7
           python3 scripts/verify-test-results.py project/jimmer-sql-kotlin/build/test-results/test \

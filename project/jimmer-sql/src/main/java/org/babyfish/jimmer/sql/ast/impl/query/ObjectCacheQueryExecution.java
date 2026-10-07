@@ -542,7 +542,6 @@ final class ObjectCacheQueryExecution {
             if (slot == null || !slot.masked) {
                 continue;
             }
-            boolean ownLeaves = slot.node.hasCacheableOwnLeaves(sqlClient);
             PropId idPropId = slot.node.getType().getIdProp().getId();
             for (Object[] seed : seeds) {
                 Object seedValue = seed[i];
@@ -550,7 +549,7 @@ final class ObjectCacheQueryExecution {
                     continue;
                 }
                 ImmutableSpi fresh = (ImmutableSpi) seedValue;
-                if (ownLeaves) {
+                if (slot.node.needsCache(fresh, sqlClient)) {
                     Object id = fresh.__get(idPropId);
                     if (id != null) {
                         // The slot's own SQL selection (the guarded outer WHERE for a

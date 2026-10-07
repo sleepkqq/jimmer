@@ -1654,6 +1654,80 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testContentFetcherOnlyLoadsApplicableMissingBranchLeaves() {
+        MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
+        JSqlClient client = createClient(type ->
+                type.getJavaClass() == Organization.class ? organizationCache : null
+        );
+        ClientTable table = ClientTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Organization.class, Collections.singletonList(100L)));
+        organizationCache.clearHistory();
+        Fetcher<Client> projection =
+                ClientFetcher.$
+                        .name()
+                        .forType(OrganizationFetcher.$.taxCode())
+                        .forType(PersonFetcher.$.firstName().lastName());
+        try {
+            rawUpdate("update CLIENT set TAX_CODE = ? where ID = ?", "DB-TAX-100", 100L);
+            rawUpdate(
+                    "update CLIENT set NAME = ?, FIRST_NAME = ?, LAST_NAME = ? where ID = ?",
+                    "DB-PERSON", "Fresh", "Person", 101L
+            );
+            clearExecutions();
+            List<Client> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(projection))
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            Organization organization = assertInstanceOf(Organization.class, rows.get(0));
+            assertEquals(100L, organization.id());
+            assertEquals("ACME-001", organization.taxCode());
+            Person person = assertInstanceOf(Person.class, rows.get(1));
+            assertEquals(101L, person.id());
+            assertEquals("DB-PERSON", person.name());
+            assertEquals("Fresh", person.firstName());
+            assertEquals("Person", person.lastName());
+            assertEquals(1, getExecutions().size(), "the mixed page must not rerun the original query");
+
+            clearExecutions();
+            List<Tuple2<ClientImplicitCatchAllView, String>> dtoRows = new ArrayList<>();
+            jdbc(con -> dtoRows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(CLIENT_IDS))
+                            .orderBy(table.id())
+                            .select(table.fetch(ClientImplicitCatchAllView.class), table.type())
+                            .useObjectCache(ClientFetcher.$.forType(OrganizationFetcher.$.taxCode()))
+                            .execute(con)
+            ));
+            assertEquals(2, dtoRows.size());
+            assertEquals("ORG", dtoRows.get(0).get_2());
+            ClientImplicitCatchAllView.Organization organizationDto =
+                    assertInstanceOf(ClientImplicitCatchAllView.Organization.class, dtoRows.get(0).get_1());
+            assertEquals(100L, organizationDto.getId());
+            assertEquals("ACME-001", organizationDto.getTaxCode());
+            assertEquals("Person", dtoRows.get(1).get_2());
+            ClientImplicitCatchAllView.Default personDto =
+                    assertInstanceOf(ClientImplicitCatchAllView.Default.class, dtoRows.get(1).get_1());
+            assertEquals(101L, personDto.getId());
+            assertEquals("DB-PERSON", personDto.getName());
+            assertEquals(1, getExecutions().size(), "native DTO shaping must retain the one-query path");
+        } finally {
+            rawUpdate("update CLIENT set TAX_CODE = 'ACME-001' where ID = ?", 100L);
+            rawUpdate(
+                    "update CLIENT set NAME = 'Bob', FIRST_NAME = 'Bob', LAST_NAME = 'Brown' where ID = ?",
+                    101L
+            );
+            organizationCache.delete(100L);
+        }
+    }
+
+    @Test
     public void testContentFetcherBranchMaskDtoAndTupleParity() {
         MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
         JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
