@@ -119,14 +119,25 @@ both passed on that exact commit,
 confirming every published POM, Gradle module metadata file and the Quarkus deployment
 descriptor, and the public smoke consumer builds from JitPack alone.
 
-### Concrete-carrier cache admission (upcoming 1.1.5)
+### Concrete-carrier cache admission in 1.1.5
 
 Cache admission is per fresh concrete carrier, not global across every mask branch: load a
 payload only when that carrier's applicable approved leaves are absent from retained SQL.
 Other concrete rows remain fully SQL-fresh and need no cache, while traversal still reaches
 their independently masked navigated children. Missing required cache content continues to
-decline to the complete original query. This correction is covered by the targeted mixed-branch
-regression; 1.1.5 availability remains unverified.
+decline to the complete original query. The mixed-organization/person regression verifies
+that a branch with no applicable missing content does not require a cache entry; it passed
+with the full 1.1.5 CI run.
+
+The immutable annotated `1.1.5` tag (`34068a2`, peeled
+[`0846dc0`](https://github.com/sleepkqq/jimmer/commit/0846dc0b12b2a36a913436adc5caa98e38e35fec))
+is available. [Fork CI](https://github.com/sleepkqq/jimmer/actions/runs/37594479986)
+passed on the exact commit, including the full build, object-cache tests, native PostgreSQL,
+JTA and isolated tests; 139 targeted tests completed with no failures or skips. The anonymous
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37595457359)
+also succeeded on its second attempt on the exact commit: it verified the 1.1.5 POMs,
+Gradle module metadata and Quarkus deployment descriptor, and the anonymous JitPack-only
+smoke consumer built successfully.
 
 ### Reference IDs in bulk update-returning in 1.0.7
 
@@ -166,14 +177,14 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.4`, replace
+For version `1.1.5`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.4`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.4`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.5`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.5`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.4` artifacts are
+this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.5` artifacts are
 verified available from anonymous JitPack with the release check below; a tag alone does not
 establish artifact availability.
 
