@@ -34,6 +34,10 @@ final class TestCacheConfigs {
     }
 
     static JimmerCacheConfig.EntityCacheConfig entity(String type, CacheMode mode) {
+        return entity(type, mode, false);
+    }
+
+    static JimmerCacheConfig.EntityCacheConfig entity(String type, CacheMode mode, boolean contentOnly) {
         return new JimmerCacheConfig.EntityCacheConfig() {
             @Override
             public String type() {
@@ -63,6 +67,11 @@ final class TestCacheConfigs {
             @Override
             public boolean cacheAssociations() {
                 return true;
+            }
+
+            @Override
+            public boolean contentOnly() {
+                return contentOnly;
             }
 
             @Override

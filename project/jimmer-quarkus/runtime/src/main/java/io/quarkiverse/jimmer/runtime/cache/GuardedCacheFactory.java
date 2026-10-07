@@ -32,6 +32,11 @@ public class GuardedCacheFactory implements FilterStateAwareCacheFactory {
     }
 
     @Override
+    public boolean isObjectCacheContentOnly(ImmutableType type) {
+        return delegate.isObjectCacheContentOnly(type);
+    }
+
+    @Override
     public Cache<?, ?> createAssociatedIdCache(ImmutableProp prop) {
         return GuardedCache.wrap(delegate.createAssociatedIdCache(prop), ready);
     }

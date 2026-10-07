@@ -26,6 +26,8 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheAbandonedCallback;
 import org.babyfish.jimmer.sql.cache.CacheEnvironment;
+import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
+import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.exception.ExecutionException;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.FieldFilter;
@@ -50,6 +52,8 @@ public abstract class AbstractDataLoader {
             Collections.unmodifiableSortedMap(new TreeMap<>());
 
     private final JSqlClientImplementor sqlClient;
+
+    private final boolean isolatedFetcherContext;
 
     private final Connection con;
 
@@ -151,7 +155,13 @@ public abstract class AbstractDataLoader {
                     "\"" + prop + "\" is not declared in entity"
             );
         }
-        this.sqlClient = sqlClient;
+        Caches caches = sqlClient.getCaches();
+        isolatedFetcherContext = caches.isObjectCacheContentOnly(prop.getDeclaringType()) ||
+                prop.isAssociation(TargetLevel.ENTITY) &&
+                        caches.isObjectCacheContentOnly(prop.getTargetType());
+        this.sqlClient = isolatedFetcherContext ?
+                sqlClient.caches(CacheDisableConfig::disableAll) :
+                sqlClient;
         this.con = con;
         this.path = FetchPath.of(path, prop);
         this.prop = prop;
@@ -192,11 +202,18 @@ public abstract class AbstractDataLoader {
         }
     }
 
-    @SuppressWarnings("unchecked")
     public Map<ImmutableSpi, Object> load(Collection<ImmutableSpi> sources) {
         if (sources.isEmpty()) {
             return Collections.emptyMap();
         }
+        // Nested SQL fetches must not rejoin an ambient cache-enabled fetcher context.
+        return isolatedFetcherContext ?
+                FetcherUtil.withoutFetcherContext(() -> loadImpl(sources)) :
+                loadImpl(sources);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<ImmutableSpi, Object> loadImpl(Collection<ImmutableSpi> sources) {
         if (resolver != null) {
             return loadTransients(sources);
         }

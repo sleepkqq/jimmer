@@ -81,6 +81,7 @@ jobs:
           bash project/gradlew -p project --max-workers=2 :jimmer-sql:test \
             --tests 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest' \
             --tests 'org.babyfish.jimmer.sql.cache.ObjectCacheTest' \
+            --tests 'org.babyfish.jimmer.sql.query.GlobalFilterTest.testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
             --tests 'org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest'
           bash project/gradlew -p project --max-workers=2 :jimmer-sql-kotlin:test \
             --tests 'org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest'
@@ -115,8 +116,15 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testOrdinaryJoinedConcreteLeafKeepsPolymorphicBaseDiscriminator' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherInheritedBranchChildSelectionStaysSafe' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testLegacyBooleanHintMatchesOrdinaryPolymorphicShape' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 84 \
-            org.babyfish.jimmer.sql.cache.ObjectCacheTest 18 \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyObjectCacheDoesNotServeOrdinaryEntityOrDtoReads' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyBooleanFetcherHintKeepsCommittedFieldsFresh' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyAssociationSubtreeDoesNotReuseAmbientCacheContext' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherMergedQueriesKeepUnapprovedSelectedChildFresh' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentOnlyBasePolicyCoversSubtypeAndSelectAssociationReads' \
+            --case 'org.babyfish.jimmer.sql.query.GlobalFilterTest#testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
+            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 86 \
+            org.babyfish.jimmer.sql.cache.ObjectCacheTest 21 \
+            org.babyfish.jimmer.sql.query.GlobalFilterTest 1 \
             org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7
           python3 scripts/verify-test-results.py project/jimmer-sql-kotlin/build/test-results/test \
             --case 'org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest#testDelegatedClientWarmMixedTupleUsesSkeleton' \
@@ -199,16 +207,25 @@ jobs:
           java-version: '21'
           distribution: temurin
       - uses: gradle/actions/setup-gradle@v6.3.0
-      - name: Quarkus nested-JTA and transaction-known-inactive guard
-        run: project/gradlew -p project --max-workers=2 :jimmer-quarkus:integration-tests:test --tests 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest'
-      - name: Require the nested-JTA object-cache cases to run without skips
+      - name: Quarkus cache policy and transaction-known-inactive guards
+        run: project/gradlew -p project --max-workers=2 :jimmer-quarkus:integration-tests:test --tests 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest' --tests 'io.quarkiverse.jimmer.it.ConfiguredCacheGuardTest' --tests 'io.quarkiverse.jimmer.it.CacheModeReadTest' --tests 'io.quarkiverse.jimmer.it.LocalOnlyCacheFactoryTest'
+      - name: Require cache policy and transaction cases to run without skips
         run: |
           python3 scripts/verify-test-results.py project/jimmer-quarkus/integration-tests/build/test-results/test \
             --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#useObjectCacheInsideTransactionDoesNotReturnStaleCachedData' \
             --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherInsideTransactionDoesNotReturnStaleCachedData' \
             --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherNestedChildInsideTransactionReadsPendingTarget' \
             --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherColdCacheInsideTransactionNeverPublishesPendingValue' \
-            io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest 13
+            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherMergedColdCacheInsideTransactionNeverPublishesPendingValue' \
+            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#ordinaryAssociationReadBypassesStaleEdgeAndUnapprovedChildCache' \
+            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#ordinaryWarmAndColdAssociationReadsDoNotPublishRolledBackChild' \
+            --case 'io.quarkiverse.jimmer.it.ConfiguredCacheGuardTest#yamlConfigAppliesGuardAndNamespaceToTheExistingFactory' \
+            --case 'io.quarkiverse.jimmer.it.CacheModeReadTest#contentOnlyPolicyIsPreservedByEveryRedisCacheMode' \
+            --case 'io.quarkiverse.jimmer.it.LocalOnlyCacheFactoryTest#buildsCaffeineOnlyCacheForConfiguredEntity' \
+            io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest 17 \
+            io.quarkiverse.jimmer.it.ConfiguredCacheGuardTest 1 \
+            io.quarkiverse.jimmer.it.CacheModeReadTest 13 \
+            io.quarkiverse.jimmer.it.LocalOnlyCacheFactoryTest 4
       - name: Upload Quarkus nested-JTA evidence
         if: always()
         uses: actions/upload-artifact@v7

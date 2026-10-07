@@ -848,6 +848,11 @@ final class ObjectCacheQueryExecution {
         if (!hasObjectCacheInHierarchy(sqlClient, entityType)) {
             return false;
         }
+        // This is the legacy boolean/no-argument hint path. Content-only entities may
+        // use their cache only through the separate explicit cachedContent path above.
+        if (sqlClient.getCaches().isObjectCacheContentOnly(entityType)) {
+            return false;
+        }
         if (fetcher != null && hasEffectiveJoinFetch(fetcher, sqlClient)) {
             return false;
         }

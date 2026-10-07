@@ -3,6 +3,7 @@ package io.quarkiverse.jimmer.it;
 import static io.quarkiverse.jimmer.it.TestCacheConfigs.config;
 import static io.quarkiverse.jimmer.it.TestCacheConfigs.entity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -29,11 +30,13 @@ import org.babyfish.jimmer.sql.cache.CacheLoader;
 import org.babyfish.jimmer.sql.cache.CacheTracker;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.api.Test;
 
 import io.quarkiverse.jimmer.it.entity.Book;
 import io.quarkiverse.jimmer.it.entity.BookProps;
 import io.quarkiverse.jimmer.it.entity.BookTable;
 import io.quarkiverse.jimmer.runtime.cache.CacheMode;
+import io.quarkiverse.jimmer.runtime.cache.GuardedCacheFactory;
 import io.quarkiverse.jimmer.runtime.cache.JimmerRedisCacheFactory;
 import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -88,6 +91,22 @@ class CacheModeReadTest {
             assertNotNull(cache.getAll(List.of(id), env).get(id));
             // second read is served by the cache tiers themselves, still traversing the chain
             assertNotNull(cache.getAll(List.of(id), env).get(id));
+        }
+    }
+
+    @Test
+    void contentOnlyPolicyIsPreservedByEveryRedisCacheMode() {
+        for (CacheMode mode : CacheMode.values()) {
+            JimmerRedisCacheFactory factory = new JimmerRedisCacheFactory(
+                    redisDataSource,
+                    config(entity("Book", mode, true)),
+                    null,
+                    cacheTracker);
+            GuardedCacheFactory guarded = new GuardedCacheFactory(factory, () -> false);
+
+            assertTrue(guarded.isObjectCacheContentOnly(ImmutableType.get(Book.class)), mode.toString());
+            assertFalse(guarded.isObjectCacheContentOnly(ImmutableType.get(io.quarkiverse.jimmer.it.entity.Author.class)),
+                    mode.toString());
         }
     }
 

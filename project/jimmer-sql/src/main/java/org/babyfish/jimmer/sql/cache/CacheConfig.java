@@ -169,6 +169,7 @@ public class CacheConfig {
 
         Map<ImmutableType, Cache<?, ?>> finalObjectCacheMap = new LinkedHashMap<>();
         Map<ImmutableProp, Cache<?, ?>> finalPropCacheMap = new LinkedHashMap<>();
+        Set<ImmutableType> objectCacheContentOnlyTypes = new LinkedHashSet<>();
 
         if (cacheFactory instanceof FilterStateAware) {
             Set<ImmutableType> affectedTypes =
@@ -195,6 +196,9 @@ public class CacheConfig {
                 }
                 if (finalObjectCache != null) {
                     finalObjectCacheMap.put(type, finalObjectCache);
+                    if (cacheFactory != null && cacheFactory.isObjectCacheContentOnly(type)) {
+                        objectCacheContentOnlyTypes.add(type);
+                    }
                 }
                 for (ImmutableProp prop : type.getProps().values()) {
                     Cache<?, ?> finalPropCache = propCacheMap.get(prop);
@@ -234,7 +238,8 @@ public class CacheConfig {
                 finalObjectCacheMap,
                 finalPropCacheMap,
                 operator,
-                CompositeCacheAbandonedCallback.combine(abandonedCallbacks)
+                CompositeCacheAbandonedCallback.combine(abandonedCallbacks),
+                objectCacheContentOnlyTypes
         );
     }
 }

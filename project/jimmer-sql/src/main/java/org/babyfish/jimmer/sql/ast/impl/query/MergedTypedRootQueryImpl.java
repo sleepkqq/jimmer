@@ -10,6 +10,8 @@ import org.babyfish.jimmer.sql.ast.impl.render.AbstractSqlBuilder;
 import org.babyfish.jimmer.sql.ast.impl.table.TableTypeProvider;
 import org.babyfish.jimmer.sql.ast.query.TypedRootQuery;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
+import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherUtil;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherSelection;
 import org.babyfish.jimmer.sql.runtime.*;
 import org.jetbrains.annotations.NotNull;
@@ -140,9 +142,19 @@ public class MergedTypedRootQueryImpl<R> implements TypedRootQueryImplementor<R>
     }
 
     private List<R> executeImpl(Connection con) {
-        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(new SqlBuilder(new AstContext(sqlClient)));
+        boolean masked = hasContentCacheHint();
+        JSqlClientImplementor readClient = masked ?
+                sqlClient.caches(CacheDisableConfig::disableAll) :
+                sqlClient;
+        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(readClient, masked);
+        return masked ? FetcherUtil.withoutFetcherContext(() -> select(con, readClient, sqlResult)) :
+                select(con, readClient, sqlResult);
+    }
+
+    private List<R> select(Connection con, JSqlClientImplementor readClient,
+                           Tuple3<String, List<Object>, List<Integer>> sqlResult) {
         return Selectors.select(
-                sqlClient,
+                readClient,
                 con,
                 sqlResult.get_1(),
                 sqlResult.get_2(),
@@ -157,9 +169,13 @@ public class MergedTypedRootQueryImpl<R> implements TypedRootQueryImplementor<R>
 
     @Override
     public Stream<R> stream(Connection con) {
-        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(new SqlBuilder(new AstContext(sqlClient)));
+        boolean masked = hasContentCacheHint();
+        JSqlClientImplementor readClient = masked ?
+                sqlClient.caches(CacheDisableConfig::disableAll) :
+                sqlClient;
+        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(readClient, masked);
         return Selectors.stream(
-                sqlClient,
+                readClient,
                 con,
                 sqlResult.get_1(),
                 sqlResult.get_2(),
@@ -192,26 +208,59 @@ public class MergedTypedRootQueryImpl<R> implements TypedRootQueryImplementor<R>
     }
 
     private void forEachImpl(Connection con, int batchSize, Consumer<R> consumer) {
-        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(new SqlBuilder(new AstContext(sqlClient)));
-        Selectors.forEach(
-                sqlClient,
-                con,
-                sqlResult.get_1(),
-                sqlResult.get_2(),
-                sqlResult.get_3(),
-                selections,
-                tupleCreator,
-                ExecutionPurpose.QUERY,
-                batchSize,
-                consumer,
-                forUpdate != null
-        );
+        boolean masked = hasContentCacheHint();
+        JSqlClientImplementor readClient = masked ?
+                sqlClient.caches(CacheDisableConfig::disableAll) :
+                sqlClient;
+        Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(readClient, masked);
+        Runnable read = () -> Selectors.forEach(
+                    readClient,
+                    con,
+                    sqlResult.get_1(),
+                    sqlResult.get_2(),
+                    sqlResult.get_3(),
+                    selections,
+                    tupleCreator,
+                    ExecutionPurpose.QUERY,
+                    batchSize,
+                    consumer,
+                    forUpdate != null
+            );
+        if (masked) {
+            FetcherUtil.withoutFetcherContext(() -> {
+                read.run();
+                return null;
+            });
+        } else {
+            read.run();
+        }
     }
 
-    private Tuple3<String, List<Object>, List<Integer>> preExecute(SqlBuilder builder) {
+    private Tuple3<String, List<Object>, List<Integer>> preExecute(
+            JSqlClientImplementor renderClient,
+            boolean masked
+    ) {
+        AstContext astContext = masked ?
+                new AstContext(renderClient, QueryRenderMode.NORMAL) :
+                new AstContext(renderClient);
+        SqlBuilder builder = new SqlBuilder(astContext);
         builder.setQueryAnalysis(QueryAnalyzer.analyze(builder.getAstContext(), this));
         renderTo(builder);
         return builder.build();
+    }
+
+    private boolean hasContentCacheHint() {
+        for (TypedRootQueryImplementor<?> query : queries) {
+            if (query instanceof MergedTypedRootQueryImpl<?>) {
+                if (((MergedTypedRootQueryImpl<?>) query).hasContentCacheHint()) {
+                    return true;
+                }
+            } else if (query instanceof ConfigurableRootQueryImpl<?, ?> &&
+                    ((ConfigurableRootQueryImpl<?, ?>) query).getData().cachedContent != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

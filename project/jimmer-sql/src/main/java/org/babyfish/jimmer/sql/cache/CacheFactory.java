@@ -10,6 +10,14 @@ import java.util.List;
 public interface CacheFactory {
 
     /**
+     * Whether this entity cache is content-only and must not serve ordinary native entity reads.
+     * Explicit query cache hints can still use it after their SQL-authoritative projection.
+     */
+    default boolean isObjectCacheContentOnly(ImmutableType type) {
+        return false;
+    }
+
+    /**
      * Create cache for an entity type.
      *
      * <p>If you don't want all entity types to support object caching,

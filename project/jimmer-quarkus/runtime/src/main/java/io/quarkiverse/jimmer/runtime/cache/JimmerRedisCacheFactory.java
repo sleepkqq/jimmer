@@ -94,6 +94,12 @@ public class JimmerRedisCacheFactory extends AbstractCacheFactory {
     }
 
     @Override
+    public boolean isObjectCacheContentOnly(ImmutableType type) {
+        JimmerCacheConfig.EntityCacheConfig config = configByType.get(type.getJavaClass().getSimpleName());
+        return config != null && config.contentOnly();
+    }
+
+    @Override
     public Cache<?, ?> createAssociatedIdCache(ImmutableProp prop) {
         return associationCache(prop);
     }

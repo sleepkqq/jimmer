@@ -90,6 +90,12 @@ public interface JimmerCacheConfig {
         boolean cacheAssociations();
 
         /**
+         * Keep this entity cache for explicit content-only query hints; ordinary entity reads remain SQL-backed.
+         */
+        @WithDefault("false")
+        boolean contentOnly();
+
+        /**
          * Random jitter percent added to the remote TTL to avoid a synchronized mass expiry (cache stampede).
          */
         @WithDefault("25")

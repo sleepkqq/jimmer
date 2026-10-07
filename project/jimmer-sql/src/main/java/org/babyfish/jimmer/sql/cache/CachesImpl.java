@@ -29,12 +29,25 @@ public class CachesImpl implements Caches {
 
     private final Set<ImmutableProp> disabledProps;
 
+    private final Set<ImmutableType> objectCacheContentOnlyTypes;
+
     public CachesImpl(
             Triggers triggers,
             Map<ImmutableType, Cache<?, ?>> objectCacheMap,
             Map<ImmutableProp, Cache<?, ?>> propCacheMap,
             CacheOperator operator,
             CacheAbandonedCallback abandonedCallback
+    ) {
+        this(triggers, objectCacheMap, propCacheMap, operator, abandonedCallback, Collections.emptySet());
+    }
+
+    public CachesImpl(
+            Triggers triggers,
+            Map<ImmutableType, Cache<?, ?>> objectCacheMap,
+            Map<ImmutableProp, Cache<?, ?>> propCacheMap,
+            CacheOperator operator,
+            CacheAbandonedCallback abandonedCallback,
+            Set<ImmutableType> objectCacheContentOnlyTypes
     ) {
         Map<ImmutableType, UsedCache<?, ?>> objectCacheWrapperMap = new LinkedHashMap<>();
         for (Map.Entry<ImmutableType, Cache<?, ?>> e : objectCacheMap.entrySet()) {
@@ -54,6 +67,9 @@ public class CachesImpl implements Caches {
         this.disableAll = false;
         this.disabledTypes = Collections.emptySet();
         this.disabledProps = Collections.emptySet();
+        this.objectCacheContentOnlyTypes = Collections.unmodifiableSet(
+                new LinkedHashSet<>(objectCacheContentOnlyTypes)
+        );
     }
 
     public CachesImpl(
@@ -68,6 +84,7 @@ public class CachesImpl implements Caches {
         disableAll = cfg.isDisableAll();
         disabledTypes = cfg.getDisabledTypes();
         disabledProps = cfg.getDisabledProps();
+        objectCacheContentOnlyTypes = base.objectCacheContentOnlyTypes;
     }
 
     public Map<ImmutableType, UsedCache<?, ?>> getObjectCacheMap() {
@@ -85,6 +102,21 @@ public class CachesImpl implements Caches {
             return null;
         }
         return UsedCacheImpl.export((UsedCache<K, V>)objectCacheMap.get(type));
+    }
+
+    @Override
+    public boolean isObjectCacheContentOnly(ImmutableType type) {
+        for (ImmutableType superType : type.getAllTypes()) {
+            if (objectCacheContentOnlyTypes.contains(superType)) {
+                return true;
+            }
+        }
+        for (ImmutableType derivedType : type.getAllDerivedTypes()) {
+            if (objectCacheContentOnlyTypes.contains(derivedType)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @SuppressWarnings("unchecked")

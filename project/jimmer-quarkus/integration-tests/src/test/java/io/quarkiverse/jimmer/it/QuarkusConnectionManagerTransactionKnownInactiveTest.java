@@ -27,7 +27,9 @@ import jakarta.transaction.TransactionManager;
 
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.JSqlClient;
+import org.babyfish.jimmer.sql.ast.query.TypedRootQuery;
 import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.CacheEnvironment;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.babyfish.jimmer.sql.fetcher.ReferenceFetchType;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import io.quarkiverse.jimmer.it.entity.Book;
 import io.quarkiverse.jimmer.it.entity.BookFetcher;
+import io.quarkiverse.jimmer.it.entity.BookProps;
 import io.quarkiverse.jimmer.it.entity.BookStore;
 import io.quarkiverse.jimmer.it.entity.BookStoreFetcher;
 import io.quarkiverse.jimmer.it.entity.BookStoreTable;
@@ -65,7 +68,8 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
      * by {@code ConfiguredCacheGuardTest} and {@code RedisCacheTimeoutTest}) that
      * excludes the application's blanket {@code CacheConfig} so the runtime
      * {@code JimmerRedisCacheFactory} is the single resolved factory, then enables
-     * {@code BookStore} explicitly. Without it the default client resolves no cache
+     * the {@code BookStore} content-only cache and {@code Book} association cache.
+     * Without it the default client resolves no cache
      * factory and the cache-bypass assertion below would be vacuous.
      */
     public static class Profile implements QuarkusTestProfile {
@@ -74,7 +78,10 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
             return Map.of(
                     "quarkus.arc.exclude-types", "io.quarkiverse.jimmer.it.config.CacheConfig",
                     "quarkus.jimmer.cache.entities[0].type", "BookStore",
-                    "quarkus.jimmer.cache.entities[0].mode", "FULL");
+                    "quarkus.jimmer.cache.entities[0].mode", "FULL",
+                    "quarkus.jimmer.cache.entities[0].content-only", "true",
+                    "quarkus.jimmer.cache.entities[1].type", "Book",
+                    "quarkus.jimmer.cache.entities[1].mode", "FULL");
         }
     }
 
@@ -263,7 +270,11 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
             }
             // The guard must be false while the transaction is active, so the query
             // reads the uncommitted value instead of the warmed cache value.
-            List<BookStore> inTx = queryStore(id);
+            List<BookStore> inTx = sqlClient.createQuery(BookStoreTable.$)
+                    .where(BookStoreTable.$.id().eq(id))
+                    .select(BookStoreTable.$.fetch(BookStoreFetcher.$.name()))
+                    .useObjectCache()
+                    .execute();
             assertEquals(1, inTx.size());
             assertEquals(pending, inTx.get(0).name());
         } finally {
@@ -348,11 +359,199 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
         assertEquals(original, after.get(0).name());
     }
 
-    /**
-     * The nested child path is no exception: inside a JTA transaction the masked hint
-     * must read the pending FK edge and the pending child fact instead of the warm
-     * child cache, and a rollback must not publish the uncommitted child.
-     */
+    @Test
+    void contentFetcherMergedColdCacheInsideTransactionNeverPublishesPendingValue() throws Exception {
+        long bookId = anyBookId();
+        long id = bookStoreId(bookId);
+        String original = storeName(id);
+        Cache<Object, BookStore> cache =
+                sqlClient.getCaches().<Object, BookStore>getObjectCache(ImmutableType.get(BookStore.class));
+        assertNotNull(cache, "The BookStore object cache must be configured");
+        cache.deleteAll(Collections.singletonList(id), null);
+
+        String pending = original + "-pending";
+        transactionManager.begin();
+        try (Connection con = dataSource.getConnection()) {
+            try (PreparedStatement ps = con.prepareStatement("update BOOK_STORE set NAME = ? where ID = ?")) {
+                ps.setString(1, pending);
+                ps.setLong(2, id);
+                assertEquals(1, ps.executeUpdate());
+            }
+            List<Book> inTx = TypedRootQuery.unionAll(
+                    sqlClient.createQuery(BookTable.$)
+                            .where(BookTable.$.id().eq(bookId))
+                            .select(BookTable.$.fetch(BookFetcher.$.store(
+                                    ReferenceFetchType.SELECT,
+                                    BookStoreFetcher.$.name()
+                            ))),
+                    sqlClient.createQuery(BookTable.$)
+                            .where(BookTable.$.id().eq(bookId))
+                            .select(BookTable.$.fetch(BookFetcher.$.store(
+                                    ReferenceFetchType.SELECT,
+                                    BookStoreFetcher.$.name()
+                            )))
+                            .useObjectCache(BookFetcher.$.store(BookStoreFetcher.$.name()))
+            ).execute();
+            assertEquals(2, inTx.size());
+            assertEquals(pending, inTx.get(0).store().name());
+            assertEquals(pending, inTx.get(1).store().name());
+        } finally {
+            transactionManager.rollback();
+        }
+
+        // A cold child load in the merged transaction must not publish its pending value.
+        List<BookStore> after = queryStore(id);
+        assertEquals(1, after.size());
+        assertEquals(original, after.get(0).name());
+    }
+
+    @Test
+    void ordinaryAssociationReadBypassesStaleEdgeAndUnapprovedChildCache() throws Exception {
+        long bookId = anyBookId();
+        long originalStoreId = bookStoreId(bookId);
+        long targetStoreId = anyOtherStoreId(originalStoreId);
+        String originalName = storeName(targetStoreId);
+        int originalVersion = storeVersion(targetStoreId);
+        String committedName = originalName + "-committed";
+        int committedVersion = originalVersion + 1;
+
+        // Seed a stale Book.store edge and child display in the real shared caches.
+        Cache<Object, Object> edgeCache = sqlClient.getCaches().getPropertyCache(BookProps.STORE.unwrap());
+        Cache<Object, BookStore> storeCache =
+                sqlClient.getCaches().<Object, BookStore>getObjectCache(ImmutableType.get(BookStore.class));
+        assertNotNull(edgeCache);
+        assertNotNull(storeCache);
+        queryStore(targetStoreId);
+        try (Connection con = dataSource.getConnection()) {
+            edgeCache.getAll(Collections.<Object>singletonList(bookId), new CacheEnvironment<>(
+                    sqlClient,
+                    con,
+                    keys -> Map.<Object, Object>of(bookId, originalStoreId),
+                    false
+            ));
+        }
+
+        try {
+            try (Connection con = dataSource.getConnection()) {
+                con.setAutoCommit(true);
+                try (PreparedStatement ps = con.prepareStatement("update BOOK set STORE_ID = ? where ID = ?")) {
+                    ps.setLong(1, targetStoreId);
+                    ps.setLong(2, bookId);
+                    assertEquals(1, ps.executeUpdate());
+                }
+                try (PreparedStatement ps = con.prepareStatement(
+                        "update BOOK_STORE set NAME = ?, VERSION = ? where ID = ?"
+                )) {
+                    ps.setString(1, committedName);
+                    ps.setInt(2, committedVersion);
+                    ps.setLong(3, targetStoreId);
+                    assertEquals(1, ps.executeUpdate());
+                }
+            }
+
+            List<Book> rows = sqlClient.createQuery(BookTable.$)
+                    .where(BookTable.$.id().eq(bookId))
+                    .select(BookTable.$.fetch(BookFetcher.$.store(BookStoreFetcher.$.name().version())))
+                    .execute();
+            assertEquals(1, rows.size());
+            assertEquals(targetStoreId, rows.get(0).store().id());
+            assertEquals(committedName, rows.get(0).store().name());
+            assertEquals(committedVersion, rows.get(0).store().version());
+        } finally {
+            try (Connection con = dataSource.getConnection()) {
+                con.setAutoCommit(true);
+                try (PreparedStatement ps = con.prepareStatement("update BOOK set STORE_ID = ? where ID = ?")) {
+                    ps.setLong(1, originalStoreId);
+                    ps.setLong(2, bookId);
+                    assertEquals(1, ps.executeUpdate());
+                }
+                try (PreparedStatement ps = con.prepareStatement(
+                        "update BOOK_STORE set NAME = ?, VERSION = ? where ID = ?"
+                )) {
+                    ps.setString(1, originalName);
+                    ps.setInt(2, originalVersion);
+                    ps.setLong(3, targetStoreId);
+                    assertEquals(1, ps.executeUpdate());
+                }
+            }
+            edgeCache.delete(bookId);
+            storeCache.delete(targetStoreId);
+        }
+    }
+
+    @Test
+    void ordinaryWarmAndColdAssociationReadsDoNotPublishRolledBackChild() throws Exception {
+        long bookId = anyBookId();
+        long originalStoreId = bookStoreId(bookId);
+        long targetStoreId = anyOtherStoreId(originalStoreId);
+        String originalName = storeName(targetStoreId);
+        Cache<Object, BookStore> storeCache =
+                sqlClient.getCaches().<Object, BookStore>getObjectCache(ImmutableType.get(BookStore.class));
+        Cache<Object, Object> edgeCache = sqlClient.getCaches().getPropertyCache(BookProps.STORE.unwrap());
+        assertNotNull(storeCache);
+        assertNotNull(edgeCache);
+
+        List<BookStore> warm = queryStore(targetStoreId);
+        assertEquals(1, warm.size());
+        try (Connection con = dataSource.getConnection()) {
+            edgeCache.getAll(Collections.<Object>singletonList(bookId), new CacheEnvironment<>(
+                    sqlClient,
+                    con,
+                    keys -> Map.<Object, Object>of(bookId, originalStoreId),
+                    false
+            ));
+        }
+
+        String warmPendingName = originalName + "-warm-pending";
+        assertOrdinaryAssociationInsideTransaction(bookId, targetStoreId, warmPendingName);
+        assertEquals(originalStoreId, bookStoreId(bookId));
+        assertEquals(originalName, storeName(targetStoreId));
+        List<BookStore> afterWarmRollback = queryStore(targetStoreId);
+        assertEquals(1, afterWarmRollback.size());
+        assertEquals(originalName, afterWarmRollback.get(0).name());
+
+        // Repeat after clearing both tiers so the uncommitted child load is cold.
+        storeCache.delete(targetStoreId);
+        edgeCache.delete(bookId);
+
+        String pendingName = originalName + "-pending";
+        assertOrdinaryAssociationInsideTransaction(bookId, targetStoreId, pendingName);
+
+        assertEquals(originalStoreId, bookStoreId(bookId));
+        assertEquals(originalName, storeName(targetStoreId));
+        List<BookStore> after = queryStore(targetStoreId);
+        assertEquals(1, after.size());
+        assertEquals(originalName, after.get(0).name());
+        storeCache.delete(targetStoreId);
+        edgeCache.delete(bookId);
+    }
+
+    private void assertOrdinaryAssociationInsideTransaction(long bookId, long storeId, String pendingName)
+            throws Exception {
+        transactionManager.begin();
+        try (Connection con = dataSource.getConnection()) {
+            try (PreparedStatement ps = con.prepareStatement("update BOOK set STORE_ID = ? where ID = ?")) {
+                ps.setLong(1, storeId);
+                ps.setLong(2, bookId);
+                assertEquals(1, ps.executeUpdate());
+            }
+            try (PreparedStatement ps = con.prepareStatement("update BOOK_STORE set NAME = ? where ID = ?")) {
+                ps.setString(1, pendingName);
+                ps.setLong(2, storeId);
+                assertEquals(1, ps.executeUpdate());
+            }
+            List<Book> inTx = sqlClient.createQuery(BookTable.$)
+                    .where(BookTable.$.id().eq(bookId))
+                    .select(BookTable.$.fetch(BookFetcher.$.store(BookStoreFetcher.$.name())))
+                    .execute();
+            assertEquals(1, inTx.size());
+            assertEquals(storeId, inTx.get(0).store().id());
+            assertEquals(pendingName, inTx.get(0).store().name());
+        } finally {
+            transactionManager.rollback();
+        }
+    }
+
     @Test
     void contentFetcherNestedChildInsideTransactionReadsPendingTarget() throws Exception {
         long bookId = anyBookId();
@@ -360,9 +559,11 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
         long otherStoreId = anyOtherStoreId(originalStoreId);
         String originalOtherName = storeName(otherStoreId);
 
-        // Warm the currently committed child through the ordinary object-cache path.
+        // Warm approved display content for both possible children.
         List<BookStore> warm = queryStore(originalStoreId);
         assertEquals(1, warm.size());
+        List<BookStore> warmOther = queryStore(otherStoreId);
+        assertEquals(1, warmOther.size());
 
         String pendingName = originalOtherName + "-pending";
         transactionManager.begin();
@@ -385,6 +586,25 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
             assertEquals(1, inTx.size());
             assertEquals(otherStoreId, inTx.get(0).store().id());
             assertEquals(pendingName, inTx.get(0).store().name());
+
+            List<Book> mergedInTx = TypedRootQuery.unionAll(
+                    sqlClient.createQuery(BookTable.$)
+                            .where(BookTable.$.id().eq(bookId))
+                            .select(BookTable.$.fetch(BookFetcher.$.store(
+                                    ReferenceFetchType.SELECT,
+                                    BookStoreFetcher.$.name()
+                            ))),
+                    sqlClient.createQuery(BookTable.$)
+                            .where(BookTable.$.id().eq(bookId))
+                            .select(BookTable.$.fetch(BookFetcher.$.store(
+                                    ReferenceFetchType.SELECT,
+                                    BookStoreFetcher.$.name()
+                            )))
+                            .useObjectCache(BookFetcher.$.store(BookStoreFetcher.$.name()))
+            ).execute();
+            assertEquals(2, mergedInTx.size());
+            assertEquals(pendingName, mergedInTx.get(0).store().name());
+            assertEquals(pendingName, mergedInTx.get(1).store().name());
         } finally {
             transactionManager.rollback();
         }
@@ -394,6 +614,7 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
         List<BookStore> after = queryStore(otherStoreId);
         assertEquals(1, after.size());
         assertEquals(originalOtherName, after.get(0).name());
+        assertEquals(originalStoreId, bookStoreId(bookId));
     }
 
     private long anyBookId() {
@@ -413,6 +634,14 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
                 .get(0);
     }
 
+    private int storeVersion(long id) {
+        return sqlClient.createQuery(BookStoreTable.$)
+                .where(BookStoreTable.$.id().eq(id))
+                .select(BookStoreTable.$.version())
+                .execute()
+                .get(0);
+    }
+
     private long anyOtherStoreId(long storeId) {
         return sqlClient.createQuery(BookStoreTable.$)
                 .where(BookStoreTable.$.id().ne(storeId))
@@ -425,8 +654,8 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
     private List<BookStore> queryStore(long id) {
         return sqlClient.createQuery(BookStoreTable.$)
                 .where(BookStoreTable.$.id().eq(id))
-                .select(BookStoreTable.$.fetch(BookStoreFetcher.$.allScalarFields()))
-                .useObjectCache()
+                .select(BookStoreTable.$.fetch(BookStoreFetcher.$.name()))
+                .useObjectCache(BookStoreFetcher.$.name())
                 .execute();
     }
 

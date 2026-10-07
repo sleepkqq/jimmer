@@ -12,10 +12,12 @@ import org.babyfish.jimmer.sql.ast.impl.query.Queries;
 import org.babyfish.jimmer.sql.ast.impl.table.FetcherSelectionImpl;
 import org.babyfish.jimmer.sql.ast.mutation.QueryReason;
 import org.babyfish.jimmer.sql.ast.query.ConfigurableRootQuery;
+import org.babyfish.jimmer.sql.ast.query.TypedRootQuery;
 import org.babyfish.jimmer.sql.ast.table.Table;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
+import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.common.NativeDatabases;
 import org.babyfish.jimmer.sql.dialect.PostgresDialect;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
@@ -217,6 +219,96 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     });
                 }
         );
+    }
+
+    @Test
+    public void testContentOnlyBasePolicyCoversSubtypeAndSelectAssociationReads() throws Exception {
+        MapCache<Client> baseCache = new MapCache<>(ImmutableType.get(Client.class));
+        MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
+        ImmutableProp organizationProp = ImmutableType.get(OrganizationProject.class).getProp("organization");
+        Cache<Object, Object> edgeCache = new CacheImpl<>(organizationProp);
+        JSqlClient client = createClient(type -> {
+            if (type.getJavaClass() == Client.class) {
+                return baseCache;
+            }
+            return type.getJavaClass() == Organization.class ? organizationCache : null;
+        }, ImmutableType.get(Client.class), organizationProp, edgeCache);
+        assertTrue(client.getCaches().isObjectCacheContentOnly(ImmutableType.get(Organization.class)));
+
+        Organization stale = OrganizationDraft.$.produce(draft -> {
+            draft.setId(100L);
+            draft.setName("STALE");
+            draft.setTaxCode("STALE");
+        });
+        baseCache.put(100L, stale);
+        organizationCache.put(100L, stale);
+        jdbc(con -> edgeCache.getAll(
+                Collections.<Object>singletonList(1001L),
+                new CacheEnvironment<>(
+                        client,
+                        con,
+                        keys -> Collections.<Object, Object>singletonMap(1001L, 9999L),
+                        false
+                )
+        ));
+        Organization byId = client.getEntities().findById(Organization.class, 100L);
+        assertEquals("Acme", byId.name());
+        assertEquals("ACME-001", byId.taxCode());
+        ClientImplicitCatchAllView dto = client.getEntities().findById(ClientImplicitCatchAllView.class, 100L);
+        assertEquals("ACME-001", assertInstanceOf(ClientImplicitCatchAllView.Organization.class, dto).getTaxCode());
+
+        OrganizationProjectTable table = OrganizationProjectTable.$;
+        List<OrganizationProject> projects = new ArrayList<>();
+        jdbc(con -> projects.addAll(client.createQuery(table)
+                .where(table.id().eq(1001L))
+                .select(table.fetch(OrganizationProjectFetcher.$.organization(
+                        ReferenceFetchType.SELECT,
+                        OrganizationFetcher.$.name().taxCode()
+                )))
+                .execute(con)));
+        assertEquals(1, projects.size());
+        assertEquals("Acme", projects.get(0).organization().name());
+        assertEquals("ACME-001", projects.get(0).organization().taxCode());
+
+        baseCache.delete(100L);
+        organizationCache.delete(100L);
+        edgeCache.deleteAll(Collections.<Object>singletonList(1001L), null);
+        jdbc(con -> {
+            boolean autoCommit = con.getAutoCommit();
+            con.setAutoCommit(false);
+            boolean rolledBack = false;
+            try {
+                try (PreparedStatement statement = con.prepareStatement(
+                        "update CLIENT set NAME = ?, TAX_CODE = ? where ID = ?"
+                )) {
+                    statement.setString(1, "PENDING");
+                    statement.setString(2, "PENDING-TAX");
+                    statement.setLong(3, 100L);
+                    assertEquals(1, statement.executeUpdate());
+                }
+                List<OrganizationProject> pending = client.createQuery(table)
+                        .where(table.id().eq(1001L))
+                        .select(table.fetch(OrganizationProjectFetcher.$.organization(
+                                ReferenceFetchType.SELECT,
+                                OrganizationFetcher.$.name().taxCode()
+                        )))
+                        .execute(con);
+                assertEquals("PENDING", pending.get(0).organization().name());
+                assertEquals("PENDING-TAX", pending.get(0).organization().taxCode());
+                con.rollback();
+                rolledBack = true;
+            } finally {
+                if (!rolledBack) {
+                    con.rollback();
+                }
+                con.setAutoCommit(autoCommit);
+            }
+        });
+        Organization afterRollback = client.getEntities().findById(Organization.class, 100L);
+        assertEquals("Acme", afterRollback.name());
+        assertEquals("ACME-001", afterRollback.taxCode());
+        assertTrue(baseCache.map.isEmpty());
+        assertTrue(organizationCache.map.isEmpty());
     }
 
     @Test
@@ -2626,6 +2718,82 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testContentFetcherMergedQueriesKeepUnapprovedSelectedChildFresh() {
+        MapCache<BookStore> storeCache = new MapCache<>(ImmutableType.get(BookStore.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == BookStore.class ? storeCache : null);
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(BookStore.class, Collections.singletonList(oreillyId)));
+        BookTable table = BookTable.$;
+        Function<UUID, ConfigurableRootQuery<BookTable, Book>> masked = id -> client.createQuery(table)
+                .where(table.id().eq(id))
+                .select(table.fetch(BookFetcher.$.name().store(
+                        ReferenceFetchType.SELECT,
+                        BookStoreFetcher.$.name().version()
+                )))
+                .useObjectCache(BookFetcher.$.name().store(BookStoreFetcher.$.name()));
+        Function<UUID, ConfigurableRootQuery<BookTable, Book>> ordinary = id -> client.createQuery(table)
+                .where(table.id().eq(id))
+                .select(table.fetch(BookFetcher.$.name().store(
+                        ReferenceFetchType.SELECT,
+                        BookStoreFetcher.$.name().version()
+                )));
+        try {
+            rawUpdate("update BOOK_STORE set NAME = ?, VERSION = ? where ID = ?", "FRESH-STORE", 9, oreillyId);
+
+            List<TypedRootQuery<Book>> merged = Arrays.asList(
+                    TypedRootQuery.union(ordinary.apply(learningGraphQLId1), masked.apply(learningGraphQLId1)),
+                    TypedRootQuery.unionAll(ordinary.apply(learningGraphQLId1),
+                            TypedRootQuery.unionAll(ordinary.apply(learningGraphQLId1), masked.apply(learningGraphQLId1))),
+                    TypedRootQuery.minus(masked.apply(learningGraphQLId1), ordinary.apply(learningGraphQLId2)),
+                    TypedRootQuery.intersect(ordinary.apply(learningGraphQLId1), masked.apply(learningGraphQLId1))
+            );
+            int[] expectedSizes = {1, 3, 1, 1};
+            for (int i = 0; i < merged.size(); i++) {
+                TypedRootQuery<Book> query = merged.get(i);
+                List<Book> rows = new ArrayList<>();
+                jdbc(con -> rows.addAll(query.execute(con)));
+                assertEquals(expectedSizes[i], rows.size());
+                for (Book row : rows) {
+                    assertEquals("FRESH-STORE", row.store().name());
+                    assertEquals(9, row.store().version());
+                }
+            }
+
+            List<Book> ordinaryMerged = new ArrayList<>();
+            jdbc(con -> ordinaryMerged.addAll(TypedRootQuery.unionAll(
+                    ordinary.apply(learningGraphQLId1),
+                    ordinary.apply(learningGraphQLId1)
+            ).execute(con)));
+            assertEquals(2, ordinaryMerged.size());
+            for (Book row : ordinaryMerged) {
+                assertEquals("O'REILLY", row.store().name());
+                assertEquals(0, row.store().version());
+            }
+
+            List<Book> booleanHintMerged = new ArrayList<>();
+            jdbc(con -> booleanHintMerged.addAll(TypedRootQuery.unionAll(
+                    ordinary.apply(learningGraphQLId1).useObjectCache(true),
+                    ordinary.apply(learningGraphQLId1).useObjectCache(true)
+            ).execute(con)));
+            assertEquals(2, booleanHintMerged.size());
+            for (Book row : booleanHintMerged) {
+                assertEquals("O'REILLY", row.store().name());
+                assertEquals(0, row.store().version());
+            }
+
+            List<String> iterated = new ArrayList<>();
+            jdbc(con -> TypedRootQuery.unionAll(
+                            ordinary.apply(learningGraphQLId1),
+                            masked.apply(learningGraphQLId1)
+                    ).forEach(con, row -> iterated.add(row.store().name() + ":" + row.store().version())));
+            assertEquals(Arrays.asList("FRESH-STORE:9", "FRESH-STORE:9"), iterated);
+        } finally {
+            rawUpdate("update BOOK_STORE set NAME = ?, VERSION = ? where ID = ?", "O'REILLY", 0, oreillyId);
+            storeCache.delete(oreillyId);
+        }
+    }
+
+    @Test
     public void testNativePostgresCommittedRootChildEdgesAndDisplay() {
         NativeDatabases.assumeNativeDatabase();
         MapCache<Book> bookCache = new MapCache<>(ImmutableType.get(Book.class));
@@ -3874,12 +4042,38 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {
+        return createClient(objectCacheFactory, null);
+    }
+
+    private JSqlClient createClient(
+            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
+            ImmutableType contentOnlyType
+    ) {
+        return createClient(objectCacheFactory, contentOnlyType, null, null);
+    }
+
+    private JSqlClient createClient(
+            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
+            ImmutableType contentOnlyType,
+            ImmutableProp cachedProp,
+            Cache<?, ?> propCache
+    ) {
         return getSqlClient(builder -> {
             builder.setConnectionManager(NON_TX_MANAGER);
             builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
                 @Override
+                public boolean isObjectCacheContentOnly(ImmutableType type) {
+                    return type == contentOnlyType;
+                }
+
+                @Override
                 public Cache<?, ?> createObjectCache(ImmutableType type) {
                     return objectCacheFactory.apply(type);
+                }
+
+                @Override
+                public Cache<?, ?> createAssociatedIdCache(ImmutableProp prop) {
+                    return prop == cachedProp ? propCache : null;
                 }
             }));
         });

@@ -139,6 +139,21 @@ also succeeded on its second attempt on the exact commit: it verified the 1.1.5 
 Gradle module metadata and Quarkus deployment descriptor, and the anonymous JitPack-only
 smoke consumer built successfully.
 
+### Declarative content-only caches in 1.1.6
+
+An entity's built-in Quarkus cache can opt into `content-only: true`. Ordinary entity,
+generated DTO and association reads then use fresh SQL; only explicit cached-content masks
+may hydrate approved leaves from that object cache. The policy follows native inheritance
+metadata and remains attached to derived clients. Its default is false, preserving legacy
+cache behavior. Custom factories expose the same policy through `CacheFactory`.
+
+Association loading isolates the entire fresh subtree from an ambient cache-enabled fetcher
+context, including deeper children. Explicit masks in merged set queries conservatively
+decline to the complete fresh graph, including nested and non-first operands and JTA reads.
+Neither change introduces query-result caching or permits transaction-time cache fills.
+
+Release verification for 1.1.6 is pending; 1.1.5 remains the last verified public release.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
