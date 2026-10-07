@@ -161,7 +161,7 @@ without failures or skips, native PostgreSQL regressions and the full build.
 The anonymous publication check and JitPack-only consumer build passed on the second
 attempt after an initial network timeout fetching a POM; no source or tag was changed.
 
-### Configured content fields (unreleased)
+### Configured content fields in 1.1.7
 
 `content-only` entity caches can declare `content-fields` as a list of approved stored
 scalar properties. Ordinary `useObjectCache()` then uses that native policy with an
@@ -174,8 +174,16 @@ The no-argument/boolean hint replaces any ad hoc mask with the configured policy
 `useObjectCache(false)` clears it. Ordinary entity/DTO and association reads remain fresh.
 Membership, order, scalar slots and unapproved projected leaves remain SQL-authoritative.
 This configuration does not relax the manager-owned inactive-transaction proof: active,
-unknown, locking and command reads still use the complete fresh graph. Verification of
-this new configuration is pending; the release evidence above covers 1.1.6 only.
+unknown, locking and command reads still use the complete fresh graph.
+
+The immutable `1.1.7` tag points to
+[`ab22b4a`](https://github.com/sleepkqq/jimmer/commit/ab22b4a58b44bd7868d950725e9f2bde1f648efc).
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37687642176) and
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37689501168)
+passed, including the configured-field, DTO/tuple and polymorphic projection regressions,
+native PostgreSQL cases and Quarkus cache-policy/JTA tests. The anonymous artifact and
+isolated consumer checks passed on the second attempt after a POM fetch timeout;
+the source and tag were unchanged.
 
 ### Reference IDs in bulk update-returning in 1.0.7
 
@@ -215,14 +223,14 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.6`, replace
+For version `1.1.7`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.6`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.6`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.7`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.7`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.6` artifacts are
+this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.7` artifacts are
 verified available from anonymous JitPack with the release check below; a tag alone does not
 establish artifact availability.
 
