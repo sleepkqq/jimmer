@@ -3,10 +3,13 @@ package io.quarkiverse.jimmer.it;
 import static io.quarkiverse.jimmer.it.TestCacheConfigs.config;
 import static io.quarkiverse.jimmer.it.TestCacheConfigs.entity;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
 
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.cache.Cache;
@@ -26,12 +29,13 @@ class LocalOnlyCacheFactoryTest {
     @Test
     void buildsCaffeineOnlyCacheForConfiguredEntity() {
         JimmerLocalCacheFactory factory = new JimmerLocalCacheFactory(
-                config(entity("Book", CacheMode.LOCAL_ONLY, true)));
+                config(entity("Book", CacheMode.LOCAL_ONLY, true, "name")));
 
         Cache<?, ?> cache = factory.createObjectCache(ImmutableType.get(Book.class));
 
         assertNotNull(cache);
         assertTrue(factory.isObjectCacheContentOnly(ImmutableType.get(Book.class)));
+        assertEquals(List.of("name"), factory.getObjectCacheContentFields(ImmutableType.get(Book.class)));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package io.quarkiverse.jimmer.runtime.cache;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -34,6 +35,11 @@ public class GuardedCacheFactory implements FilterStateAwareCacheFactory {
     @Override
     public boolean isObjectCacheContentOnly(ImmutableType type) {
         return delegate.isObjectCacheContentOnly(type);
+    }
+
+    @Override
+    public Collection<String> getObjectCacheContentFields(ImmutableType type) {
+        return delegate.getObjectCacheContentFields(type);
     }
 
     @Override

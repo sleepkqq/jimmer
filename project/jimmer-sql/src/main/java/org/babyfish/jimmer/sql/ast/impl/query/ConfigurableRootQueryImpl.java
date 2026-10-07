@@ -335,14 +335,14 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     @Override
     public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         TypedQueryData data = getData();
-        // A deliberate boolean call is a mode switch: it must clear any explicit
-        // content mask, exactly like TypedQueryData.useObjectCache(boolean), instead of
-        // short-circuiting while the mask is still installed.
-        if (data.useObjectCache == enabled && data.cachedContent == null) {
+        // Boolean mode replaces an ad hoc mask with the configured policy, or no mask.
+        Fetcher<?> cachedContent = enabled ? getMutableQuery().getSqlClient().getCaches()
+                .getObjectCacheContentFetcher(getMutableQuery().getTable().getImmutableType()) : null;
+        if (data.useObjectCache == enabled && data.cachedContent == cachedContent) {
             return this;
         }
         return new ConfigurableRootQueryImpl<>(
-                data.useObjectCache(enabled),
+                cachedContent != null ? data.useObjectCache(cachedContent) : data.useObjectCache(enabled),
                 getMutableQuery()
         );
     }

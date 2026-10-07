@@ -1,5 +1,7 @@
 package io.quarkiverse.jimmer.runtime.cache;
 
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +57,12 @@ public class JimmerLocalCacheFactory extends AbstractCacheFactory {
     public boolean isObjectCacheContentOnly(ImmutableType type) {
         JimmerCacheConfig.EntityCacheConfig config = configByType.get(type.getJavaClass().getSimpleName());
         return config != null && config.contentOnly();
+    }
+
+    @Override
+    public Collection<String> getObjectCacheContentFields(ImmutableType type) {
+        JimmerCacheConfig.EntityCacheConfig config = configByType.get(type.getJavaClass().getSimpleName());
+        return config != null ? config.contentFields().orElse(Collections.emptyList()) : Collections.emptyList();
     }
 
     @Override

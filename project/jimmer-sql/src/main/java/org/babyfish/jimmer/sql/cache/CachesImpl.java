@@ -6,6 +6,7 @@ import org.babyfish.jimmer.meta.TargetLevel;
 import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.event.DatabaseEvent;
 import org.babyfish.jimmer.sql.filter.impl.FilterManager;
+import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.runtime.EntityManager;
 import org.babyfish.jimmer.sql.event.Triggers;
 
@@ -31,6 +32,8 @@ public class CachesImpl implements Caches {
 
     private final Set<ImmutableType> objectCacheContentOnlyTypes;
 
+    private final Map<ImmutableType, Fetcher<?>> objectCacheContentFetchers;
+
     public CachesImpl(
             Triggers triggers,
             Map<ImmutableType, Cache<?, ?>> objectCacheMap,
@@ -48,6 +51,19 @@ public class CachesImpl implements Caches {
             CacheOperator operator,
             CacheAbandonedCallback abandonedCallback,
             Set<ImmutableType> objectCacheContentOnlyTypes
+    ) {
+        this(triggers, objectCacheMap, propCacheMap, operator, abandonedCallback,
+                objectCacheContentOnlyTypes, Collections.emptyMap());
+    }
+
+    public CachesImpl(
+            Triggers triggers,
+            Map<ImmutableType, Cache<?, ?>> objectCacheMap,
+            Map<ImmutableProp, Cache<?, ?>> propCacheMap,
+            CacheOperator operator,
+            CacheAbandonedCallback abandonedCallback,
+            Set<ImmutableType> objectCacheContentOnlyTypes,
+            Map<ImmutableType, Fetcher<?>> objectCacheContentFetchers
     ) {
         Map<ImmutableType, UsedCache<?, ?>> objectCacheWrapperMap = new LinkedHashMap<>();
         for (Map.Entry<ImmutableType, Cache<?, ?>> e : objectCacheMap.entrySet()) {
@@ -70,6 +86,9 @@ public class CachesImpl implements Caches {
         this.objectCacheContentOnlyTypes = Collections.unmodifiableSet(
                 new LinkedHashSet<>(objectCacheContentOnlyTypes)
         );
+        this.objectCacheContentFetchers = Collections.unmodifiableMap(
+                new LinkedHashMap<>(objectCacheContentFetchers)
+        );
     }
 
     public CachesImpl(
@@ -85,6 +104,7 @@ public class CachesImpl implements Caches {
         disabledTypes = cfg.getDisabledTypes();
         disabledProps = cfg.getDisabledProps();
         objectCacheContentOnlyTypes = base.objectCacheContentOnlyTypes;
+        objectCacheContentFetchers = base.objectCacheContentFetchers;
     }
 
     public Map<ImmutableType, UsedCache<?, ?>> getObjectCacheMap() {
@@ -117,6 +137,11 @@ public class CachesImpl implements Caches {
             }
         }
         return false;
+    }
+
+    @Override
+    public Fetcher<?> getObjectCacheContentFetcher(ImmutableType type) {
+        return objectCacheContentFetchers.get(type);
     }
 
     @SuppressWarnings("unchecked")

@@ -121,8 +121,11 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyAssociationSubtreeDoesNotReuseAmbientCacheContext' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherMergedQueriesKeepUnapprovedSelectedChildFresh' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentOnlyBasePolicyCoversSubtypeAndSelectAssociationReads' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsUseDtoProjectionAndKeepScalarSlotsFresh' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsUsePolymorphicDtoBranches' \
+            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsRejectUnknownOrProtectedProperties' \
             --case 'org.babyfish.jimmer.sql.query.GlobalFilterTest#testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 86 \
+            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 89 \
             org.babyfish.jimmer.sql.cache.ObjectCacheTest 21 \
             org.babyfish.jimmer.sql.query.GlobalFilterTest 1 \
             org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7

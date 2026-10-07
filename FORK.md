@@ -161,6 +161,22 @@ without failures or skips, native PostgreSQL regressions and the full build.
 The anonymous publication check and JitPack-only consumer build passed on the second
 attempt after an initial network timeout fetching a POM; no source or tag was changed.
 
+### Configured content fields (unreleased)
+
+`content-only` entity caches can declare `content-fields` as a list of approved stored
+scalar properties. Ordinary `useObjectCache()` then uses that native policy with an
+existing DTO Language projection; consumers do not need handwritten fetchers or parallel
+cache DTOs. Single-table subtype fields become concrete-type branches. Unknown fields,
+associations, formulas, ID views, identity/version/deletion/discriminator metadata and a
+field list without `content-only` are rejected during client construction.
+
+The no-argument/boolean hint replaces any ad hoc mask with the configured policy;
+`useObjectCache(false)` clears it. Ordinary entity/DTO and association reads remain fresh.
+Membership, order, scalar slots and unapproved projected leaves remain SQL-authoritative.
+This configuration does not relax the manager-owned inactive-transaction proof: active,
+unknown, locking and command reads still use the complete fresh graph. Verification of
+this new configuration is pending; the release evidence above covers 1.1.6 only.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as

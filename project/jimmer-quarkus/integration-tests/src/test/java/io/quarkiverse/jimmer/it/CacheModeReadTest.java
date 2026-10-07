@@ -99,12 +99,15 @@ class CacheModeReadTest {
         for (CacheMode mode : CacheMode.values()) {
             JimmerRedisCacheFactory factory = new JimmerRedisCacheFactory(
                     redisDataSource,
-                    config(entity("Book", mode, true)),
+                    config(entity("Book", mode, true, "name")),
                     null,
                     cacheTracker);
             GuardedCacheFactory guarded = new GuardedCacheFactory(factory, () -> false);
 
             assertTrue(guarded.isObjectCacheContentOnly(ImmutableType.get(Book.class)), mode.toString());
+            assertEquals(List.of("name"), guarded.getObjectCacheContentFields(ImmutableType.get(Book.class)), mode.toString());
+            assertTrue(guarded.getObjectCacheContentFields(ImmutableType.get(io.quarkiverse.jimmer.it.entity.Author.class))
+                    .isEmpty(), mode.toString());
             assertFalse(guarded.isObjectCacheContentOnly(ImmutableType.get(io.quarkiverse.jimmer.it.entity.Author.class)),
                     mode.toString());
         }

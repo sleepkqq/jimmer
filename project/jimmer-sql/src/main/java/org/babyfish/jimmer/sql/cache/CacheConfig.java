@@ -6,6 +6,9 @@ import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.meta.TargetLevel;
 import org.babyfish.jimmer.meta.TypedProp;
 import org.babyfish.jimmer.sql.filter.impl.FilterManager;
+import org.babyfish.jimmer.sql.fetcher.Fetcher;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherImpl;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherImplementor;
 import org.babyfish.jimmer.sql.meta.JoinTemplate;
 import org.babyfish.jimmer.sql.event.Triggers;
 import org.babyfish.jimmer.sql.ast.table.Table;
@@ -170,6 +173,7 @@ public class CacheConfig {
         Map<ImmutableType, Cache<?, ?>> finalObjectCacheMap = new LinkedHashMap<>();
         Map<ImmutableProp, Cache<?, ?>> finalPropCacheMap = new LinkedHashMap<>();
         Set<ImmutableType> objectCacheContentOnlyTypes = new LinkedHashSet<>();
+        Map<ImmutableType, Collection<String>> objectCacheContentFields = new LinkedHashMap<>();
 
         if (cacheFactory instanceof FilterStateAware) {
             Set<ImmutableType> affectedTypes =
@@ -198,6 +202,17 @@ public class CacheConfig {
                     finalObjectCacheMap.put(type, finalObjectCache);
                     if (cacheFactory != null && cacheFactory.isObjectCacheContentOnly(type)) {
                         objectCacheContentOnlyTypes.add(type);
+                    }
+                    if (cacheFactory != null) {
+                        Collection<String> fields = cacheFactory.getObjectCacheContentFields(type);
+                        if (!fields.isEmpty()) {
+                            if (!objectCacheContentOnlyTypes.contains(type)) {
+                                throw new IllegalArgumentException(
+                                        "Configured object-cache content fields require content-only caching for \"" + type + "\""
+                                );
+                            }
+                            objectCacheContentFields.put(type, fields);
+                        }
                     }
                 }
                 for (ImmutableProp prop : type.getProps().values()) {
@@ -239,7 +254,91 @@ public class CacheConfig {
                 finalPropCacheMap,
                 operator,
                 CompositeCacheAbandonedCallback.combine(abandonedCallbacks),
-                objectCacheContentOnlyTypes
+                objectCacheContentOnlyTypes,
+                createContentFetchers(entityManager.getAllTypes(microServiceName), objectCacheContentFields)
         );
+    }
+
+    private static Map<ImmutableType, Fetcher<?>> createContentFetchers(
+            Collection<ImmutableType> types,
+            Map<ImmutableType, Collection<String>> configuredFields
+    ) {
+        Map<ImmutableType, Set<String>> fieldsByType = new LinkedHashMap<>();
+        for (Map.Entry<ImmutableType, Collection<String>> e : configuredFields.entrySet()) {
+            ImmutableType type = e.getKey();
+            Set<ImmutableType> candidates = new LinkedHashSet<>();
+            candidates.add(type);
+            if (type.getInheritanceInfo() != null) {
+                candidates.addAll(type.getAllDerivedTypes());
+            }
+            for (String name : e.getValue()) {
+                boolean found = false;
+                for (ImmutableType candidate : candidates) {
+                    ImmutableProp prop = candidate.getProps().get(name);
+                    if (prop == null) {
+                        continue;
+                    }
+                    if (!prop.isScalar(TargetLevel.PERSISTENT) ||
+                            !prop.isColumnDefinition() ||
+                            prop.getSqlTemplate() != null ||
+                            prop.getIdViewBaseProp() != null ||
+                            prop.isId() || prop.isVersion() || prop.isLogicalDeleted() || prop.isDiscriminator()) {
+                        throw new IllegalArgumentException(
+                                "Configured object-cache content field \"" + prop +
+                                        "\" must be a stored scalar other than identity, version, logical deletion or discriminator"
+                        );
+                    }
+                    fieldsByType.computeIfAbsent(candidate, it -> new LinkedHashSet<>()).add(name);
+                    found = true;
+                }
+                if (!found) {
+                    throw new IllegalArgumentException(
+                            "Unknown configured object-cache content field \"" + type + "." + name + "\""
+                    );
+                }
+            }
+        }
+        Map<ImmutableType, Fetcher<?>> fetchers = new LinkedHashMap<>();
+        for (ImmutableType type : types) {
+            if (!type.isEntity()) {
+                continue;
+            }
+            FetcherImplementor<?> fetcher = null;
+            Set<String> rootFields = fieldsByType.get(type);
+            if (rootFields != null) {
+                fetcher = new FetcherImpl<>(type.getJavaClass());
+                for (String name : rootFields) {
+                    fetcher = fetcher.add(name);
+                }
+            }
+            if (type.getInheritanceInfo() != null) {
+                for (ImmutableType derivedType : type.getAllDerivedTypes()) {
+                    Set<String> branchFields = fieldsByType.get(derivedType);
+                    if (branchFields == null || type.getInheritanceInfo().getConcreteTypes(derivedType).isEmpty()) {
+                        continue;
+                    }
+                    FetcherImplementor<?> branch = null;
+                    for (String name : branchFields) {
+                        if (rootFields != null && rootFields.contains(name)) {
+                            continue;
+                        }
+                        if (branch == null) {
+                            branch = new FetcherImpl<>(derivedType.getJavaClass());
+                        }
+                        branch = branch.add(name);
+                    }
+                    if (branch != null) {
+                        if (fetcher == null) {
+                            fetcher = new FetcherImpl<>(type.getJavaClass());
+                        }
+                        fetcher = fetcher.__forType(branch);
+                    }
+                }
+            }
+            if (fetcher != null) {
+                fetchers.put(type, fetcher);
+            }
+        }
+        return fetchers;
     }
 }

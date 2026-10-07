@@ -34,7 +34,8 @@ class ConfiguredCacheGuardTest {
                 "quarkus.jimmer.cache.guard.enabled", "true",
                 "quarkus.jimmer.cache.entities[0].type", "BookStore",
                 "quarkus.jimmer.cache.entities[0].mode", "FULL",
-                "quarkus.jimmer.cache.entities[0].content-only", "true"
+                "quarkus.jimmer.cache.entities[0].content-only", "true",
+                "quarkus.jimmer.cache.entities[0].content-fields", "name"
             );
         }
     }
@@ -59,6 +60,9 @@ class ConfiguredCacheGuardTest {
     void yamlConfigAppliesGuardAndNamespaceToTheExistingFactory() throws Exception {
         assertTrue(factory.isObjectCacheContentOnly(ImmutableType.get(BookStore.class)));
         assertTrue(sql.getCaches().isObjectCacheContentOnly(ImmutableType.get(BookStore.class)));
+        assertEquals(List.of("name"), factory.getObjectCacheContentFields(ImmutableType.get(BookStore.class)));
+        assertEquals(java.util.Set.of("id", "name"), sql.getCaches()
+                .getObjectCacheContentFetcher(ImmutableType.get(BookStore.class)).getFieldMap().keySet());
         Cache<Long, BookStore> cache = (Cache<Long, BookStore>) factory.createObjectCache(ImmutableType.get(BookStore.class));
         var loads = new AtomicInteger();
         try (var connection = dataSource.getConnection()) {
