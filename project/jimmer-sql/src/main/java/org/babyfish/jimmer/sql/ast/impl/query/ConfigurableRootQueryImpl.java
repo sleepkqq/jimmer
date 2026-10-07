@@ -336,16 +336,11 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     @Override
     public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         TypedQueryData data = getData();
-        // Boolean mode replaces an ad hoc mask with the configured policy, or no mask.
-        Fetcher<?> cachedContent = enabled && getMutableQuery().getTableLikeImplementor() instanceof TableImplementor<?> ?
-                getMutableQuery().getSqlClient().getCaches().getObjectCacheContentFetcher(
-                        ((TableImplementor<?>) getMutableQuery().getTableLikeImplementor()).getImmutableType()
-                ) : null;
-        if (data.useObjectCache == enabled && data.cachedContent == cachedContent) {
+        if (data.useObjectCache == enabled && data.cachedContent == null) {
             return this;
         }
         return new ConfigurableRootQueryImpl<>(
-                cachedContent != null ? data.useObjectCache(cachedContent) : data.useObjectCache(enabled),
+                data.useObjectCache(enabled),
                 getMutableQuery()
         );
     }
@@ -356,6 +351,21 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 getData().useObjectCache(cachedContent),
                 getMutableQuery()
         );
+    }
+
+    Fetcher<?> getCachedContent() {
+        TypedQueryData data = getData();
+        if (!data.useObjectCache) {
+            return null;
+        }
+        if (data.cachedContent != null) {
+            return data.cachedContent;
+        }
+        Object table = getMutableQuery().getTableLikeImplementor();
+        return table instanceof TableImplementor<?> ?
+                getMutableQuery().getSqlClient().getCaches().getObjectCacheContentFetcher(
+                        ((TableImplementor<?>) table).getImmutableType()
+                ) : null;
     }
 
     @Override
@@ -432,8 +442,8 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
         boolean queryPurpose =
                 getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY;
-        if (data.useObjectCache && data.cachedContent != null) {
-            // The explicit recursive content mask is a cache-content hint, not an
+        if (getCachedContent() != null) {
+            // An explicit or configured content mask is a cache-content hint, not an
             // authorization cache. Whenever it cannot be honored - a non-QUERY purpose,
             // a locking read, an unproven transaction state or any decline - the complete
             // original projection runs on a cache-disabled derived client, so no
@@ -607,7 +617,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         }
         // A content-mask query never streams the cached hint; it stays a fresh,
         // whole-graph read on a cache-disabled derived client.
-        JSqlClientImplementor sqlClient = data.cachedContent != null ?
+        JSqlClientImplementor sqlClient = getCachedContent() != null ?
                 getMutableQuery().getSqlClient().caches(CacheDisableConfig::disableAll) :
                 getMutableQuery().getSqlClient();
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
@@ -659,8 +669,8 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     private void forEachImpl(Connection con, int batchSize, Consumer<R> consumer) {
         // A content-mask query never uses the cached hint for forEach; it stays a
         // fresh, whole-graph read on a cache-disabled derived client. The legacy
-        // boolean/no-arg hint keeps its ordinary client and ambient-context batching.
-        boolean masked = getData().cachedContent != null;
+        // hint without a configured policy keeps its ordinary client and batching.
+        boolean masked = getCachedContent() != null;
         JSqlClientImplementor sqlClient = masked ?
                 getMutableQuery().getSqlClient().caches(CacheDisableConfig::disableAll) :
                 getMutableQuery().getSqlClient();

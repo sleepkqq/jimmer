@@ -119,6 +119,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import javax.sql.DataSource;
 
@@ -2371,6 +2372,14 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals("FRESH-NAME", rows.get(0).name());
             // The unsupported projection is declined before any cache access.
             assertTrue(bookCache.getAllKeys.isEmpty());
+            JSqlClient configured = createClient(type -> type.getJavaClass() == Book.class ? bookCache : null,
+                    ImmutableType.get(Book.class), null, null, Collections.singletonList("name"));
+            jdbc(con -> assertEquals("FRESH-NAME", configured.createQuery(table)
+                    .where(table.id().eq(learningGraphQLId1))
+                    .select(table.fetch(forward))
+                    .useObjectCache()
+                    .execute(con).get(0).name()));
+            assertTrue(bookCache.getAllKeys.isEmpty());
         } finally {
             rawUpdate("update BOOK set NAME = ? where ID = ?", "Learning GraphQL", learningGraphQLId1);
             bookCache.delete(learningGraphQLId1);
@@ -4045,8 +4054,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     public void testConfiguredContentFieldsUseDtoProjectionAndKeepScalarSlotsFresh() {
         ImmutableType type = ImmutableType.get(BookStore.class);
         MapCache<BookStore> cache = new MapCache<>(type);
-        JSqlClient client = createClient(it -> it == type ? cache : null,
-                type, null, null, Collections.singletonList("name"));
+        MapCache<Author> authorCache = new MapCache<>(ImmutableType.get(Author.class));
+        JSqlClient client = createClient(it -> it == type ? cache :
+                        it.getJavaClass() == Author.class ? authorCache : null,
+                type, null, null, Arrays.asList("name", "website"));
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4079,6 +4090,43 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         jdbc(con -> assertEquals("O'REILLY", client.getEntities().forConnection(con)
                 .findById(ReusableBookStoreView.class, oreillyId).getName()));
         assertTrue(cache.getAllKeys.isEmpty());
+
+        assertThrows(IllegalArgumentException.class, () -> jdbc(con ->
+                query.useObjectCache(BookStoreFetcher.$.website()).execute(con)));
+        jdbc(con -> assertEquals("O'REILLY", client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.name())
+                .useObjectCache()
+                .execute(con).get(0)));
+        jdbc(con -> assertEquals(oreillyId, client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(BookStoreFetcher.$))
+                .useObjectCache()
+                .execute(con).get(0).getId()));
+        assertTrue(cache.getAllKeys.isEmpty());
+
+        authorCache.put(alexId, AuthorDraft.$.produce(draft -> {
+            draft.setId(alexId);
+            draft.setFirstName("CACHED-AUTHOR");
+        }));
+        jdbc(con -> {
+            ConfigurableRootQuery<BookStoreTable, Book> joined = client.createQuery(table)
+                    .where(table.books().id().eq(learningGraphQLId1))
+                    .select(table.books().fetch(BookFetcher.$.authors(AuthorFetcher.$.firstName())))
+                    .useObjectCache();
+            List<Book> books = new ArrayList<>(joined.execute(con));
+            joined.forEach(con, 1, books::add);
+            try (Stream<Book> stream = joined.stream(con)) {
+                stream.forEach(books::add);
+            }
+            books.addAll(joined.unionAll(joined).execute(con));
+            books.addAll(joined.forUpdate().execute(con));
+            books.addAll(joined.distinct().execute(con));
+            assertEquals(7, books.size());
+            assertTrue(books.stream().allMatch(book -> book.authors().stream().anyMatch(author ->
+                    alexId.equals(author.id()) && "Alex".equals(author.firstName()))));
+        });
+        assertTrue(authorCache.getAllKeys.isEmpty());
     }
 
     @Test
@@ -4112,6 +4160,14 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertFalse(getExecutions().get(0).getSql().contains(".TAX_CODE"));
         assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
         assertNotNull(client.getCaches().getObjectCacheContentFetcher(ImmutableType.get(Organization.class)));
+
+        cache.clearHistory();
+        jdbc(con -> assertEquals("Acme", client.createQuery(table)
+                .where(table.id().eq(100L))
+                .select(table.fetch(ClientFetcher.$.name()))
+                .useObjectCache()
+                .execute(con).get(0).getName()));
+        assertTrue(cache.getAllKeys.isEmpty());
     }
 
     @Test

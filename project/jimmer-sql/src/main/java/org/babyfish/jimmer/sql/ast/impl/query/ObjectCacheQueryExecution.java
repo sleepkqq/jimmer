@@ -79,8 +79,11 @@ final class ObjectCacheQueryExecution {
         TypedQueryData data = query.getData();
         MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
 
-        if (data.cachedContent != null) {
-            return tryExecuteWithContent(query, con, sqlClient, connectionManager);
+        Fetcher<?> cachedContent = query.getCachedContent();
+        if (cachedContent != null) {
+            return tryExecuteWithContent(
+                    query, con, sqlClient, connectionManager, cachedContent, data.cachedContent == null
+            );
         }
 
         // ---- Strict eligibility -------------------------------------------------
@@ -369,7 +372,9 @@ final class ObjectCacheQueryExecution {
             ConfigurableRootQueryImpl<T, R> query,
             Connection con,
             JSqlClientImplementor sqlClient,
-            ConnectionManager connectionManager
+            ConnectionManager connectionManager,
+            Fetcher<?> cachedContent,
+            boolean configuredContent
     ) {
         TypedQueryData data = query.getData();
         MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
@@ -389,7 +394,7 @@ final class ObjectCacheQueryExecution {
             return null;
         }
 
-        CacheContentMask rootMask = CacheContentMask.of(data.cachedContent);
+        CacheContentMask rootMask = CacheContentMask.of(cachedContent);
 
         // The retained graph must not read any object cache: a locally derived,
         // cache-disabled client keeps every loader query fresh and consistent with the
@@ -436,7 +441,11 @@ final class ObjectCacheQueryExecution {
                         continue;
                     }
                     maskMatched = true;
-                    Fetcher<?> retained = fetcher != null ?
+                    if (configuredContent && fetcher != null) {
+                        // Configured fields approve content; they do not demand a wider DTO projection.
+                        node = node.selectedBy(fetcher, sqlClient);
+                    }
+                    Fetcher<?> retained = fetcher != null && node != null ?
                             CacheContentMask.retainedFetcher(fetcher, node, sqlClient) : null;
                     if (retained != null &&
                             node.hasCacheableLeaves(sqlClient) &&
@@ -486,6 +495,9 @@ final class ObjectCacheQueryExecution {
             astContext.popStatement();
         }
         if (!maskMatched) {
+            if (configuredContent) {
+                return null;
+            }
             throw new IllegalArgumentException(
                     "The object-cache content mask does not match any selected table"
             );

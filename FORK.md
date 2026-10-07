@@ -185,6 +185,16 @@ native PostgreSQL cases and Quarkus cache-policy/JTA tests. The anonymous artifa
 isolated consumer checks passed on the second attempt after a POM fetch timeout;
 the source and tag were unchanged.
 
+### Configured policy projection matching in 1.1.8
+
+Configured `content-fields` approve eligible leaves rather than requiring every DTO
+to select the full list. The boolean/no-argument hint resolves the policy at execution
+and intersects it with each native selected projection, including concrete-type branches.
+Scalar-only, ID-only and unsupported projections stay fresh without cache access.
+Explicit Fetcher masks still reject approved content absent from their projection.
+Transaction, visibility, whole-query fallback and complete entity-cache loading remain unchanged.
+Source CI and public publication verification for `1.1.8` are pending.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -223,16 +233,16 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.7`, replace
+For version `1.1.8`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.7`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.7`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.8`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.8`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.7` artifacts are
-verified available from anonymous JitPack with the release check below; a tag alone does not
-establish artifact availability.
+compatibility is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.7` artifacts are
+verified available from anonymous JitPack; `1.1.8` publication is pending the release check
+below. A tag alone does not establish artifact availability.
 
 The previous extension repository and tags are retained for existing consumers. Its
 archive is a maintenance handoff, not an artifact relocation or deletion.
