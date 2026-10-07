@@ -32,6 +32,7 @@ import org.babyfish.jimmer.sql.runtime.SqlBuilder;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Map;
@@ -408,13 +409,19 @@ public class FetcherSelectionImpl<T> implements FetcherSelection<T>, Ast {
                     return discriminatorProp;
                 }
                 // A polymorphic entity projected on a joined table (the selection's own
-                // table) is still read by an ObjectReader that requires its discriminator.
-                // getPolymorphicDiscriminatorProp reports null for any non-root table, so
-                // select the discriminator here too; otherwise the reader would consume a
-                // column the SQL never emitted.
-                InheritanceInfo inheritanceInfo =
-                        ((TableImplementor<?>) implementor).getImmutableType().getInheritanceInfo();
-                return inheritanceInfo != null ? inheritanceInfo.getDiscriminatorProp() : null;
+                // table) is read by an ObjectReader whose discriminator rule is
+                // getConcreteTypes(type): the discriminator is read unless the type is its
+                // own only concrete type. Match that rule exactly so a concrete leaf emits
+                // nothing while a polymorphic base on a join still emits the column.
+                ImmutableType type = ((TableImplementor<?>) implementor).getImmutableType();
+                InheritanceInfo inheritanceInfo = type.getInheritanceInfo();
+                if (inheritanceInfo == null) {
+                    return null;
+                }
+                Collection<ImmutableType> concreteTypes = inheritanceInfo.getConcreteTypes(type);
+                return concreteTypes.size() == 1 && concreteTypes.iterator().next() == type ?
+                        null :
+                        inheritanceInfo.getDiscriminatorProp();
             }
 
             private boolean isRenderedByDiscriminatorSlot(RealTable table, ImmutableProp prop) {

@@ -243,6 +243,9 @@ final class CacheContentMask {
         if (hasReducedFieldLocalFilter(projection, mask)) {
             return null;
         }
+        if (hasInheritedBranchChild(mask)) {
+            return null;
+        }
         // Filter the native-expanded field map, not the declaration chain: the stored
         // dependency containers of a removed JVM formula only exist in the expanded map,
         // so a chain filter would drop them and leave the formula getter unloaded. The
@@ -255,6 +258,26 @@ final class CacheContentMask {
         );
     }
 
+    // ponytail: decline a branch approving an ancestor-declared child; refine to a parent-type proof if this over-declines.
+    private static boolean hasInheritedBranchChild(CacheContentMask node) {
+        for (CacheContentMask branch : node.typeBranches.values()) {
+            for (ImmutableProp childProp : branch.children.keySet()) {
+                if (childProp.toOriginal().getDeclaringType() != branch.type) {
+                    return true;
+                }
+            }
+            if (hasInheritedBranchChild(branch)) {
+                return true;
+            }
+        }
+        for (CacheContentMask child : node.children.values()) {
+            if (hasInheritedBranchChild(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Whether reducing an approved reference that carries a field-local filter to an id-only
      * edge would erase its admission boundary; such a hint is declined.
@@ -265,7 +288,7 @@ final class CacheContentMask {
             if (prop.isId() || prop.isDiscriminator()) {
                 continue;
             }
-            CacheContentMask childNode = node.children.get(prop);
+            CacheContentMask childNode = childOf(node.children, prop);
             Fetcher<?> childFetcher = field.getChildFetcher();
             if (childNode == null || childFetcher == null) {
                 continue;
@@ -433,6 +456,34 @@ final class CacheContentMask {
         return merged;
     }
 
+    /** A subtype's inherited property wrapper denotes the same underlying property as its {@link ImmutableProp#toOriginal()}. */
+    private static boolean containsProp(Set<ImmutableProp> props, ImmutableProp prop) {
+        if (props.contains(prop)) {
+            return true;
+        }
+        ImmutableProp original = prop.toOriginal();
+        for (ImmutableProp p : props) {
+            if (p.toOriginal() == original) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static CacheContentMask childOf(Map<ImmutableProp, CacheContentMask> children, ImmutableProp prop) {
+        CacheContentMask child = children.get(prop);
+        if (child != null) {
+            return child;
+        }
+        ImmutableProp original = prop.toOriginal();
+        for (Map.Entry<ImmutableProp, CacheContentMask> e : children.entrySet()) {
+            if (e.getKey().toOriginal() == original) {
+                return e.getValue();
+            }
+        }
+        return null;
+    }
+
     private boolean isRemovedAt(
             JSqlClientImplementor sqlClient,
             ImmutableType currentType,
@@ -460,10 +511,10 @@ final class CacheContentMask {
         }
         // A node-level (base) approval is common to every concrete type and every
         // applicable branch, so it removes the column in any fetch scope.
-        if (node.leaves.contains(prop)) {
+        if (containsProp(node.leaves, prop)) {
             return true;
         }
-        if (node.formulas.contains(prop)) {
+        if (containsProp(node.formulas, prop)) {
             return prop.getSqlTemplate() == null;
         }
         // Otherwise the base and every applicable branch must together approve the property
@@ -474,7 +525,7 @@ final class CacheContentMask {
 
     /** Whether this node or a subtype branch approves {@code prop} as a whole-embedded leaf. */
     private boolean hasWholeEmbeddedLeaf(ImmutableProp prop) {
-        if (leaves.contains(prop) && prop.isEmbedded(EmbeddedLevel.SCALAR)) {
+        if (containsProp(leaves, prop) && prop.isEmbedded(EmbeddedLevel.SCALAR)) {
             return true;
         }
         for (CacheContentMask branch : typeBranches.values()) {
@@ -496,7 +547,7 @@ final class CacheContentMask {
                 Collections.<ImmutableType>singleton(scopeType);
         boolean any = false;
         for (ImmutableType concreteType : concreteTypes) {
-            if (!prop.getDeclaringType().isAssignableFrom(concreteType)) {
+            if (!prop.toOriginal().getDeclaringType().isAssignableFrom(concreteType)) {
                 continue;
             }
             any = true;
@@ -508,7 +559,7 @@ final class CacheContentMask {
     }
 
     private boolean approvesForConcreteType(ImmutableType concreteType, ImmutableProp prop) {
-        if (leaves.contains(prop) || formulas.contains(prop)) {
+        if (containsProp(leaves, prop) || containsProp(formulas, prop)) {
             return true;
         }
         for (CacheContentMask branch : typeBranches.values()) {
@@ -526,7 +577,7 @@ final class CacheContentMask {
      * caller keeps the column fresh rather than trusting a first match.
      */
     private CacheContentMask childFor(ImmutableProp step) {
-        CacheContentMask child = children.get(step);
+        CacheContentMask child = childOf(children, step);
         if (child != null) {
             return child;
         }

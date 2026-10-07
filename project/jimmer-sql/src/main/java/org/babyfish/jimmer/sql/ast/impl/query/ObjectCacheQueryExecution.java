@@ -280,9 +280,15 @@ final class ObjectCacheQueryExecution {
                             group.getKey(),
                             group.getValue()
                     );
+                    // The internal bridge returns the raw cached shape; a bare/no-fetcher
+                    // slot keeps the legacy declared shape, so pass the explicit table-field
+                    // fetcher the native shaper needs to reduce it back to that shape.
+                    Fetcher<?> requestedFetcher = slot.fetcher != null ?
+                            slot.fetcher :
+                            allTableFieldsFetcher(slot.entityType);
                     Map<Object, Object> groupHydrated = (Map<Object, Object>) entitiesImpl.findMapByIdsForQuery(
                             slot.entityType,
-                            (Fetcher) slot.fetcher,
+                            (Fetcher) requestedFetcher,
                             group.getKey(),
                             group.getValue().keySet(),
                             group.getValue(),

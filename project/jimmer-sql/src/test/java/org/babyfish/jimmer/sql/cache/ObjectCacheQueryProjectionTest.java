@@ -60,6 +60,14 @@ import org.babyfish.jimmer.sql.model.fetcher.Issue1434User;
 import org.babyfish.jimmer.sql.model.fetcher.Issue1434UserFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.AdministratorFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.AdministratorTable;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.Department;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.DepartmentFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.Employee;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.EmployeeFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.EmployeeTable;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.FullTimeEmployee;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.FullTimeEmployeeFetcher;
+import org.babyfish.jimmer.sql.model.inheritance.single.employee.PartTimeEmployee;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.Client;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientFetcher;
 import org.babyfish.jimmer.sql.model.inheritance.singletable.ClientProject;
@@ -1972,7 +1980,16 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ));
             assertEquals(2, rows.size());
             Organization organization = assertInstanceOf(Organization.class, rows.get(0));
-            assertEquals("Acme", organization.name());
+            assertEquals("Acme", organization.name(), () -> {
+                StringBuilder message = new StringBuilder("statements:");
+                for (Execution execution : getExecutions()) {
+                    message.append('\n').append(execution.getSql());
+                }
+                Client cached = clientCache.map.get(100L);
+                return message.append("\ncacheTouched=").append(!clientCache.getAllKeys.isEmpty())
+                        .append("\ncachedName=").append(cached != null ? cached.name() : null)
+                        .toString();
+            });
             assertEquals("STALE-TAX-100", organization.taxCode());
             Person person = assertInstanceOf(Person.class, rows.get(1));
             assertEquals("Bob", person.name());
@@ -2229,8 +2246,14 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     client.createQuery(table)
                             .where(table.id().eq(3L))
                             .select(table.fetch(
+                                    // Explicit join: AUTO resolves to a post-fetch SELECT, so the
+                                    // fake-FK join policy would not be the effective fetch.
                                     TreeNode2Fetcher.$.name().parent(
-                                            TreeNode2Fetcher.$.name().parent(TreeNode2Fetcher.$.name())
+                                            ReferenceFetchType.JOIN_ALWAYS,
+                                            TreeNode2Fetcher.$.name().parent(
+                                                    ReferenceFetchType.JOIN_ALWAYS,
+                                                    TreeNode2Fetcher.$.name()
+                                            )
                                     )
                             ))
                             .useObjectCache(
@@ -2258,6 +2281,119 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             nodeCache.delete(2L);
             nodeCache.delete(1L);
         }
+    }
+
+    @Test
+    public void testOrdinaryJoinedConcreteLeafKeepsPolymorphicBaseDiscriminator() {
+        OrganizationProjectTable orgProject = OrganizationProjectTable.$;
+        List<Tuple2<Organization, String>> joinedLeaves = new ArrayList<>();
+        jdbc(con -> joinedLeaves.addAll(
+                sqlClient.createQuery(orgProject)
+                        .where(orgProject.id().eq(1001L))
+                        .select(
+                                orgProject.organization().fetch(OrganizationFetcher.$.name().taxCode()),
+                                orgProject.name()
+                        )
+                        .execute(con)
+        ));
+        assertEquals(1, joinedLeaves.size());
+        Organization organization = joinedLeaves.get(0).get_1();
+        assertNotNull(organization);
+        // A concrete joined leaf reads only its own columns; a stray discriminator shifts them.
+        assertEquals("Acme", organization.name());
+        assertEquals("ACME-001", organization.taxCode());
+        assertEquals("Single organization project", joinedLeaves.get(0).get_2());
+
+        ClientProjectTable clientProject = ClientProjectTable.$;
+        List<Client> joinedBase = new ArrayList<>();
+        jdbc(con -> joinedBase.addAll(
+                sqlClient.createQuery(clientProject)
+                        .where(clientProject.id().eq(1000L))
+                        .select(clientProject.client().fetch(ClientFetcher.$.name()))
+                        .execute(con)
+        ));
+        assertEquals(1, joinedBase.size());
+        // The polymorphic base joined leaf still consumes its discriminator.
+        assertEquals("Acme", assertInstanceOf(Organization.class, joinedBase.get(0)).name());
+    }
+
+    @Test
+    public void testContentFetcherInheritedBranchChildSelectionStaysSafe() {
+        MapCache<Department> departmentCache = new MapCache<>(ImmutableType.get(Department.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Department.class ? departmentCache : null);
+        EmployeeTable table = EmployeeTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(Department.class, Arrays.asList(6900L, 6901L)));
+        departmentCache.clearHistory();
+        try {
+            rawUpdate("update STAFF_DEPARTMENT set NAME = ? where ID = ?", "FRESH-ENG", 6900L);
+            rawUpdate("update STAFF_DEPARTMENT set NAME = ? where ID = ?", "FRESH-SALES", 6901L);
+            clearExecutions();
+            List<Employee> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(
+                    client.createQuery(table)
+                            .where(table.id().in(Arrays.asList(6000L, 6002L)))
+                            .orderBy(table.id())
+                            .select(table.fetch(
+                                    EmployeeFetcher.$.department(DepartmentFetcher.$.name())
+                                            .forType(FullTimeEmployeeFetcher.$.annualSalary())
+                            ))
+                            .useObjectCache(
+                                    EmployeeFetcher.$.forType(
+                                            FullTimeEmployeeFetcher.$.department(DepartmentFetcher.$.name())
+                                    )
+                            )
+                            .execute(con)
+            ));
+            assertEquals(2, rows.size());
+            FullTimeEmployee fullTime = assertInstanceOf(FullTimeEmployee.class, rows.get(0));
+            assertNotNull(fullTime.department());
+            assertEquals("FRESH-ENG", fullTime.department().name());
+            assertEquals(120000L, fullTime.annualSalary().longValue());
+            PartTimeEmployee partTime = assertInstanceOf(PartTimeEmployee.class, rows.get(1));
+            assertNotNull(partTime.department());
+            assertEquals("FRESH-SALES", partTime.department().name());
+            // The owning hint conservatively declines, so it never touches the cache.
+            assertTrue(departmentCache.getAllKeys.isEmpty());
+        } finally {
+            rawUpdate("update STAFF_DEPARTMENT set NAME = ? where ID = ?", "Engineering", 6900L);
+            rawUpdate("update STAFF_DEPARTMENT set NAME = ? where ID = ?", "Sales", 6901L);
+            departmentCache.delete(6900L);
+            departmentCache.delete(6901L);
+        }
+    }
+
+    @Test
+    public void testLegacyBooleanHintMatchesOrdinaryPolymorphicShape() {
+        MapCache<Client> clientCache = new MapCache<>(ImmutableType.get(Client.class));
+        JSqlClient client = createClient(type -> type.getJavaClass() == Client.class ? clientCache : null);
+        ClientTable table = ClientTable.$;
+        jdbc(con -> client.getEntities().forConnection(con).findByIds(Client.class, CLIENT_IDS));
+        clientCache.clearHistory();
+
+        List<Client> ordinary = new ArrayList<>();
+        jdbc(con -> ordinary.addAll(
+                client.createQuery(table).where(table.id().in(CLIENT_IDS)).orderBy(table.id())
+                        .select(table).execute(con)
+        ));
+        clearExecutions();
+        List<Client> noArg = new ArrayList<>();
+        jdbc(con -> noArg.addAll(
+                client.createQuery(table).where(table.id().in(CLIENT_IDS)).orderBy(table.id())
+                        .select(table).useObjectCache().execute(con)
+        ));
+        clearExecutions();
+        List<Client> trueArg = new ArrayList<>();
+        jdbc(con -> trueArg.addAll(
+                client.createQuery(table).where(table.id().in(CLIENT_IDS)).orderBy(table.id())
+                        .select(table).useObjectCache(true).execute(con)
+        ));
+
+        assertSameLoadedShape(ordinary, noArg);
+        assertSameLoadedShape(ordinary, trueArg);
+        // The ordinary bare projection leaves unselected subtype props unloaded.
+        assertFalse(assertInstanceOf(ImmutableSpi.class, ordinary.get(0)).__isLoaded("taxCode"));
+        assertFalse(assertInstanceOf(ImmutableSpi.class, ordinary.get(1)).__isLoaded("firstName"));
     }
 
     @Test
@@ -3612,6 +3748,27 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             }
         }
         assertTrue(false, "the object cache must be consulted for " + key);
+    }
+
+    /** Asserts rows match on concrete type, id/name and every property's loaded state. */
+    private static void assertSameLoadedShape(List<Client> expected, List<Client> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            Client expectedRow = expected.get(i);
+            Client actualRow = actual.get(i);
+            ImmutableSpi expectedSpi = assertInstanceOf(ImmutableSpi.class, expectedRow);
+            ImmutableSpi actualSpi = assertInstanceOf(ImmutableSpi.class, actualRow);
+            assertEquals(expectedSpi.__type(), actualSpi.__type());
+            for (ImmutableProp prop : expectedSpi.__type().getProps().values()) {
+                assertEquals(
+                        expectedSpi.__isLoaded(prop.getId()),
+                        actualSpi.__isLoaded(prop.getId()),
+                        "load state of \"" + prop + "\""
+                );
+            }
+            assertEquals(expectedRow.id(), actualRow.id());
+            assertEquals(expectedRow.name(), actualRow.name());
+        }
     }
 
     private static Book hintedBook(JSqlClient client, BookTable table) {
