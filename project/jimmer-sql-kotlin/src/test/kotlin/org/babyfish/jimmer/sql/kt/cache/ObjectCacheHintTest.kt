@@ -366,11 +366,13 @@ class ObjectCacheHintTest : AbstractQueryTest() {
                     where(table.id valueIn visibleIds)
                     orderBy(table.id)
                     select(
-                        table.fetchBy {
-                            name()
-                            forType(KOrganization::class) { taxCode() }
-                            forType(KPerson::class) { firstName(); lastName() }
-                        }
+                        table.fetch(
+                            newFetcher(KClient::class).by {
+                                name()
+                                forType(KOrganization::class) { taxCode() }
+                                forType(KPerson::class) { firstName(); lastName() }
+                            }
+                        )
                     )
                 }.useObjectCache(
                     newFetcher(KClient::class).by {
