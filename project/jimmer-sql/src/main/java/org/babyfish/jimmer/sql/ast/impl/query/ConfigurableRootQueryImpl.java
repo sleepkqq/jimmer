@@ -6,6 +6,7 @@ import org.babyfish.jimmer.sql.ast.Selection;
 import org.babyfish.jimmer.sql.ast.impl.Ast;
 import org.babyfish.jimmer.sql.ast.impl.AstContext;
 import org.babyfish.jimmer.sql.ast.impl.AstVisitor;
+import org.babyfish.jimmer.sql.ast.impl.table.TableImplementor;
 import org.babyfish.jimmer.sql.ast.query.*;
 import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
@@ -336,8 +337,10 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         TypedQueryData data = getData();
         // Boolean mode replaces an ad hoc mask with the configured policy, or no mask.
-        Fetcher<?> cachedContent = enabled ? getMutableQuery().getSqlClient().getCaches()
-                .getObjectCacheContentFetcher(getMutableQuery().getTable().getImmutableType()) : null;
+        Fetcher<?> cachedContent = enabled && getMutableQuery().getTableLikeImplementor() instanceof TableImplementor<?> ?
+                getMutableQuery().getSqlClient().getCaches().getObjectCacheContentFetcher(
+                        ((TableImplementor<?>) getMutableQuery().getTableLikeImplementor()).getImmutableType()
+                ) : null;
         if (data.useObjectCache == enabled && data.cachedContent == cachedContent) {
             return this;
         }
