@@ -25,6 +25,7 @@ import org.babyfish.jimmer.sql.fetcher.ReferenceFetchType;
 import org.babyfish.jimmer.sql.filter.Filter;
 import org.babyfish.jimmer.sql.filter.FilterArgs;
 import org.babyfish.jimmer.sql.model.Author;
+import org.babyfish.jimmer.sql.model.AuthorDraft;
 import org.babyfish.jimmer.sql.model.AuthorFetcher;
 import org.babyfish.jimmer.sql.model.AuthorTable;
 import org.babyfish.jimmer.sql.model.Book;
@@ -4102,7 +4103,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 .where(table.id().eq(oreillyId))
                 .select(table.fetch(BookStoreFetcher.$))
                 .useObjectCache()
-                .execute(con).get(0).getId()));
+                .execute(con).get(0).id()));
         assertTrue(cache.getAllKeys.isEmpty());
 
         authorCache.put(alexId, AuthorDraft.$.produce(draft -> {
@@ -4111,8 +4112,8 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }));
         jdbc(con -> {
             ConfigurableRootQuery<BookStoreTable, Book> joined = client.createQuery(table)
-                    .where(table.books().id().eq(learningGraphQLId1))
-                    .select(table.books().fetch(BookFetcher.$.authors(AuthorFetcher.$.firstName())))
+                    .where(table.asTableEx().books().id().eq(learningGraphQLId1))
+                    .select(table.asTableEx().books().fetch(BookFetcher.$.authors(AuthorFetcher.$.firstName())))
                     .useObjectCache();
             List<Book> books = new ArrayList<>(joined.execute(con));
             joined.forEach(con, 1, books::add);
@@ -4166,7 +4167,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 .where(table.id().eq(100L))
                 .select(table.fetch(ClientFetcher.$.name()))
                 .useObjectCache()
-                .execute(con).get(0).getName()));
+                .execute(con).get(0).name()));
         assertTrue(cache.getAllKeys.isEmpty());
     }
 
