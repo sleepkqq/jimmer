@@ -193,7 +193,14 @@ and intersects it with each native selected projection, including concrete-type 
 Scalar-only, ID-only and unsupported projections stay fresh without cache access.
 Explicit Fetcher masks still reject approved content absent from their projection.
 Transaction, visibility, whole-query fallback and complete entity-cache loading remain unchanged.
-Source CI and public publication verification for `1.1.8` are pending.
+The immutable `1.1.8` tag points to
+[`23e747943`](https://github.com/sleepkqq/jimmer/commit/23e7479439a3d771a4ef65065dadd7d77fc7631d).
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37701909708) and
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37702666113)
+passed, including 130 targeted Java/Kotlin cache tests without failures or skips,
+native PostgreSQL cases, Quarkus cache-policy/JTA tests and the full build.
+The anonymous artifacts and isolated public consumer passed on the second attempt
+after a POM fetch timeout; the source and tag were unchanged.
 
 ### Reference IDs in bulk update-returning in 1.0.7
 
