@@ -111,8 +111,13 @@ unchanged. Collections cannot be approved by a mask; unapproved collections stay
 Fetchers without the native metadata required for reduction use the original fresh read.
 
 The `1.1.3` tag (`a021104`) is immutable; its JitPack build failed before compilation on an
-external Maven Central HTTP 429. `1.1.4` is prepared but not yet tagged or verified: verify
-the tagged artifacts before adopting them.
+external Maven Central HTTP 429. `1.1.4` is available as the immutable annotated tag
+(`9018a92`, peeled [`80be789`](https://github.com/sleepkqq/jimmer/commit/80be789348b9b22b532eca0651b4c26934dbb061)):
+[fork CI](https://github.com/sleepkqq/jimmer/actions/runs/37553186767) and the
+[anonymous public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37554211005)
+both passed on that exact commit,
+confirming every published POM, Gradle module metadata file and the Quarkus deployment
+descriptor, and the public smoke consumer builds from JitPack alone.
 
 ### Reference IDs in bulk update-returning in 1.0.7
 
@@ -159,9 +164,9 @@ For version `1.1.4`, replace
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12. Verify the tagged public
-artifacts using the release check below before adopting these coordinates; a tag alone
-does not establish artifact availability.
+this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.4` artifacts are
+verified available from anonymous JitPack with the release check below; a tag alone does not
+establish artifact availability.
 
 The previous extension repository and tags are retained for existing consumers. Its
 archive is a maintenance handoff, not an artifact relocation or deletion.
