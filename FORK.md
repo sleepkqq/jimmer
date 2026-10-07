@@ -152,7 +152,14 @@ context, including deeper children. Explicit masks in merged set queries conserv
 decline to the complete fresh graph, including nested and non-first operands and JTA reads.
 Neither change introduces query-result caching or permits transaction-time cache fills.
 
-Release verification for 1.1.6 is pending; 1.1.5 remains the last verified public release.
+The immutable `1.1.6` tag points to
+[`aee7d33`](https://github.com/sleepkqq/jimmer/commit/aee7d3381738773406430b2fdbe5aafa731aa8b9).
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37673336571) and
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37674851282)
+passed, including 162 targeted object-cache, Kotlin and Quarkus cache-policy/JTA tests
+without failures or skips, native PostgreSQL regressions and the full build.
+The anonymous publication check and JitPack-only consumer build passed on the second
+attempt after an initial network timeout fetching a POM; no source or tag was changed.
 
 ### Reference IDs in bulk update-returning in 1.0.7
 
@@ -192,14 +199,14 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.5`, replace
+For version `1.1.6`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.5`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.5`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.6`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.6`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.5` artifacts are
+this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.6` artifacts are
 verified available from anonymous JitPack with the release check below; a tag alone does not
 establish artifact availability.
 
