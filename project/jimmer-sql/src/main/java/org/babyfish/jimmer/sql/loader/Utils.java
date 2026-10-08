@@ -55,7 +55,10 @@ class Utils {
             if (originalValues != null && !originalValues.isEmpty()) {
                 List<V> values = new ArrayList<>();
                 for (T t : originalValues) {
-                    values.add(map2.get(t));
+                    V value = map2.get(t);
+                    if (value != null) {
+                        values.add(value);
+                    }
                 }
                 if (comparator != null) {
                     values.sort((Comparator<? super V>) comparator);

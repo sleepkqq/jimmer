@@ -202,6 +202,17 @@ native PostgreSQL cases, Quarkus cache-policy/JTA tests and the full build.
 The anonymous artifacts and isolated public consumer passed on the second attempt
 after a POM fetch timeout; the source and tag were unchanged.
 
+### Missing targets in ordinary association caches in 1.1.9
+
+An ordinary cached to-many ID snapshot can outlive a deleted or filtered target.
+Association assembly now omits absent targets instead of putting null into the child
+collection. Valid children retain their order and duplicates; an all-missing snapshot
+produces an empty collection. This matches the existing to-one map join behavior.
+Explicit query-cache hydration, SQL-authoritative membership and whole-query fallback
+remain unchanged. The existing Book/BookStore regression covers mixed and all-missing
+targets, including warm negative object-cache entries, without changing the cache factory.
+Publication and consumer verification are pending; a local change is not a released artifact.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
