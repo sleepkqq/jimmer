@@ -81,6 +81,7 @@ jobs:
           bash project/gradlew -p project --max-workers=2 :jimmer-sql:test \
             --tests 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest' \
             --tests 'org.babyfish.jimmer.sql.cache.ObjectCacheTest' \
+            --tests 'org.babyfish.jimmer.sql.loader.OneToManyWithCacheTest' \
             --tests 'org.babyfish.jimmer.sql.query.GlobalFilterTest.testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
             --tests 'org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest'
           bash project/gradlew -p project --max-workers=2 :jimmer-sql-kotlin:test \
@@ -125,6 +126,7 @@ jobs:
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsUsePolymorphicDtoBranches' \
             --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsRejectUnknownOrProtectedProperties' \
             --case 'org.babyfish.jimmer.sql.query.GlobalFilterTest#testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
+            --case 'org.babyfish.jimmer.sql.loader.OneToManyWithCacheTest#loadChildDetailsWithMissingCachedTargets' \
             org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 89 \
             org.babyfish.jimmer.sql.cache.ObjectCacheTest 21 \
             org.babyfish.jimmer.sql.query.GlobalFilterTest 1 \
