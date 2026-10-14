@@ -24,6 +24,18 @@
 
 ## Migrate a consumer
 
+### Non-nullable key-group preference in 1.1.10
+
+When multiple key groups are loaded, matching prefers a group without nullable
+properties before nullable alternatives, then the group with more properties.
+Entity and property-set matching use the same metadata-based ordering. This avoids
+collapsing distinct batch rows or reporting false conflicts on an optional null key
+when a complete non-nullable key is available. A nullable group remains eligible
+when no non-nullable group is loaded; explicit key configuration is unchanged.
+The existing `MatchByKeyTest` covers new and existing rows, entity/shape agreement
+and nullable-only fallback with the shared anonymized `NullableKeyUser` fixture.
+This correction is new in `1.1.10`; `1.1.9` does not include it.
+
 ### Optional object-cache query hydration in 1.1.0
 
 `useObjectCache()` is an explicit, off-by-default hint on Java and Kotlin root queries.
@@ -257,16 +269,16 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.9`, replace
+For version `1.1.10`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.9`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.9`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.10`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.10`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-compatibility is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.9` artifacts and
-the public-only consumer are verified against anonymous JitPack. A tag alone does not
-establish artifact availability.
+compatibility is tested with Kotlin 2.4.20 and KSP 2.3.12. Verify the tagged artifacts and
+the public-only consumer against anonymous JitPack before publishing the GitHub release.
+A tag alone does not establish artifact availability.
 
 The previous extension repository and tags are retained for existing consumers. Its
 archive is a maintenance handoff, not an artifact relocation or deletion.

@@ -81,7 +81,10 @@ public class KeyMatcherImpl implements KeyMatcher {
             }
             items.add(new Item(propIds, group));
         }
-        items.sort((a, b) -> b.propIds.length - a.propIds.length);
+        // Use the same non-nullable key preference for entities and mutation shapes.
+        items.sort(Comparator
+                .comparing((Item item) -> groupMap.get(item.group).stream().anyMatch(ImmutableProp::isNullable))
+                .thenComparing((a, b) -> b.propIds.length - a.propIds.length));
         this.type = type;
         this.groupMap = Collections.unmodifiableMap(groupMap);
         this.items = items.toArray(EMPTY_MATCHED_ITEMS);
