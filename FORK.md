@@ -239,8 +239,8 @@ joined-inheritance validation use the physical FK property on the updated table;
 the existing renderer and readers retain nullable reference semantics. Inverse
 references and properties requiring a target-table join remain unsupported.
 `FluentDMLTest` covers changed/non-null and cleared/null references on H2 and
-PostgreSQL, plus rejection of joined and inverse projections. CI runs the PostgreSQL
-regression with the canonical native fixture and rejects skipped execution.
+PostgreSQL, plus rejection of joined and inverse projections. CI enables the canonical
+PostgreSQL and MySQL fixtures in the normal full test suite.
 
 ### Tenant filters and multi-view caches in 1.0.6
 

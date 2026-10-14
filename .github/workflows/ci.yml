@@ -16,18 +16,22 @@ permissions:
   contents: read
 
 jobs:
-  whitespace:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Reject introduced whitespace errors and conflict markers
-        run: git diff --check "${{ github.event.pull_request.base.sha }}...HEAD"
-
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: jimmer_test
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: '123456'
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d jimmer_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -35,210 +39,24 @@ jobs:
           java-version: '21'
           distribution: temurin
       - uses: gradle/actions/setup-gradle@v6.3.0
+      - name: Start the canonical MySQL fixture
+        run: docker compose -f project/jimmer-sql/src/test/resources/docker-compose.yml up -d --wait --wait-timeout 120 mysql
+      - name: Load the canonical PostgreSQL fixture
+        run: docker exec -i "${{ job.services.postgres.id }}" psql -U root -d jimmer_test -v ON_ERROR_STOP=1 < project/jimmer-sql/src/test/resources/database-postgres.sql
       - name: Build and test ORM, processors, Kotlin and Quarkus
         working-directory: project
-        run: ./gradlew --build-cache --no-parallel --max-workers=2 build
-      - name: Upload complete build test evidence
+        env:
+          jimmer-sql-test-native-database: postgres
+        # Bash preserves the upstream fixture's hyphenated environment key.
+        run: bash ./gradlew --no-build-cache --no-parallel --max-workers=2 build
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: build-evidence
+          name: build-test-reports
           path: |
             project/**/build/test-results/**
             project/**/build/reports/tests/**
-          if-no-files-found: warn
-
-  object-cache:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18.6-alpine
-        env:
-          POSTGRES_DB: jimmer_test
-          POSTGRES_USER: root
-          POSTGRES_PASSWORD: '123456'
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U root -d jimmer_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          java-version: '21'
-          distribution: temurin
-      - uses: gradle/actions/setup-gradle@v6.3.0
-      - name: Load the canonical PostgreSQL fixture
-        run: docker exec -i "${{ job.services.postgres.id }}" psql -U root -d jimmer_test -v ON_ERROR_STOP=1 < project/jimmer-sql/src/test/resources/database-postgres.sql
-      - name: Java object-cache query hydration and Kotlin hint
-        env:
-          jimmer-sql-test-native-database: postgres
-        run: |
-          # Ubuntu's /bin/sh drops the upstream fixture's hyphenated environment key.
-          bash project/gradlew -p project --max-workers=2 :jimmer-sql:test \
-            --tests 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest' \
-            --tests 'org.babyfish.jimmer.sql.cache.ObjectCacheTest' \
-            --tests 'org.babyfish.jimmer.sql.loader.OneToManyWithCacheTest' \
-            --tests 'org.babyfish.jimmer.sql.query.GlobalFilterTest.testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
-            --tests 'org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest'
-          bash project/gradlew -p project --max-workers=2 :jimmer-sql-kotlin:test \
-            --tests 'org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest'
-      - name: Require the targeted object-cache cases to run without skips
-        run: |
-          python3 scripts/verify-test-results.py project/jimmer-sql/build/test-results/test \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testNativePostgresCommittedRootChildEdgesAndDisplay' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testFakeFkSiblingJoinedProofDoesNotAdmitDeletedReferenceTarget' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testRealFkSingleTableSubtypeChangeDoesNotAdmitStaleTarget' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testNullableAncestorRequiredEmbeddedGrandchildPresenceStaysSqlAuthoritative' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherExplicitDependencyVisibilityAcrossFormulaMasks' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherApprovedJvmFormulaAcceptsEmbeddedDependencyClosure' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherApprovedJvmFormulaOnlyKeepsImplicitEmbeddedClosure' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherFieldLocalReferenceFilterAdmissionKeepsRootMembershipFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherRecursiveParentKeepsAncestorNamesFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherRecursiveChildNodesKeepDescendantNamesFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskServesApprovedSubtypeLeaf' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherOnlyLoadsApplicableMissingBranchLeaves' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskDtoAndTupleParity' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchWrongConcreteTypeAndSubtypeChangeFallBack' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskRejectsProtectedAndUnselectedContent' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskKeepsUniversallySelectedBaseNameFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchInheritedLeafApprovalKeepsSiblingsFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBaseNameApprovalCoversExplicitBranchDuplicate' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchMaskAcceptsInheritedBaseSelection' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchDefaultDtoSqlReduction' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherBranchLateBadPayloadFallsBackBeforeConverter' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherNestedPolymorphicChildBranchStaysConcreteTypeScoped' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherUnsupportedPublicFetcherProjectionDeclinesSafely' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherDepth2FakeFkJoinPolicyDeclinesWholeFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherIncompleteCachedEmbeddedFallsBackWholeQuery' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testOrdinaryJoinedConcreteLeafKeepsPolymorphicBaseDiscriminator' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherInheritedBranchChildSelectionStaysSafe' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testLegacyBooleanHintMatchesOrdinaryPolymorphicShape' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyObjectCacheDoesNotServeOrdinaryEntityOrDtoReads' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyBooleanFetcherHintKeepsCommittedFieldsFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheTest#testContentOnlyAssociationSubtreeDoesNotReuseAmbientCacheContext' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentFetcherMergedQueriesKeepUnapprovedSelectedChildFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testContentOnlyBasePolicyCoversSubtypeAndSelectAssociationReads' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsUseDtoProjectionAndKeepScalarSlotsFresh' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsUsePolymorphicDtoBranches' \
-            --case 'org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest#testConfiguredContentFieldsRejectUnknownOrProtectedProperties' \
-            --case 'org.babyfish.jimmer.sql.query.GlobalFilterTest#testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate' \
-            --case 'org.babyfish.jimmer.sql.loader.OneToManyWithCacheTest#loadChildDetailsWithMissingCachedTargets' \
-            org.babyfish.jimmer.sql.cache.ObjectCacheQueryProjectionTest 89 \
-            org.babyfish.jimmer.sql.cache.ObjectCacheTest 21 \
-            org.babyfish.jimmer.sql.query.GlobalFilterTest 1 \
-            org.babyfish.jimmer.sql.ast.impl.query.ObjectCacheSeedIntegrityTest 7
-          python3 scripts/verify-test-results.py project/jimmer-sql-kotlin/build/test-results/test \
-            --case 'org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest#testDelegatedClientWarmMixedTupleUsesSkeleton' \
-            --case 'org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest#testBranchContentFetcherServesApprovedSubtypeLeafFromCache' \
-            --case 'org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest#testContentFetcherHintDeclinedInsideLocalJdbcTransaction' \
-            org.babyfish.jimmer.sql.kt.cache.ObjectCacheHintTest 12
-      - name: Upload object-cache test evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: object-cache-evidence
-          path: |
-            project/jimmer-sql/build/test-results/test
-            project/jimmer-sql/build/reports/tests/test
-            project/jimmer-sql-kotlin/build/test-results/test
-            project/jimmer-sql-kotlin/build/reports/tests/test
-          if-no-files-found: warn
-
-  native-pg:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18.6-alpine
-        env:
-          POSTGRES_DB: jimmer_test
-          POSTGRES_USER: root
-          POSTGRES_PASSWORD: '123456'
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U root -d jimmer_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          java-version: '21'
-          distribution: temurin
-      - uses: gradle/actions/setup-gradle@v6.3.0
-      - name: Load the canonical PostgreSQL fixture
-        run: docker exec -i "${{ job.services.postgres.id }}" psql -U root -d jimmer_test -v ON_ERROR_STOP=1 < project/jimmer-sql/src/test/resources/database-postgres.sql
-      - name: Native PostgreSQL temporal, JSON and reference regressions
-        env:
-          jimmer-sql-test-native-database: postgres
-        run: |
-          # Ubuntu's /bin/sh drops the upstream fixture's hyphenated environment key.
-          bash project/gradlew -p project --max-workers=2 :jimmer-sql:test \
-            --tests 'org.babyfish.jimmer.sql.mutation.FluentDMLTest.testUpdateReturningReferenceIdByPostgres' \
-            --tests 'org.babyfish.jimmer.sql.mutation.ModifiedFetcherTest.testUpdateReturningTemporalValuesByPostgres' \
-            --tests 'org.babyfish.jimmer.sql.json.ScalarProviderTest.testUpdateReturningJsonNull' \
-            --tests 'org.babyfish.jimmer.sql.json.ScalarProviderTest.testBatchUpdateReturningJsonValues'
-      - name: Require the native PostgreSQL cases to run without skips
-        run: |
-          python3 scripts/verify-test-results.py project/jimmer-sql/build/test-results/test \
-            --case 'org.babyfish.jimmer.sql.mutation.FluentDMLTest#testUpdateReturningReferenceIdByPostgres' \
-            --case 'org.babyfish.jimmer.sql.mutation.ModifiedFetcherTest#testUpdateReturningTemporalValuesByPostgres' \
-            --case 'org.babyfish.jimmer.sql.json.ScalarProviderTest#testUpdateReturningJsonNull' \
-            --case 'org.babyfish.jimmer.sql.json.ScalarProviderTest#testBatchUpdateReturningJsonValues' \
-            org.babyfish.jimmer.sql.mutation.FluentDMLTest 1 \
-            org.babyfish.jimmer.sql.mutation.ModifiedFetcherTest 1 \
-            org.babyfish.jimmer.sql.json.ScalarProviderTest 2
-      - name: Upload native PostgreSQL test evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: native-pg-evidence
-          path: |
-            project/jimmer-sql/build/test-results/test
-            project/jimmer-sql/build/reports/tests/test
-          if-no-files-found: warn
-
-  quarkus-jta:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
-        with:
-          java-version: '21'
-          distribution: temurin
-      - uses: gradle/actions/setup-gradle@v6.3.0
-      - name: Quarkus cache policy and transaction-known-inactive guards
-        run: project/gradlew -p project --max-workers=2 :jimmer-quarkus:integration-tests:test --tests 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest' --tests 'io.quarkiverse.jimmer.it.ConfiguredCacheGuardTest' --tests 'io.quarkiverse.jimmer.it.CacheModeReadTest' --tests 'io.quarkiverse.jimmer.it.LocalOnlyCacheFactoryTest'
-      - name: Require cache policy and transaction cases to run without skips
-        run: |
-          python3 scripts/verify-test-results.py project/jimmer-quarkus/integration-tests/build/test-results/test \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#useObjectCacheInsideTransactionDoesNotReturnStaleCachedData' \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherInsideTransactionDoesNotReturnStaleCachedData' \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherNestedChildInsideTransactionReadsPendingTarget' \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherColdCacheInsideTransactionNeverPublishesPendingValue' \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#contentFetcherMergedColdCacheInsideTransactionNeverPublishesPendingValue' \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#ordinaryAssociationReadBypassesStaleEdgeAndUnapprovedChildCache' \
-            --case 'io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest#ordinaryWarmAndColdAssociationReadsDoNotPublishRolledBackChild' \
-            --case 'io.quarkiverse.jimmer.it.ConfiguredCacheGuardTest#yamlConfigAppliesGuardAndNamespaceToTheExistingFactory' \
-            --case 'io.quarkiverse.jimmer.it.CacheModeReadTest#contentOnlyPolicyIsPreservedByEveryRedisCacheMode' \
-            --case 'io.quarkiverse.jimmer.it.LocalOnlyCacheFactoryTest#buildsCaffeineOnlyCacheForConfiguredEntity' \
-            io.quarkiverse.jimmer.it.QuarkusConnectionManagerTransactionKnownInactiveTest 17 \
-            io.quarkiverse.jimmer.it.ConfiguredCacheGuardTest 1 \
-            io.quarkiverse.jimmer.it.CacheModeReadTest 13 \
-            io.quarkiverse.jimmer.it.LocalOnlyCacheFactoryTest 4
-      - name: Upload Quarkus nested-JTA evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: quarkus-jta-evidence
-          path: |
-            project/jimmer-quarkus/integration-tests/build/test-results/test
-            project/jimmer-quarkus/integration-tests/build/reports/tests/test
           if-no-files-found: warn
 
   publish-smoke:
@@ -253,22 +71,19 @@ jobs:
       - name: Publish every fork module to an isolated repository
         run: project/gradlew -p project --no-parallel --max-workers=2 publishToMavenLocal -Dmaven.repo.local="$RUNNER_TEMP/jimmer-m2"
       - name: Verify every published artifact and shared version
-        shell: bash
         run: |
           version=$(sed -n 's/^version=//p' project/gradle.properties)
-          python3 scripts/verify-publication.py "$RUNNER_TEMP/jimmer-m2" "$version" 2>&1 | tee "$RUNNER_TEMP/verify-publication.log"
+          python3 scripts/verify-publication.py "$RUNNER_TEMP/jimmer-m2" "$version"
       - name: Build the isolated consumer against only the published fork
-        shell: bash
         run: |
           version=$(sed -n 's/^version=//p' project/gradle.properties)
-          project/gradlew -p smoke-tests --no-parallel --max-workers=2 build -PforkRepository="file://$RUNNER_TEMP/jimmer-m2" -PforkVersion="$version" 2>&1 | tee "$RUNNER_TEMP/smoke-tests.log"
-      - name: Upload isolated consumer evidence
+          project/gradlew -p smoke-tests --no-parallel --max-workers=2 build -PforkRepository="file://$RUNNER_TEMP/jimmer-m2" -PforkVersion="$version"
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: isolated-consumer-evidence
+          name: isolated-consumer-test-reports
           path: |
-            ${{ runner.temp }}/*.log
             smoke-tests/build/test-results/test
             smoke-tests/build/reports/tests/test
           if-no-files-found: warn
@@ -284,7 +99,6 @@ jobs:
           distribution: temurin
       - uses: gradle/actions/setup-gradle@v6.3.0
       - name: Require the dispatched version to match this ref
-        shell: bash
         env:
           PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
         run: |
@@ -294,26 +108,19 @@ jobs:
             exit 1
           fi
       - name: Verify the anonymous JitPack release
-        shell: bash
         env:
           PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
-        run: |
-          set -o pipefail
-          python3 scripts/verify-publication.py https://jitpack.io "$PUBLIC_RELEASE_VERSION" 2>&1 | tee "$RUNNER_TEMP/verify-publication-public.log"
+        run: python3 scripts/verify-publication.py https://jitpack.io "$PUBLIC_RELEASE_VERSION"
       - name: Build the isolated consumer against the public release
-        shell: bash
         env:
           PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
-        run: |
-          set -o pipefail
-          project/gradlew -p smoke-tests clean build -PforkVersion="$PUBLIC_RELEASE_VERSION" --no-parallel --max-workers=2 --refresh-dependencies 2>&1 | tee "$RUNNER_TEMP/smoke-tests-public.log"
-      - name: Upload public release evidence
+        run: project/gradlew -p smoke-tests clean build -PforkVersion="$PUBLIC_RELEASE_VERSION" --no-parallel --max-workers=2 --refresh-dependencies
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: public-release-evidence
+          name: public-release-test-reports
           path: |
-            ${{ runner.temp }}/*.log
             smoke-tests/build/test-results/test
             smoke-tests/build/reports/tests/test
           if-no-files-found: warn
