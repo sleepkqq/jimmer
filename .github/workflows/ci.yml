@@ -40,7 +40,9 @@ jobs:
           distribution: temurin
       - uses: gradle/actions/setup-gradle@v6.3.0
       - name: Start the canonical MySQL fixture
-        run: docker compose -f project/jimmer-sql/src/test/resources/docker-compose.yml up -d --wait --wait-timeout 120 mysql
+        run: |
+          trap 'docker compose -f project/jimmer-sql/src/test/resources/docker-compose.yml logs mysql' ERR
+          docker compose -f project/jimmer-sql/src/test/resources/docker-compose.yml up -d --wait --wait-timeout 120 mysql
       - name: Load the canonical PostgreSQL fixture
         run: docker exec -i "${{ job.services.postgres.id }}" psql -U root -d jimmer_test -v ON_ERROR_STOP=1 < project/jimmer-sql/src/test/resources/database-postgres.sql
       - name: Build and test ORM, processors, Kotlin and Quarkus
