@@ -14,6 +14,7 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
 import org.babyfish.jimmer.sql.common.AbstractTest;
 import org.babyfish.jimmer.sql.common.CacheImpl;
+import org.babyfish.jimmer.sql.fetcher.ReferenceFetchType;
 import org.babyfish.jimmer.sql.model.*;
 import org.babyfish.jimmer.sql.model.dto.ReusableBookStoreView;
 import org.babyfish.jimmer.sql.model.inheritance.joinedtable.*;
@@ -33,6 +34,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -48,11 +50,20 @@ public class ObjectCacheTest extends AbstractQueryTest {
     }
 
     private JSqlClient newClient(ConnectionManager connectionManager) {
+        return newClient(connectionManager, false);
+    }
+
+    private JSqlClient newClient(ConnectionManager connectionManager, boolean contentOnly) {
         return getSqlClient(builder -> {
             builder.setConnectionManager(connectionManager);
             builder.setCaches(cfg ->
                     cfg.setCacheFactory(
                             new CacheFactory() {
+
+                                @Override
+                                public boolean isObjectCacheContentOnly(ImmutableType type) {
+                                    return contentOnly && type == ImmutableType.get(BookStore.class);
+                                }
 
                                 @Override
                                 public Cache<?, ?> createObjectCache(ImmutableType type) {
@@ -623,6 +634,208 @@ public class ObjectCacheTest extends AbstractQueryTest {
             Assertions.assertEquals(1, rows.size());
             Assertions.assertEquals("O'REILLY", rows.get(0).name());
             assertHintStatements(warmMiss, HINT_SKELETON_SQL);
+        }
+    }
+
+    @Test
+    public void testContentOnlyObjectCacheDoesNotServeOrdinaryEntityOrDtoReads() {
+        sqlClient = newClient(NON_TX_MANAGER, true);
+        BookStoreTable table = BookStoreTable.$;
+        List<BookStore> warm = new ArrayList<>();
+        nontransactional(con -> warm.addAll(sqlClient
+                .createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(BookStoreFetcher.$.name()))
+                .useObjectCache(BookStoreFetcher.$.name())
+                .execute(con)));
+        Assertions.assertEquals(1, warm.size());
+        Assertions.assertEquals("O'REILLY", warm.get(0).name());
+        clearExecutions();
+        nontransactional(con -> sqlClient
+                .createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(BookStoreFetcher.$.name()))
+                .useObjectCache(BookStoreFetcher.$.name())
+                .execute(con));
+        Assertions.assertEquals(1, getExecutions().size());
+        Assertions.assertEquals(HINT_SKELETON_SQL, getExecutions().get(0).getSql());
+
+        String pendingName = "O'REILLY-pending";
+        jdbc(con -> {
+            try (PreparedStatement ps = con.prepareStatement(
+                    "update BOOK_STORE set NAME = ? where ID = ?"
+            )) {
+                ps.setString(1, pendingName);
+                ps.setObject(2, oreillyId);
+                Assertions.assertEquals(1, ps.executeUpdate());
+            }
+            BookStore store = sqlClient.getEntities().forConnection(con).findById(
+                    BookStore.class,
+                    oreillyId
+            );
+            Assertions.assertEquals(pendingName, store.name());
+            List<BookStore> wholeEntity = sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                    .useObjectCache()
+                    .execute(con);
+            Assertions.assertEquals(1, wholeEntity.size());
+            Assertions.assertEquals(pendingName, wholeEntity.get(0).name());
+            ReusableBookStoreView view = sqlClient.getEntities().forConnection(con).findById(
+                    ReusableBookStoreView.class,
+                    oreillyId
+            );
+            Assertions.assertEquals(pendingName, view.getName());
+        });
+    }
+
+    @Test
+    public void testContentOnlyAssociationSubtreeDoesNotReuseAmbientCacheContext() {
+        sqlClient = newClient(NON_TX_MANAGER, true);
+        Cache<Object, Author> authorCache = sqlClient.getCaches().getObjectCache(ImmutableType.get(Author.class));
+        nontransactional(con -> authorCache.getAll(
+                Collections.<Object>singletonList(sammerId),
+                new CacheEnvironment<>(sqlClient, con, keys -> Collections.singletonMap(
+                        sammerId,
+                        AuthorDraft.$.produce(draft -> {
+                            draft.setId(sammerId);
+                            draft.setFirstName("STALE");
+                        })
+                ), false)
+        ));
+        BookStoreFetcher storeFetcher = BookStoreFetcher.$.name().books(
+                BookFetcher.$.name().authors(AuthorFetcher.$.firstName())
+        );
+        List<BookStore> stores = new ArrayList<>();
+        nontransactional(con -> stores.add(sqlClient.getEntities().forConnection(con)
+                .findById(storeFetcher, manningId)));
+        BookTable table = BookTable.$;
+        nontransactional(con -> stores.add(sqlClient.createQuery(table)
+                .where(table.id().eq(graphQLInActionId1))
+                .select(table.fetch(BookFetcher.$.store(
+                        ReferenceFetchType.SELECT,
+                        storeFetcher
+                )))
+                .execute(con).get(0).store()));
+        for (BookStore store : stores) {
+            Assertions.assertFalse(store.books().isEmpty());
+            for (Book book : store.books()) {
+                Assertions.assertFalse(book.authors().isEmpty());
+                Assertions.assertEquals("Samer", book.authors().get(0).firstName());
+            }
+        }
+        nontransactional(con -> Assertions.assertEquals("STALE", sqlClient.getEntities().forConnection(con)
+                .findById(AuthorFetcher.$.firstName(), sammerId).firstName()));
+    }
+
+    @Test
+    public void testContentOnlyBooleanFetcherHintKeepsCommittedFieldsFresh() {
+        sqlClient = newClient(NON_TX_MANAGER, true);
+        BookStoreTable table = BookStoreTable.$;
+        String originalName = sqlClient.getEntities().findById(BookStore.class, oreillyId).name();
+        int originalVersion = sqlClient.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.version())
+                .execute()
+                .get(0);
+        int updatedVersion = originalVersion + 1;
+
+        // Explicitly cache only display content; version remains SQL-authoritative.
+        nontransactional(con -> sqlClient.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(BookStoreFetcher.$.name()))
+                .useObjectCache(BookStoreFetcher.$.name())
+                .execute(con));
+
+        String committedName = originalName + "-committed";
+        try {
+            nontransactional(con -> {
+                try (PreparedStatement ps = con.prepareStatement(
+                        "update BOOK_STORE set NAME = ?, VERSION = ? where ID = ?"
+                )) {
+                    ps.setString(1, committedName);
+                    ps.setInt(2, updatedVersion);
+                    ps.setObject(3, oreillyId);
+                    Assertions.assertEquals(1, ps.executeUpdate());
+                }
+            });
+
+            List<BookStore> ordinary = sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.allScalarFields()))
+                    .useObjectCache()
+                    .execute();
+            Assertions.assertEquals(1, ordinary.size());
+            Assertions.assertEquals(committedName, ordinary.get(0).name());
+            Assertions.assertEquals(updatedVersion, ordinary.get(0).version());
+            List<Tuple2<BookStore, Integer>> booleanTuple = sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.allScalarFields()), table.version())
+                    .useObjectCache()
+                    .execute();
+            Assertions.assertEquals(1, booleanTuple.size());
+            Assertions.assertEquals(committedName, booleanTuple.get(0).get_1().name());
+            Assertions.assertEquals(updatedVersion, booleanTuple.get(0).get_2());
+            Assertions.assertEquals(committedName,
+                    sqlClient.getEntities().findById(BookStore.class, oreillyId).name());
+            Assertions.assertEquals(committedName,
+                    sqlClient.getEntities().findById(ReusableBookStoreView.class, oreillyId).getName());
+            List<ReusableBookStoreView> booleanDto = sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(ReusableBookStoreView.class))
+                    .useObjectCache()
+                    .execute();
+            Assertions.assertEquals(1, booleanDto.size());
+            Assertions.assertEquals(committedName, booleanDto.get(0).getName());
+
+            nontransactional(con -> Assertions.assertTrue(sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.id())
+                    .exists(con)));
+            nontransactional(con -> {
+                BookStore locked = sqlClient.getEntities().forUpdate().forConnection(con)
+                        .findById(BookStore.class, oreillyId);
+                Assertions.assertEquals(committedName, locked.name());
+            });
+
+            List<BookStore> masked = sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.name().version()))
+                    .useObjectCache(BookStoreFetcher.$.name())
+                    .execute();
+            Assertions.assertEquals(1, masked.size());
+            Assertions.assertEquals(originalName, masked.get(0).name());
+            Assertions.assertEquals(updatedVersion, masked.get(0).version());
+            List<Tuple2<BookStore, Integer>> maskedTuple = sqlClient.createQuery(table)
+                    .where(table.id().eq(oreillyId))
+                    .select(table.fetch(BookStoreFetcher.$.name().version()), table.version())
+                    .useObjectCache(BookStoreFetcher.$.name())
+                    .execute();
+            Assertions.assertEquals(1, maskedTuple.size());
+            Assertions.assertEquals(originalName, maskedTuple.get(0).get_1().name());
+            Assertions.assertEquals(updatedVersion, maskedTuple.get(0).get_2());
+
+            Cache<Object, BookStore> cache = sqlClient.getCaches()
+                    .<Object, BookStore>getObjectCache(ImmutableType.get(BookStore.class));
+            Assertions.assertNotNull(cache);
+            cache.delete(oreillyId);
+            nontransactional(con -> cache.getAll(
+                    Collections.<Object>singletonList(oreillyId),
+                    new CacheEnvironment<>(sqlClient, con, keys -> Collections.emptyMap(), false)
+            ));
+            Assertions.assertEquals(committedName,
+                    sqlClient.getEntities().findById(BookStore.class, oreillyId).name());
+        } finally {
+            nontransactional(con -> {
+                try (PreparedStatement ps = con.prepareStatement(
+                        "update BOOK_STORE set NAME = ?, VERSION = ? where ID = ?"
+                )) {
+                    ps.setString(1, originalName);
+                    ps.setInt(2, originalVersion);
+                    ps.setObject(3, oreillyId);
+                    Assertions.assertEquals(1, ps.executeUpdate());
+                }
+            });
         }
     }
 

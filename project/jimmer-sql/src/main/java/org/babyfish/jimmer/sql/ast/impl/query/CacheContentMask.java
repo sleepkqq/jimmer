@@ -204,6 +204,14 @@ final class CacheContentMask {
         );
     }
 
+    CacheContentMask selectedBy(Fetcher<?> projection, JSqlClientImplementor sqlClient) {
+        Fetcher<?> selected = FetcherFactory.filterExpanded(
+                projection,
+                (type, prop, path) -> isRemovedAt(sqlClient, type, path, prop)
+        );
+        return selected != null ? of(selected) : null;
+    }
+
     /**
      * The SQL projection with every approved leaf of a cacheable node removed; associations
      * stay as edges. Returns {@code null} when reducing would drop a proving join, erase a
@@ -651,6 +659,10 @@ final class CacheContentMask {
         return !embedded && isCacheableNode(sqlClient) && hasStoredLeaves();
     }
 
+    boolean needsCache(ImmutableSpi fresh, JSqlClientImplementor sqlClient) {
+        return isCacheableNode(sqlClient) && hasMissingLeaves(fresh, this);
+    }
+
     /** Whether this node or any navigated descendant has cacheable leaves. */
     boolean hasCacheableLeaves(JSqlClientImplementor sqlClient) {
         if (isCacheableNode(sqlClient) && hasStoredLeaves()) {
@@ -870,7 +882,7 @@ final class CacheContentMask {
             if (!childNode.embedded && !isConcreteTypeEstablished(childSpi)) {
                 return false;
             }
-            if (childNode.hasCacheableOwnLeaves(sqlClient)) {
+            if (!childNode.embedded && childNode.needsCache(childSpi, sqlClient)) {
                 Object id = childSpi.__get(childNode.type.getIdProp().getId());
                 if (id != null) {
                     ImmutableType concreteType = childSpi.__type();
@@ -937,8 +949,7 @@ final class CacheContentMask {
             Map<CacheContentMask, Map<Object, ImmutableSpi>> cachedByNode,
             JSqlClientImplementor sqlClient
     ) {
-        boolean needsCache = node.isCacheableNode(sqlClient) && hasMissingLeaves(fresh, node);
-        if (needsCache && cached == null) {
+        if (node.needsCache(fresh, sqlClient) && cached == null) {
             return false;
         }
         return validateContent(fresh, node, cached, cachedByNode, sqlClient);

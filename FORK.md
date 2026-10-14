@@ -24,6 +24,18 @@
 
 ## Migrate a consumer
 
+### Non-nullable key-group preference in 1.1.10
+
+When multiple key groups are loaded, matching prefers a group without nullable
+properties before nullable alternatives, then the group with more properties.
+Entity and property-set matching use the same metadata-based ordering. This avoids
+collapsing distinct batch rows or reporting false conflicts on an optional null key
+when a complete non-nullable key is available. A nullable group remains eligible
+when no non-nullable group is loaded; explicit key configuration is unchanged.
+The existing `MatchByKeyTest` covers new and existing rows, entity/shape agreement
+and nullable-only fallback with the shared anonymized `NullableKeyUser` fixture.
+This correction is new in `1.1.10`; `1.1.9` does not include it.
+
 ### Optional object-cache query hydration in 1.1.0
 
 `useObjectCache()` is an explicit, off-by-default hint on Java and Kotlin root queries.
@@ -119,6 +131,106 @@ both passed on that exact commit,
 confirming every published POM, Gradle module metadata file and the Quarkus deployment
 descriptor, and the public smoke consumer builds from JitPack alone.
 
+### Concrete-carrier cache admission in 1.1.5
+
+Cache admission is per fresh concrete carrier, not global across every mask branch: load a
+payload only when that carrier's applicable approved leaves are absent from retained SQL.
+Other concrete rows remain fully SQL-fresh and need no cache, while traversal still reaches
+their independently masked navigated children. Missing required cache content continues to
+decline to the complete original query. The mixed-organization/person regression verifies
+that a branch with no applicable missing content does not require a cache entry; it passed
+with the full 1.1.5 CI run.
+
+The immutable annotated `1.1.5` tag (`34068a2`, peeled
+[`0846dc0`](https://github.com/sleepkqq/jimmer/commit/0846dc0b12b2a36a913436adc5caa98e38e35fec))
+is available. [Fork CI](https://github.com/sleepkqq/jimmer/actions/runs/37594479986)
+passed on the exact commit, including the full build, object-cache tests, native PostgreSQL,
+JTA and isolated tests; 139 targeted tests completed with no failures or skips. The anonymous
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37595457359)
+also succeeded on its second attempt on the exact commit: it verified the 1.1.5 POMs,
+Gradle module metadata and Quarkus deployment descriptor, and the anonymous JitPack-only
+smoke consumer built successfully.
+
+### Declarative content-only caches in 1.1.6
+
+An entity's built-in Quarkus cache can opt into `content-only: true`. Ordinary entity,
+generated DTO and association reads then use fresh SQL; only explicit cached-content masks
+may hydrate approved leaves from that object cache. The policy follows native inheritance
+metadata and remains attached to derived clients. Its default is false, preserving legacy
+cache behavior. Custom factories expose the same policy through `CacheFactory`.
+
+Association loading isolates the entire fresh subtree from an ambient cache-enabled fetcher
+context, including deeper children. Explicit masks in merged set queries conservatively
+decline to the complete fresh graph, including nested and non-first operands and JTA reads.
+Neither change introduces query-result caching or permits transaction-time cache fills.
+
+The immutable `1.1.6` tag points to
+[`aee7d33`](https://github.com/sleepkqq/jimmer/commit/aee7d3381738773406430b2fdbe5aafa731aa8b9).
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37673336571) and
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37674851282)
+passed, including 162 targeted object-cache, Kotlin and Quarkus cache-policy/JTA tests
+without failures or skips, native PostgreSQL regressions and the full build.
+The anonymous publication check and JitPack-only consumer build passed on the second
+attempt after an initial network timeout fetching a POM; no source or tag was changed.
+
+### Configured content fields in 1.1.7
+
+`content-only` entity caches can declare `content-fields` as a list of approved stored
+scalar properties. Ordinary `useObjectCache()` then uses that native policy with an
+existing DTO Language projection; consumers do not need handwritten fetchers or parallel
+cache DTOs. Single-table subtype fields become concrete-type branches. Unknown fields,
+associations, formulas, ID views, identity/version/deletion/discriminator metadata and a
+field list without `content-only` are rejected during client construction.
+
+The no-argument/boolean hint replaces any ad hoc mask with the configured policy;
+`useObjectCache(false)` clears it. Ordinary entity/DTO and association reads remain fresh.
+Membership, order, scalar slots and unapproved projected leaves remain SQL-authoritative.
+This configuration does not relax the manager-owned inactive-transaction proof: active,
+unknown, locking and command reads still use the complete fresh graph.
+
+The immutable `1.1.7` tag points to
+[`ab22b4a`](https://github.com/sleepkqq/jimmer/commit/ab22b4a58b44bd7868d950725e9f2bde1f648efc).
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37687642176) and
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37689501168)
+passed, including the configured-field, DTO/tuple and polymorphic projection regressions,
+native PostgreSQL cases and Quarkus cache-policy/JTA tests. The anonymous artifact and
+isolated consumer checks passed on the second attempt after a POM fetch timeout;
+the source and tag were unchanged.
+
+### Configured policy projection matching in 1.1.8
+
+Configured `content-fields` approve eligible leaves rather than requiring every DTO
+to select the full list. The boolean/no-argument hint resolves the policy at execution
+and intersects it with each native selected projection, including concrete-type branches.
+Scalar-only, ID-only and unsupported projections stay fresh without cache access.
+Explicit Fetcher masks still reject approved content absent from their projection.
+Transaction, visibility, whole-query fallback and complete entity-cache loading remain unchanged.
+The immutable `1.1.8` tag points to
+[`23e747943`](https://github.com/sleepkqq/jimmer/commit/23e7479439a3d771a4ef65065dadd7d77fc7631d).
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37701909708) and
+[public-release verification](https://github.com/sleepkqq/jimmer/actions/runs/37702666113)
+passed, including 130 targeted Java/Kotlin cache tests without failures or skips,
+native PostgreSQL cases, Quarkus cache-policy/JTA tests and the full build.
+The anonymous artifacts and isolated public consumer passed on the second attempt
+after a POM fetch timeout; the source and tag were unchanged.
+
+### Missing targets in ordinary association caches in 1.1.9
+
+An ordinary cached to-many ID snapshot can outlive a deleted or filtered target.
+Association assembly now omits absent targets instead of putting null into the child
+collection. Valid children retain their order and duplicates; an all-missing snapshot
+produces an empty collection. This matches the existing to-one map join behavior.
+Explicit query-cache hydration, SQL-authoritative membership and whole-query fallback
+remain unchanged. The existing Book/BookStore regression covers mixed and all-missing
+targets, including warm negative object-cache entries, without changing the cache factory.
+The immutable `1.1.9` tag points to
+`3ccf22aa1896094527e3b6961f15eedb56bb77bb`.
+[Source CI](https://github.com/sleepkqq/jimmer/actions/runs/37713528106) passed 137 cache,
+35 Quarkus/JTA and 4 native PostgreSQL tests, plus the full build and isolated consumer.
+[Anonymous public verification](https://github.com/sleepkqq/jimmer/actions/runs/37714362547)
+passed for every artifact and the public-only consumer after retrying only a POM read timeout;
+the source and tag were unchanged.
+
 ### Reference IDs in bulk update-returning in 1.0.7
 
 Bulk `UPDATE ... RETURNING` accepts raw owning-reference ID projections such as
@@ -157,16 +269,16 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.4`, replace
+For version `1.1.10`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.4`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.4`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.10`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.10`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-this release is tested with Kotlin 2.4.20 and KSP 2.3.12. The tagged `1.1.4` artifacts are
-verified available from anonymous JitPack with the release check below; a tag alone does not
-establish artifact availability.
+compatibility is tested with Kotlin 2.4.20 and KSP 2.3.12. Verify the tagged artifacts and
+the public-only consumer against anonymous JitPack before publishing the GitHub release.
+A tag alone does not establish artifact availability.
 
 The previous extension repository and tags are retained for existing consumers. Its
 archive is a maintenance handoff, not an artifact relocation or deletion.

@@ -2,6 +2,7 @@ package io.quarkiverse.jimmer.runtime.cfg;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 
 import io.quarkiverse.jimmer.runtime.cache.CacheMode;
 import io.quarkus.runtime.annotations.ConfigGroup;
@@ -88,6 +89,15 @@ public interface JimmerCacheConfig {
          */
         @WithDefault("true")
         boolean cacheAssociations();
+
+        /**
+         * Keep this entity cache for explicit content-only query hints; ordinary entity reads remain SQL-backed.
+         */
+        @WithDefault("false")
+        boolean contentOnly();
+
+        /** Stored scalar properties allowed by no-argument query hints; requires {@code content-only}. */
+        Optional<List<String>> contentFields();
 
         /**
          * Random jitter percent added to the remote TTL to avoid a synchronized mass expiry (cache stampede).

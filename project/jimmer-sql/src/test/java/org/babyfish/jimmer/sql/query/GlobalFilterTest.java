@@ -9,6 +9,7 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheEnvironment;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
+import org.babyfish.jimmer.sql.cache.CacheLoader;
 import org.babyfish.jimmer.sql.cache.ValueSerializer;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
 import org.babyfish.jimmer.sql.common.CacheImpl;
@@ -105,6 +106,50 @@ public class GlobalFilterTest extends AbstractQueryTest {
             Assertions.assertNotNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
             clearExecutions();
             Assertions.assertNotNull(client.getEntities().forConnection(con).forUpdate().findById(Permission.class, 1000L));
+            Assertions.assertTrue(getExecutions().get(0).getSql().endsWith("for update"));
+        });
+    }
+
+    @Test
+    public void testContentOnlyObjectReadsStillApplyCurrentFiltersAndForUpdate() {
+        AtomicLong visibleId = new AtomicLong(1000L);
+        JSqlClient client = getSqlClient(it -> {
+            it.addFilters(new Filter<PermissionTable>() {
+                @Override
+                public void filter(FilterArgs<PermissionTable> args) {
+                    args.where(args.getTable().id().eq(visibleId.get()));
+                }
+            });
+            it.setCacheFactory(new CacheFactory() {
+                @Override
+                public boolean isObjectCacheContentOnly(ImmutableType type) {
+                    return type == ImmutableType.get(Permission.class);
+                }
+
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return new CacheImpl<>(type);
+                }
+            });
+        });
+        jdbc(con -> {
+            Cache<Object, Permission> cache = client.getCaches()
+                    .getObjectCache(ImmutableType.get(Permission.class));
+            cache.getAll(Collections.<Object>singletonList(1000L), new CacheEnvironment<>(
+                    client,
+                    con,
+                    CacheLoader.objectLoader(client, con, Permission.class),
+                    false
+            ));
+
+            visibleId.set(-1L);
+            Assertions.assertNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+            visibleId.set(1000L);
+            Assertions.assertNotNull(client.getEntities().forConnection(con).findById(Permission.class, 1000L));
+
+            clearExecutions();
+            Assertions.assertNotNull(client.getEntities().forConnection(con).forUpdate()
+                    .findById(Permission.class, 1000L));
             Assertions.assertTrue(getExecutions().get(0).getSql().endsWith("for update"));
         });
     }

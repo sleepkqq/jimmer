@@ -448,7 +448,9 @@ public class EntitiesImpl implements Entities {
         }
         boolean internal = expectedTypes != null;
         ImmutableType owner = cacheOwner != null ? cacheOwner : immutableType;
-        Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(owner);
+        Cache<Object, E> cache = forUpdate ||
+                seed == null && sqlClient.getCaches().isObjectCacheContentOnly(owner) ?
+                null : sqlClient.getCaches().getObjectCache(owner);
         if (cache != null) {
             // A seed proves the filtered skeleton already admitted these exact ids on this
             // connection. An internal caller without a seed (a navigated FAKE-FK/filtered
@@ -574,7 +576,9 @@ public class EntitiesImpl implements Entities {
                 );
             }
         }
-        Cache<Object, E> cache = forUpdate ? null : sqlClient.getCaches().getObjectCache(immutableType);
+        Cache<Object, E> cache = forUpdate ||
+                sqlClient.getCaches().isObjectCacheContentOnly(immutableType) ?
+                null : sqlClient.getCaches().getObjectCache(immutableType);
         if (cache != null) {
             Collection<Object> visibleIds = visibleCachedIds(immutableType, distinctIds, con);
             if (visibleIds.isEmpty()) {

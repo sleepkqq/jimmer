@@ -1,5 +1,7 @@
 package org.babyfish.jimmer.sql.loader;
 
+import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.CacheEnvironment;
 import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.impl.DataLoader;
@@ -13,8 +15,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 import static org.babyfish.jimmer.sql.common.Constants.*;
 
@@ -30,6 +31,52 @@ public class OneToManyWithCacheTest extends AbstractCachedLoaderTest {
     @Override
     protected Map<Object, byte[]> rawObjectMap() {
         return rawObjectMap;
+    }
+
+    @Test
+    public void loadChildDetailsWithMissingCachedTargets() {
+        JSqlClientImplementor sqlClient = (JSqlClientImplementor) getCachedSqlClient();
+        Cache<Object, List<Object>> cache = sqlClient.getCaches().getPropertyCache(BookStoreProps.BOOKS.unwrap());
+        Fetcher<BookStore> fetcher = BookStoreFetcher.$.books(BookFetcher.$.name().edition());
+        UUID missingId1 = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID missingId2 = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        for (int i = 0; i < 2; i++) {
+            boolean useSql = i == 0;
+            connectAndExpect(
+                    con -> {
+                        if (useSql) {
+                            cache.getAll(
+                                    Arrays.asList(oreillyId, manningId),
+                                    new CacheEnvironment<>(sqlClient, con, ids -> {
+                                        Map<Object, List<Object>> snapshots = new LinkedHashMap<>();
+                                        snapshots.put(oreillyId, Arrays.asList(effectiveTypeScriptId3, missingId1, learningGraphQLId3));
+                                        snapshots.put(manningId, Collections.singletonList(missingId2));
+                                        return snapshots;
+                                    }, false)
+                            );
+                        }
+                        return new DataLoader(sqlClient, con, null, fetcher.getFieldMap().get("books"))
+                                .load(Entities.BOOK_STORES);
+                    },
+                    ctx -> {
+                        if (useSql) {
+                            ctx.sql(
+                                    "select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID " +
+                                            "from BOOK tb_1_ where tb_1_.ID in (?, ?, ?, ?)"
+                            ).variables(effectiveTypeScriptId3, missingId1, learningGraphQLId3, missingId2);
+                        }
+                        ctx.rows(1);
+                        ctx.row(0, map -> {
+                            expect(
+                                    "[{\"id\":\"9eded40f-6d2e-41de-b4e7-33a28b11c8b6\",\"name\":\"Effective TypeScript\",\"edition\":3}," +
+                                            "{\"id\":\"64873631-5d82-4bae-8eb8-72dd955bfc56\",\"name\":\"Learning GraphQL\",\"edition\":3}]",
+                                    map.get(Entities.BOOK_STORES.get(0))
+                            );
+                            expect("[]", map.get(Entities.BOOK_STORES.get(1)));
+                        });
+                    }
+            );
+        }
     }
 
     @Test
