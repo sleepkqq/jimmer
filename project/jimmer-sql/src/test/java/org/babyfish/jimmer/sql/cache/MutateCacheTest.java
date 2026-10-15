@@ -551,6 +551,23 @@ public class MutateCacheTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testChangeTreeNodeOwnerMove() {
+        lambdaClient.getTriggers().fireEntityTableChange(
+                TreeNodeDraft.$.produce(treeNode -> {
+                    treeNode.setId(9L).applyParent(parent -> parent.setId(1L));
+                }),
+                TreeNodeDraft.$.produce(treeNode -> {
+                    treeNode.setId(9L).applyParent(parent -> parent.setId(2L));
+                }),
+                null
+        );
+        Assertions.assertEquals(
+                "[TreeNode-9, TreeNode.parent-9, TreeNode.childNodes-1, TreeNode.childNodes-2]",
+                cacheOpRecords.toString()
+        );
+    }
+
+    @Test
     public void testChangeInheritanceDerivedType() {
         lambdaClient.getTriggers().fireEntityTableChange(
                 OrganizationDraft.$.produce(organization -> {
