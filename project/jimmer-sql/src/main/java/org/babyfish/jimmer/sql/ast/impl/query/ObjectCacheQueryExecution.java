@@ -436,13 +436,18 @@ final class ObjectCacheQueryExecution {
                     TableImplementor<?> tableImplementor =
                             TableProxies.resolve(selectedTable, astContext);
                     Fetcher<?> fetcher = fetcherSelection.getFetcher();
-                    Fetcher<?> slotMask = rootMask != null ?
-                            cachedContent : query.contentMaskForSlot(fetcherSelection);
-                    CacheContentMask node = rootMask != null ?
-                            maskNodeFor(rootMask, tableImplementor, rootImplementor) :
-                            (slotMask != null ?
-                                    maskNodeFor(CacheContentMask.of(slotMask), tableImplementor, rootImplementor) :
-                                    null);
+                    CacheContentMask node;
+                    if (rootMask != null) {
+                        node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                    } else {
+                        // An automatic mask is already rooted at the selected entity type, so it is
+                        // bound directly to its slot. Resolving it through the root's join path would
+                        // look for the join property inside the slot's own mask and decline every
+                        // joined DTO slot.
+                        Fetcher<?> slotMask = query.contentMaskForSlot(fetcherSelection);
+                        node = slotMask != null && joinPathTo(tableImplementor, rootImplementor) != null ?
+                                CacheContentMask.of(slotMask) : null;
+                    }
                     if (node == null) {
                         slots[i] = MaskSlot.fresh(fetcherSelection.getConverter());
                         retainedSelections.add(stripConverter(fetcherSelection));
@@ -677,17 +682,8 @@ final class ObjectCacheQueryExecution {
             TableImplementor<?> tableImplementor,
             TableImplementor<?> rootImplementor
     ) {
-        List<ImmutableProp> path = new ArrayList<>();
-        TableImplementor<?> table = tableImplementor;
-        while (table != null && table != rootImplementor) {
-            ImmutableProp joinProp = table.getJoinProp();
-            if (joinProp == null || table.isTreated() || table.isRemote() || table.isInverse()) {
-                return null;
-            }
-            path.add(0, joinProp);
-            table = table.getParent();
-        }
-        if (table != rootImplementor) {
+        List<ImmutableProp> path = joinPathTo(tableImplementor, rootImplementor);
+        if (path == null) {
             return null;
         }
         CacheContentMask node = rootMask;
@@ -703,6 +699,28 @@ final class ObjectCacheQueryExecution {
             }
         }
         return node;
+    }
+
+    /**
+     * The plain whitelisted to-one join path from the root to a selected table, or
+     * {@code null} when the table is not a plain to-one descent (treated, remote, inverse
+     * or unreachable).
+     */
+    private static List<ImmutableProp> joinPathTo(
+            TableImplementor<?> tableImplementor,
+            TableImplementor<?> rootImplementor
+    ) {
+        List<ImmutableProp> path = new ArrayList<>();
+        TableImplementor<?> table = tableImplementor;
+        while (table != null && table != rootImplementor) {
+            ImmutableProp joinProp = table.getJoinProp();
+            if (joinProp == null || table.isTreated() || table.isRemote() || table.isInverse()) {
+                return null;
+            }
+            path.add(0, joinProp);
+            table = table.getParent();
+        }
+        return table == rootImplementor ? path : null;
     }
 
     /** The bare table selected by a Table/KTable selection, or null for any other slot. */

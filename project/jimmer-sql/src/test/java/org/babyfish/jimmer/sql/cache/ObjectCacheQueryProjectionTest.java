@@ -29,6 +29,7 @@ import org.babyfish.jimmer.sql.model.AuthorDraft;
 import org.babyfish.jimmer.sql.model.AuthorFetcher;
 import org.babyfish.jimmer.sql.model.AuthorTable;
 import org.babyfish.jimmer.sql.model.Book;
+import org.babyfish.jimmer.sql.model.BookDraft;
 import org.babyfish.jimmer.sql.model.BookFetcher;
 import org.babyfish.jimmer.sql.model.BookStore;
 import org.babyfish.jimmer.sql.model.BookStoreDraft;
@@ -41,6 +42,7 @@ import org.babyfish.jimmer.sql.model.Country;
 import org.babyfish.jimmer.sql.model.TreeNode;
 import org.babyfish.jimmer.sql.model.TreeNodeFetcher;
 import org.babyfish.jimmer.sql.model.TreeNodeTable;
+import org.babyfish.jimmer.sql.model.dto.BookViewForTupleTest;
 import org.babyfish.jimmer.sql.model.dto.ReusableBookStoreView;
 import org.babyfish.jimmer.sql.model.embedded.LocationDraft;
 import org.babyfish.jimmer.sql.model.embedded.LocationFetcher;
@@ -4295,6 +4297,139 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertTrue(cache.getAllKeys.isEmpty());
         assertEquals(1, getExecutions().size());
         assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
+    @Test
+    public void testNativeAdmissionKeepsStaleOwningFkFresh() {
+        // A complete-snapshot declaration approves stored scalar leaves only, so the
+        // DTO's owning FK must keep coming from SQL even while the cached root snapshot
+        // still carries the old reference.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+            draft.setStore(BookStoreDraft.$.produce(store -> store.setId(oreillyId)));
+        }));
+        BookTable table = BookTable.$;
+        try {
+            rawUpdate("update BOOK set STORE_ID = ? where ID = ?", manningId, learningGraphQLId1);
+            clearExecutions();
+            List<BookViewForTupleTest> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(client.createQuery(table)
+                    .where(table.id().eq(learningGraphQLId1))
+                    .select(table.fetch(BookViewForTupleTest.class))
+                    .execute(con)));
+            assertEquals(1, rows.size());
+            assertEquals("CACHED-BOOK", rows.get(0).getName());
+            assertEquals(manningId, rows.get(0).getStore().getId(), "a moved FK must not come from the stale snapshot");
+            assertCacheTouched(cache, learningGraphQLId1);
+
+            rawUpdate("update BOOK set STORE_ID = null where ID = ?", learningGraphQLId1);
+            clearExecutions();
+            rows.clear();
+            jdbc(con -> rows.addAll(client.createQuery(table)
+                    .where(table.id().eq(learningGraphQLId1))
+                    .select(table.fetch(BookViewForTupleTest.class))
+                    .execute(con)));
+            assertNull(rows.get(0).getStore(), "a cleared FK must not come from the stale snapshot");
+        } finally {
+            rawUpdate("update BOOK set STORE_ID = ? where ID = ?", oreillyId, learningGraphQLId1);
+            cache.deleteAll(Collections.singletonList(learningGraphQLId1), null);
+        }
+    }
+
+    @Test
+    public void testNativePlainAdmissionKeepsEntitySiblingFresh() {
+        // Admission is scoped to the converted DTO/View slot: an entity-fetcher or bare
+        // entity sibling of the same table stays SQL-fresh under the default policy.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, BookStore, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(
+                        table.fetch(ReusableBookStoreView.class),
+                        table.fetch(BookStoreFetcher.$.name()),
+                        table
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".NAME"), sql);
+    }
+
+    @Test
+    public void testNativeContentOnlyAdmissionKeepsEntitySiblingFresh() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple2<ReusableBookStoreView, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(
+                        table.fetch(ReusableBookStoreView.class),
+                        table.fetch(BookStoreFetcher.$.name())
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".NAME"), sql);
+    }
+
+    @Test
+    public void testNativeAdmissionServesJoinedDtoSlotWithoutHint() {
+        // An automatic mask is rooted at the selected slot's own type, so a joined DTO
+        // slot participates without the whole query being declined.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        BookTable table = BookTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(BookStore.class, Collections.singletonList(oreillyId)));
+        clearExecutions();
+        List<Tuple2<ReusableBookStoreView, String>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(
+                        table.store().fetch(ReusableBookStoreView.class),
+                        table.name()
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(oreillyId, rows.get(0).get_1().getId());
+        assertEquals("O'REILLY", rows.get(0).get_1().getName());
+        assertEquals("Learning GraphQL", rows.get(0).get_2());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains("BOOK_STORE"), sql);
+        assertTrue(sql.contains("tb_2_.ID"), sql);
+        assertFalse(sql.contains("tb_2_.NAME"), sql);
     }
 
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {
