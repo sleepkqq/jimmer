@@ -230,12 +230,21 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         // A cached DTO slot can split the projection into the root skeleton plus a
         // separate association load, so assert across every statement rather than
         // assuming a single execution.
-        val sql = executions.joinToString("\n") { it.sql }
-        // The weak join and its scalar must survive the cache optimization.
-        assertTrue(sql.contains("BOOK_STORE"), sql)
-        // The cached root leaf must not be re-read; a fallback to the full DTO
-        // projection would emit the BOOK table's own NAME column.
-        assertFalse(sql.contains("tb_1_.NAME"), sql)
+        // Only the cached Book root (the statement selecting BOOK with its
+        // STORE_ID FK, the weak-join source) may be checked for the cached
+        // leaf; BookStore-rooted association loads legitimately emit
+        // tb_1_.NAME (the store's name) and must not make this assertion fail.
+        val rootSqls = executions
+            .map { it.sql }
+            .filter { it.contains("from BOOK tb_1_") && it.contains("tb_1_.STORE_ID") }
+        assertTrue(rootSqls.isNotEmpty(), executions.joinToString("\n") { it.sql })
+        rootSqls.forEach { rootSql ->
+            // The weak join and its scalar must survive the cache optimization.
+            assertTrue(rootSql.contains("BOOK_STORE"), rootSql)
+            // The cached root leaf must not be re-read; a fallback to the full
+            // DTO projection would emit the BOOK table's own NAME column.
+            assertFalse(rootSql.contains("tb_1_.NAME"), rootSql)
+        }
     }
 
     @Test
