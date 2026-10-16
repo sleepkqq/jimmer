@@ -4404,6 +4404,38 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNativeAdmissionKeepsNestedDtoSlotFresh() {
+        // Automatic admission approves only the selected entity's own stored leaves, so a
+        // nested converted slot is never stripped from SQL: its content stays fresh even
+        // when the cached root carries a loaded reference of its own.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+            draft.setStore(BookStoreDraft.$.produce(store -> {
+                store.setId(oreillyId);
+                store.setName("CACHED-STORE");
+            }));
+        }));
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<BookViewForTupleTest> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(table.fetch(BookViewForTupleTest.class))
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED-BOOK", rows.get(0).getName());
+        assertEquals(oreillyId, rows.get(0).getStore().getId());
+        assertEquals("O'REILLY", rows.get(0).getStore().getName());
+        assertCacheTouched(cache, learningGraphQLId1);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains("BOOK_STORE"), sql);
+    }
+
+    @Test
     public void testNativePlainAdmissionKeepsEntitySiblingFresh() {
         // Admission is scoped to the converted DTO/View slot: an entity-fetcher or bare
         // entity sibling of the same table stays SQL-fresh under the default policy.
