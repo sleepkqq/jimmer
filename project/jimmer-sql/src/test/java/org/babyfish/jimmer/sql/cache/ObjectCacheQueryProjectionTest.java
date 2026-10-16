@@ -4303,14 +4303,17 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     public void testNativeAdmissionKeepsStaleOwningFkFresh() {
         // A complete-snapshot declaration approves stored scalar leaves only, so the
         // DTO's owning FK must keep coming from SQL even while the cached root snapshot
-        // still carries the old reference.
+        // still carries the old, fully loaded reference.
         ImmutableType type = ImmutableType.get(Book.class);
         MapCache<Book> cache = new MapCache<>(type);
         JSqlClient client = createClient(it -> it == type ? cache : null);
         cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
             draft.setId(learningGraphQLId1);
             draft.setName("CACHED-BOOK");
-            draft.setStore(BookStoreDraft.$.produce(store -> store.setId(oreillyId)));
+            draft.setStore(BookStoreDraft.$.produce(store -> {
+                store.setId(oreillyId);
+                store.setName("CACHED-STORE");
+            }));
         }));
         BookTable table = BookTable.$;
         try {
@@ -4324,6 +4327,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             assertEquals(1, rows.size());
             assertEquals("CACHED-BOOK", rows.get(0).getName());
             assertEquals(manningId, rows.get(0).getStore().getId(), "a moved FK must not come from the stale snapshot");
+            assertEquals("MANNING", rows.get(0).getStore().getName(), "a moved FK target must not come from the stale snapshot");
             assertCacheTouched(cache, learningGraphQLId1);
 
             rawUpdate("update BOOK set STORE_ID = null where ID = ?", learningGraphQLId1);
