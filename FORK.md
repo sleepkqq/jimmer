@@ -214,6 +214,25 @@ native PostgreSQL cases, Quarkus cache-policy/JTA tests and the full build.
 The anonymous artifacts and isolated public consumer passed on the second attempt
 after a POM fetch timeout; the source and tag were unchanged.
 
+### Native ordinary-query admission in 1.1.11
+
+An ordinary, hint-free root query whose projection contains a native generated DTO/View
+slot for an entity with a declared object cache is admitted without any per-query
+`useObjectCache()` call and without any service-side field list or cache wrapper. A
+complete-snapshot cache (the default, `content-only: false`) serves the projection through
+the existing plain object-cache path; a `content-only` cache with configured
+`content-fields` serves exactly those approved leaves through the existing content path.
+Membership, order, pagination, visibility, global filters and every non-approved scalar
+slot stay SQL-authoritative, and the whole projection falls back to the complete fresh
+graph whenever the cache cannot satisfy the page.
+
+The admission reuses every existing guard: QUERY purpose, a non-locking read and a
+connection with a proven inactive transaction; cacheable slots only (no effective join
+fetch, no JOINED-inheritance root). An explicit `useObjectCache(false)` always wins.
+Entity projections keep the documented explicit opt-in, so existing fresh-SQL entity reads
+are unchanged; streaming and count queries remain hint-only. No query-result caching is
+introduced and no association edge or authorization fact is served from the cache.
+
 ### Missing targets in ordinary association caches in 1.1.9
 
 An ordinary cached to-many ID snapshot can outlive a deleted or filtered target.

@@ -79,7 +79,7 @@ final class ObjectCacheQueryExecution {
         TypedQueryData data = query.getData();
         MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
 
-        Fetcher<?> cachedContent = query.getCachedContent();
+        Fetcher<?> cachedContent = query.resolveCachedContent();
         if (cachedContent != null) {
             return tryExecuteWithContent(
                     query, con, sqlClient, connectionManager, cachedContent, data.cachedContent == null
@@ -892,7 +892,7 @@ final class ObjectCacheQueryExecution {
         return sqlClient.getFilters().getTargetFilter(joinProp) == null;
     }
 
-    private static boolean hasObjectCacheInHierarchy(JSqlClientImplementor sqlClient, ImmutableType type) {
+    static boolean hasObjectCacheInHierarchy(JSqlClientImplementor sqlClient, ImmutableType type) {
         if (sqlClient.getCaches().getObjectCache(type) != null) {
             return true;
         }

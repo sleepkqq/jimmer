@@ -1,6 +1,7 @@
 package org.babyfish.jimmer.sql.ast.impl.query;
 
 import org.babyfish.jimmer.Slice;
+import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.ast.Expression;
 import org.babyfish.jimmer.sql.ast.Selection;
 import org.babyfish.jimmer.sql.ast.impl.Ast;
@@ -12,7 +13,9 @@ import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
 import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
+import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherSelection;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherUtil;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.runtime.ConnectionManager;
@@ -336,7 +339,9 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     @Override
     public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         TypedQueryData data = getData();
-        if (data.useObjectCache == enabled && data.cachedContent == null) {
+        if (data.useObjectCache == enabled
+                && data.objectCacheDisabled == !enabled
+                && data.cachedContent == null) {
             return this;
         }
         return new ConfigurableRootQueryImpl<>(
@@ -366,6 +371,77 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 getMutableQuery().getSqlClient().getCaches().getObjectCacheContentFetcher(
                         ((TableImplementor<?>) table).getImmutableType()
                 ) : null;
+    }
+
+    /**
+     * Resolves the content mask for the optional content path. Unlike the explicit-only
+     * {@link #getCachedContent()} it also admits the declarative eligible-field policy of
+     * an ordinary, hint-free native DTO/View projection. Only {@link #executeImpl(Connection)}
+     * and the cache execution consult it; the streaming, for-each and merged plans keep
+     * {@code getCachedContent()} so their cache-disabled fallback decisions never change.
+     */
+    Fetcher<?> resolveCachedContent() {
+        Fetcher<?> explicit = getCachedContent();
+        if (explicit != null) {
+            return explicit;
+        }
+        TypedQueryData data = getData();
+        if (data.objectCacheDisabled) {
+            return null;
+        }
+        ImmutableType type = autoAdmittedType();
+        if (type == null) {
+            return null;
+        }
+        Caches caches = getMutableQuery().getSqlClient().getCaches();
+        return caches.isObjectCacheContentOnly(type) ?
+                caches.getObjectCacheContentFetcher(type) : null;
+    }
+
+    /**
+     * Whether an ordinary, hint-free root query over a native DTO/View projection may be
+     * hydrated from the object cache declared for the projected entity. Entity projections
+     * keep the documented explicit opt-in, so no existing fresh-SQL entity read changes
+     * behavior; an explicit {@code useObjectCache(false)} always wins.
+     */
+    private boolean isNativeAdmissionEnabled() {
+        TypedQueryData data = getData();
+        if (data.useObjectCache || data.objectCacheDisabled) {
+            return false;
+        }
+        ImmutableType type = autoAdmittedType();
+        if (type == null) {
+            return false;
+        }
+        JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
+        return !sqlClient.getCaches().isObjectCacheContentOnly(type)
+                && ObjectCacheQueryExecution.hasObjectCacheInHierarchy(sqlClient, type);
+    }
+
+    /**
+     * The declared entity type of the first converted (native DTO/View) projection whose
+     * entity declares an object cache, or {@code null} when no such slot exists.
+     */
+    private ImmutableType autoAdmittedType() {
+        Caches caches = getMutableQuery().getSqlClient().getCaches();
+        for (Selection<?> selection : getData().selections) {
+            if (!(selection instanceof FetcherSelection<?>)) {
+                continue;
+            }
+            FetcherSelection<?> fetcherSelection = (FetcherSelection<?>) selection;
+            if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
+                continue;
+            }
+            Fetcher<?> fetcher = fetcherSelection.getFetcher();
+            if (fetcher == null) {
+                continue;
+            }
+            ImmutableType type = fetcher.getImmutableType();
+            if (caches.getObjectCache(type) != null || caches.getObjectCacheContentFetcher(type) != null) {
+                return type;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -442,7 +518,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
         boolean queryPurpose =
                 getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY;
-        if (getCachedContent() != null) {
+        if (resolveCachedContent() != null) {
             // An explicit or configured content mask is a cache-content hint, not an
             // authorization cache. Whenever it cannot be honored - a non-QUERY purpose,
             // a locking read, an unproven transaction state or any decline - the complete
@@ -461,7 +537,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             }
             return executeBypassed(con, data, sqlClient);
         }
-        if (data.useObjectCache
+        if ((data.useObjectCache || isNativeAdmissionEnabled())
                 && data.forUpdate == null
                 && queryPurpose) {
             ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);

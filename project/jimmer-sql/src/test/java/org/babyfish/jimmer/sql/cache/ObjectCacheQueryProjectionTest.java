@@ -4201,6 +4201,102 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 }))));
     }
 
+    @Test
+    public void testNativeAdmissionServesConfiguredContentFieldsWithoutHint() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name", "website"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setWebsite("CACHED-WEBSITE");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple2<ReusableBookStoreView, Integer>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class), table.version())
+                .execute(con)));
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals(0, rows.get(0).get_2());
+        assertCacheTouched(cache, oreillyId);
+        assertEquals(1, getExecutions().size());
+        assertFalse(getExecutions().get(0).getSql().contains(".NAME"));
+        assertTrue(getExecutions().get(0).getSql().contains(".VERSION"));
+
+        clearExecutions();
+        cache.clearHistory();
+        rows.clear();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class), table.version())
+                .useObjectCache(false)
+                .execute(con)));
+        assertEquals("O'REILLY", rows.get(0).get_1().getName());
+        assertTrue(cache.getAllKeys.isEmpty());
+        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
+    @Test
+    public void testNativePlainAdmissionServesDtoWithoutHint() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setWebsite("CACHED-WEBSITE");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<ReusableBookStoreView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class))
+                .execute(con)));
+        assertEquals("CACHED", rows.get(0).getName());
+        assertCacheTouched(cache, oreillyId);
+        assertEquals(1, getExecutions().size());
+
+        clearExecutions();
+        cache.clearHistory();
+        rows.clear();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class))
+                .useObjectCache(false)
+                .execute(con)));
+        assertEquals("O'REILLY", rows.get(0).getName());
+        assertTrue(cache.getAllKeys.isEmpty());
+        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
+    @Test
+    public void testNativeAdmissionKeepsEntityProjectionFresh() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        jdbc(con -> client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(BookStoreFetcher.$.name().website()))
+                .execute(con));
+        assertTrue(cache.getAllKeys.isEmpty());
+        assertEquals(1, getExecutions().size());
+        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {
         return createClient(objectCacheFactory, null);
     }
