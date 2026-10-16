@@ -70,7 +70,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                                         "--->merge into DEPARTMENT tb_1_ " +
                                         "--->using(values(?, ?)) tb_2_(NAME, DELETED_MILLIS) " +
                                         "--->on tb_1_.NAME = tb_2_.NAME and tb_1_.DELETED_MILLIS = tb_2_.DELETED_MILLIS " +
-                                        "--->when matched then update set /* fake update to return all ids */ DELETED_MILLIS = DELETED_MILLIS " +
+                                        "--->when matched then update set /* fake update to return all ids */ DELETED_MILLIS = tb_1_.DELETED_MILLIS " +
                                         "--->when not matched then insert(NAME, DELETED_MILLIS) values(tb_2_.NAME, tb_2_.DELETED_MILLIS)" +
                                         ")"
                         );
@@ -712,7 +712,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                                         "--->merge into DEPARTMENT tb_1_ " +
                                         "--->using(values(?, ?), (?, ?)) tb_2_(NAME, DELETED_MILLIS) " +
                                         "--->on tb_1_.NAME = tb_2_.NAME and tb_1_.DELETED_MILLIS = tb_2_.DELETED_MILLIS " +
-                                        "--->when matched then update set /* fake update to return all ids */ DELETED_MILLIS = DELETED_MILLIS " +
+                                        "--->when matched then update set /* fake update to return all ids */ DELETED_MILLIS = tb_1_.DELETED_MILLIS " +
                                         "--->when not matched then insert(NAME, DELETED_MILLIS) values(tb_2_.NAME, tb_2_.DELETED_MILLIS)" +
                                         ")"
                         );
@@ -1507,7 +1507,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into SYS_USER(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
+                                "insert into SYS_USER as tb_1_(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
                                         "values(?, ?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "ACCOUNT = excluded.ACCOUNT, " +
@@ -1554,14 +1554,14 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into SYS_USER(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
+                                "insert into SYS_USER as tb_1_(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
                                         "values(?, ?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "ACCOUNT = excluded.ACCOUNT, " +
                                         "EMAIL = excluded.EMAIL, " +
                                         "AREA = excluded.AREA, " +
                                         "NICK_NAME = excluded.NICK_NAME " +
-                                        "where ACCOUNT <> excluded.ACCOUNT " +
+                                        "where tb_1_.ACCOUNT <> excluded.ACCOUNT " +
                                         "returning ID, DESCRIPTION"
                         );
                     });
@@ -1603,14 +1603,14 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into SYS_USER(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
+                                "insert into SYS_USER as tb_1_(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
                                         "values(?, ?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "ACCOUNT = excluded.ACCOUNT, " +
                                         "EMAIL = excluded.EMAIL, " +
                                         "AREA = excluded.AREA, " +
                                         "NICK_NAME = excluded.NICK_NAME " +
-                                        "where ACCOUNT <> excluded.ACCOUNT"
+                                        "where tb_1_.ACCOUNT <> excluded.ACCOUNT"
                         );
                     });
                     ctx.statement(it -> {

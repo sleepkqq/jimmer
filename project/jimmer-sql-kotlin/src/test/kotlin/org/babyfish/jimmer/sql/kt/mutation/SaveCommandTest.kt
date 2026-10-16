@@ -600,7 +600,7 @@ class SaveCommandTest : AbstractMutationTest() {
         }) {
             statement {
                 sql(
-                    """insert into DEPENDENCY(GROUP_ID, ARTIFACT_ID, VERSION, SCOPE) 
+                    """insert into DEPENDENCY as tb_1_(GROUP_ID, ARTIFACT_ID, VERSION, SCOPE) 
                         |values(?, ?, ?, ?) 
                         |on conflict(GROUP_ID, ARTIFACT_ID) 
                         |do update set VERSION = excluded.VERSION""".trimMargin()

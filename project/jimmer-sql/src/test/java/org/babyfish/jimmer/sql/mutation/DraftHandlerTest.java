@@ -260,7 +260,7 @@ public class DraftHandlerTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into EMPLOYEE(NAME, GENDER, DEPARTMENT_ID, DELETED_MILLIS) " +
+                                "insert into EMPLOYEE as tb_1_(NAME, GENDER, DEPARTMENT_ID, DELETED_MILLIS) " +
                                         "values(?, ?, ?, ?) " +
                                         "on conflict(NAME, DELETED_MILLIS) do nothing returning ID"
                         );
