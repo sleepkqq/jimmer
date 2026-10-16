@@ -227,7 +227,10 @@ class ObjectCacheHintTest : AbstractQueryTest() {
             assertEquals(1L, rows[0].authorCount)
         }
         assertTrue(executions.isNotEmpty())
-        val sql = executions.single().sql
+        // A cached DTO slot can split the projection into the root skeleton plus a
+        // separate association load, so assert across every statement rather than
+        // assuming a single execution.
+        val sql = executions.joinToString("\n") { it.sql }
         // The weak join and its scalar must survive the cache optimization.
         assertTrue(sql.contains("BOOK_STORE"), sql)
         // The cached root leaf must not be re-read; a fallback to the full DTO
