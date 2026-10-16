@@ -340,6 +340,35 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNativeBareEntityRootStaysFreshUnderContentOnlyPolicy() {
+        // An ordinary entity root query is not admitted automatically: a content-only
+        // declaration approves leaves for converted slots, never a whole entity snapshot,
+        // so the entity read stays SQL-authoritative and the cache is never consulted.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table)
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("O'REILLY", rows.get(0).name());
+        assertTrue(cache.getAllKeys.isEmpty(), cache.getAllKeys::toString);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".NAME"), sql);
+    }
+
+    @Test
     public void testNativePolymorphicAdmissionServesConfiguredContentWithoutHint() {
         // A content-only declaration on a SINGLE_TABLE subtype must be admitted by an
         // unhinted base-type root query: only the configured leaf is served from cache,
