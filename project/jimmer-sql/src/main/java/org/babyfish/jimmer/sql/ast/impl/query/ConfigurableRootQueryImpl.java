@@ -373,11 +373,47 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 ) : null;
     }
 
+    private ImmutableType autoAdmittedType() {
+        Caches caches = getMutableQuery().getSqlClient().getCaches();
+        for (Selection<?> selection : getData().selections) {
+            if (!(selection instanceof FetcherSelection<?>)) {
+                continue;
+            }
+            FetcherSelection<?> fetcherSelection = (FetcherSelection<?>) selection;
+            if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
+                continue;
+            }
+            Fetcher<?> fetcher = fetcherSelection.getFetcher();
+            if (fetcher == null) {
+                continue;
+            }
+            ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
+            if (declared != null) {
+                return declared;
+            }
+        }
+        return null;
+    }
+
+    private static ImmutableType resolveDeclaredCacheType(Caches caches, ImmutableType type) {
+        if (caches.getObjectCache(type) != null || caches.getObjectCacheContentFetcher(type) != null) {
+            return type;
+        }
+        for (ImmutableType derived : type.getAllDerivedTypes()) {
+            if (caches.getObjectCache(derived) != null || caches.getObjectCacheContentFetcher(derived) != null) {
+                return derived;
+            }
+        }
+        return null;
+    }
+
     /**
-     * Resolves the content mask for the optional content path. Unlike the explicit-only
-     * {@link #getCachedContent()} it also admits the declarative eligible-field policy of
-     * an ordinary, hint-free native DTO/View projection. Only {@link #executeImpl(Connection)}
-     * and the cache execution consult it; the streaming, for-each and merged plans keep
+     * Resolves the content mask for the optional content path. An explicit per-query mask
+     * always wins. When an ordinary projection is polymorphic and only a subtype declares a
+     * cache, the resolution follows the same declared (complete-snapshot) or content-only
+     * policy of that subtype, rather than treating the base type as un-cached. An explicit
+     * {@code useObjectCache(false)} always suppresses it. Only {@link #executeImpl(Connection)}
+     * and the cache execution consult it; streaming, for-each and merged plans keep
      * {@code getCachedContent()} so their cache-disabled fallback decisions never change.
      */
     Fetcher<?> resolveCachedContent() {
@@ -394,55 +430,13 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             return null;
         }
         Caches caches = getMutableQuery().getSqlClient().getCaches();
-        return caches.isObjectCacheContentOnly(type) ?
-                caches.getObjectCacheContentFetcher(type) : null;
+        if (!caches.isObjectCacheContentOnly(type)) {
+            return null;
+        }
+        return caches.getObjectCacheContentFetcher(type);
     }
 
-    /**
-     * Whether an ordinary, hint-free root query over a native DTO/View projection may be
-     * hydrated from the object cache declared for the projected entity. Entity projections
-     * keep the documented explicit opt-in, so no existing fresh-SQL entity read changes
-     * behavior; an explicit {@code useObjectCache(false)} always wins.
-     */
-    private boolean isNativeAdmissionEnabled() {
-        TypedQueryData data = getData();
-        if (data.useObjectCache || data.objectCacheDisabled) {
-            return false;
-        }
-        ImmutableType type = autoAdmittedType();
-        if (type == null) {
-            return false;
-        }
-        JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
-        return !sqlClient.getCaches().isObjectCacheContentOnly(type)
-                && ObjectCacheQueryExecution.hasObjectCacheInHierarchy(sqlClient, type);
-    }
-
-    /**
-     * The declared entity type of the first converted (native DTO/View) projection whose
-     * entity declares an object cache, or {@code null} when no such slot exists.
-     */
-    private ImmutableType autoAdmittedType() {
-        Caches caches = getMutableQuery().getSqlClient().getCaches();
-        for (Selection<?> selection : getData().selections) {
-            if (!(selection instanceof FetcherSelection<?>)) {
-                continue;
-            }
-            FetcherSelection<?> fetcherSelection = (FetcherSelection<?>) selection;
-            if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
-                continue;
-            }
-            Fetcher<?> fetcher = fetcherSelection.getFetcher();
-            if (fetcher == null) {
-                continue;
-            }
-            ImmutableType type = fetcher.getImmutableType();
-            if (caches.getObjectCache(type) != null || caches.getObjectCacheContentFetcher(type) != null) {
-                return type;
-            }
-        }
-        return null;
-    }
+}
 
     @Override
     public List<R> execute(Connection con) {
@@ -537,7 +531,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             }
             return executeBypassed(con, data, sqlClient);
         }
-        if ((data.useObjectCache || isNativeAdmissionEnabled())
+        if (data.useObjectCache
                 && data.forUpdate == null
                 && queryPurpose) {
             ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
