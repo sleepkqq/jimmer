@@ -371,6 +371,9 @@ alter table shop
     add constraint uq_shop
         unique(name);
 
+insert into shop(id, name) values(1, 'Starbucks');
+insert into shop(id, name) values(2, 'Dunkin');
+
 create table customer(
      id bigint not null,
      name varchar(20) not null
@@ -381,6 +384,14 @@ alter table customer
 alter table customer
     add constraint uq_customer
         unique(name);
+
+insert into customer(id, name) values
+    (1, 'Alex'),
+    (2, 'Tim'),
+    (3, 'Jessica'),
+    (4, 'Linda'),
+    (5, 'Mary'),
+    (6, 'Bob');
 
 
 create table card(

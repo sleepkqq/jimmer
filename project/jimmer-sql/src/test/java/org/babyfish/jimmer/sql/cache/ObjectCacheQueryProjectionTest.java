@@ -28,7 +28,9 @@ import org.babyfish.jimmer.sql.model.Author;
 import org.babyfish.jimmer.sql.model.AuthorDraft;
 import org.babyfish.jimmer.sql.model.AuthorFetcher;
 import org.babyfish.jimmer.sql.model.AuthorTable;
+import org.babyfish.jimmer.sql.model.AuthorTableEx;
 import org.babyfish.jimmer.sql.model.Book;
+import org.babyfish.jimmer.sql.model.BookDraft;
 import org.babyfish.jimmer.sql.model.BookFetcher;
 import org.babyfish.jimmer.sql.model.BookStore;
 import org.babyfish.jimmer.sql.model.BookStoreDraft;
@@ -41,6 +43,7 @@ import org.babyfish.jimmer.sql.model.Country;
 import org.babyfish.jimmer.sql.model.TreeNode;
 import org.babyfish.jimmer.sql.model.TreeNodeFetcher;
 import org.babyfish.jimmer.sql.model.TreeNodeTable;
+import org.babyfish.jimmer.sql.model.dto.BookViewForTupleTest;
 import org.babyfish.jimmer.sql.model.dto.ReusableBookStoreView;
 import org.babyfish.jimmer.sql.model.embedded.LocationDraft;
 import org.babyfish.jimmer.sql.model.embedded.LocationFetcher;
@@ -98,6 +101,8 @@ import org.babyfish.jimmer.sql.runtime.EntityManager;
 import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.tuple.EntityTuple;
+import org.babyfish.jimmer.sql.tuple.DtoTuple;
+import org.babyfish.jimmer.sql.tuple.DtoTupleMapper;
 import org.babyfish.jimmer.sql.tuple.EntityTupleMapper;
 import org.babyfish.jimmer.support.ProxyRecorder;
 import org.jetbrains.annotations.NotNull;
@@ -335,6 +340,137 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     });
                 }
         );
+    }
+
+    @Test
+    public void testNativeAdmissionServesTypedTupleDtoWithoutHint() {
+        // A generated @TypedTuple (DtoTuple) is a real DTO-slot, not a bare single-fetch
+        // View. The typed root fact supplies both a cached BookView slot and a scalar
+        // authorCount weak join slot. The cache owns only the eligible stored Book leaf;
+        // the scalar and membership remain authoritative SQL while the cache is consulted
+        // for the DTO owner.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+        }));
+        BookTable table = BookTable.$;
+        AuthorTableEx author = AuthorTableEx.$;
+        clearExecutions();
+        List<DtoTuple> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(DtoTupleMapper
+                        .book(table.fetch(BookViewForTupleTest.class))
+                        .authorCount(client.createSubQuery(author)
+                                .where(author.books().id().eq(table.id()))
+                                .selectCount()))
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(learningGraphQLId1, rows.get(0).getBook().getId());
+        assertEquals("CACHED-BOOK", rows.get(0).getBook().getName());
+        assertEquals(2, rows.get(0).getAuthorCount());
+        assertCacheTouched(cache, learningGraphQLId1);
+        String sql = String.join("\n", getExecutions().stream().map(Execution::getSql).toList());
+        assertTrue(sql.contains("(select count(1)"), sql);
+    }
+
+    @Test
+    public void testNativeBareEntityRootStaysFreshUnderContentOnlyPolicy() {
+        // An ordinary entity root query is not admitted automatically: a content-only
+        // declaration approves leaves for converted slots, never a whole entity snapshot,
+        // so the entity read stays SQL-authoritative and the cache is never consulted.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table)
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("O'REILLY", rows.get(0).name());
+        assertTrue(cache.getAllKeys.isEmpty(), cache.getAllKeys::toString);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".NAME"), sql);
+    }
+
+    @Test
+    public void testNativePolymorphicAdmissionServesConfiguredContentWithoutHint() {
+        // A content-only declaration on a SINGLE_TABLE subtype must be admitted by an
+        // unhinted base-type root query: only the configured leaf is served from cache,
+        // while the discriminator, membership and every other leaf stay SQL-authoritative.
+        MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
+        JSqlClient client = createClient(
+                type -> type.getJavaClass() == Organization.class ? organizationCache : null,
+                ImmutableType.get(Organization.class), null, null, Arrays.asList("taxCode"));
+        organizationCache.put(100L, OrganizationDraft.$.produce(draft -> {
+            draft.setId(100L);
+            draft.setName("CACHED-NAME");
+            draft.setTaxCode("CACHED-TAX");
+        }));
+        ClientTable table = ClientTable.$;
+        clearExecutions();
+        List<ClientImplicitCatchAllView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().in(CLIENT_IDS))
+                .select(table.fetch(ClientImplicitCatchAllView.class))
+                .execute(con)));
+        assertEquals(2, rows.size());
+        ClientImplicitCatchAllView.Organization organization =
+                assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
+        assertEquals("CACHED-TAX", organization.getTaxCode());
+        assertEquals("Acme", organization.getName());
+        assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
+        assertCacheTouched(organizationCache, 100L);
+    }
+
+    @Test
+    public void testNativePolymorphicAdmissionServesEligibleLeavesWithoutHint() {
+        // A complete-snapshot declaration on the polymorphic base type must admit an unhinted
+        // base-rooted DTO query without any configured whitelist: the eligible stored leaves
+        // are derived from the projected DTO, while the discriminator, membership and every
+        // non-leaf stay SQL-authoritative.
+        ImmutableType clientType = ImmutableType.get(Client.class);
+        MapCache<Client> clientCache = new MapCache<>(clientType);
+        JSqlClient client = createClient(type -> type == clientType ? clientCache : null);
+        clientCache.put(100L, OrganizationDraft.$.produce(draft -> {
+            draft.setId(100L);
+            draft.setName("CACHED-NAME");
+            draft.setTaxCode("CACHED-TAX");
+        }));
+        clientCache.put(101L, PersonDraft.$.produce(draft -> {
+            draft.setId(101L);
+            draft.setName("CACHED-PERSON");
+        }));
+        ClientTable table = ClientTable.$;
+        clearExecutions();
+        List<ClientImplicitCatchAllView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().in(CLIENT_IDS))
+                .select(table.fetch(ClientImplicitCatchAllView.class))
+                .execute(con)));
+        assertEquals(2, rows.size());
+        ClientImplicitCatchAllView.Organization organization =
+                assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
+        assertEquals("CACHED-NAME", organization.getName());
+        assertEquals("CACHED-TAX", organization.getTaxCode());
+        ClientImplicitCatchAllView.Default person =
+                assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
+        assertEquals("CACHED-PERSON", person.getName());
+        assertCacheTouched(clientCache, 100L);
+        assertCacheTouched(clientCache, 101L);
     }
 
     @Test
@@ -4199,6 +4335,348 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                         return cacheType == type ? new MapCache<>(type) : null;
                     }
                 }))));
+    }
+
+    @Test
+    public void testNativeAdmissionServesConfiguredContentFieldsWithoutHint() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name", "website"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setWebsite("CACHED-WEBSITE");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple2<ReusableBookStoreView, Integer>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class), table.version())
+                .execute(con)));
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals(0, rows.get(0).get_2());
+        assertCacheTouched(cache, oreillyId);
+        assertEquals(1, getExecutions().size());
+        assertFalse(getExecutions().get(0).getSql().contains(".NAME"));
+        assertTrue(getExecutions().get(0).getSql().contains(".VERSION"));
+
+        clearExecutions();
+        cache.clearHistory();
+        rows.clear();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class), table.version())
+                .useObjectCache(false)
+                .execute(con)));
+        assertEquals("O'REILLY", rows.get(0).get_1().getName());
+        assertTrue(cache.getAllKeys.isEmpty());
+        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
+    @Test
+    public void testNativePlainAdmissionServesDtoWithoutHint() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setWebsite("CACHED-WEBSITE");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<ReusableBookStoreView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class))
+                .execute(con)));
+        assertEquals("CACHED", rows.get(0).getName());
+        assertCacheTouched(cache, oreillyId);
+        assertEquals(1, getExecutions().size());
+
+        clearExecutions();
+        cache.clearHistory();
+        rows.clear();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class))
+                .useObjectCache(false)
+                .execute(con)));
+        assertEquals("O'REILLY", rows.get(0).getName());
+        assertTrue(cache.getAllKeys.isEmpty());
+        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
+    @Test
+    public void testNativeAdmissionKeepsEntityProjectionFresh() {
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        jdbc(con -> client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(BookStoreFetcher.$.name().website()))
+                .execute(con));
+        assertTrue(cache.getAllKeys.isEmpty());
+        assertEquals(1, getExecutions().size());
+        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
+    }
+
+    @Test
+    public void testNativeAdmissionKeepsStaleOwningFkFresh() {
+        // A complete-snapshot declaration approves stored scalar leaves only, so the
+        // DTO's owning FK must keep coming from SQL even while the cached root snapshot
+        // still carries the old, fully loaded reference.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+            draft.setStore(BookStoreDraft.$.produce(store -> {
+                store.setId(oreillyId);
+                store.setName("CACHED-STORE");
+            }));
+        }));
+        BookTable table = BookTable.$;
+        try {
+            rawUpdate("update BOOK set STORE_ID = ? where ID = ?", manningId, learningGraphQLId1);
+            clearExecutions();
+            List<BookViewForTupleTest> rows = new ArrayList<>();
+            jdbc(con -> rows.addAll(client.createQuery(table)
+                    .where(table.id().eq(learningGraphQLId1))
+                    .select(table.fetch(BookViewForTupleTest.class))
+                    .execute(con)));
+            assertEquals(1, rows.size());
+            assertEquals("CACHED-BOOK", rows.get(0).getName());
+            assertEquals(manningId, rows.get(0).getStore().getId(), "a moved FK must not come from the stale snapshot");
+            assertEquals("MANNING", rows.get(0).getStore().getName(), "a moved FK target must not come from the stale snapshot");
+            assertCacheTouched(cache, learningGraphQLId1);
+
+            rawUpdate("update BOOK set STORE_ID = null where ID = ?", learningGraphQLId1);
+            clearExecutions();
+            rows.clear();
+            jdbc(con -> rows.addAll(client.createQuery(table)
+                    .where(table.id().eq(learningGraphQLId1))
+                    .select(table.fetch(BookViewForTupleTest.class))
+                    .execute(con)));
+            assertNull(rows.get(0).getStore(), "a cleared FK must not come from the stale snapshot");
+        } finally {
+            rawUpdate("update BOOK set STORE_ID = ? where ID = ?", oreillyId, learningGraphQLId1);
+            cache.deleteAll(Collections.singletonList(learningGraphQLId1), null);
+        }
+    }
+
+    @Test
+    public void testNativeAdmissionKeepsNestedDtoSlotFresh() {
+        // Automatic admission approves only the selected entity's own stored leaves, so a
+        // nested converted slot is never served from the cached root's loaded reference:
+        // its content stays SQL-authoritative.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+            draft.setStore(BookStoreDraft.$.produce(store -> {
+                store.setId(oreillyId);
+                store.setName("CACHED-STORE");
+            }));
+        }));
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<BookViewForTupleTest> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(table.fetch(BookViewForTupleTest.class))
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED-BOOK", rows.get(0).getName());
+        assertEquals(oreillyId, rows.get(0).getStore().getId());
+        assertEquals("O'REILLY", rows.get(0).getStore().getName());
+        assertCacheTouched(cache, learningGraphQLId1);
+    }
+
+    @Test
+    public void testNativePlainAdmissionKeepsEntitySiblingFresh() {
+        // Admission is scoped to the converted DTO/View slot: an entity-fetcher or bare
+        // entity sibling of the same table stays SQL-fresh under the default policy.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, BookStore, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(
+                        table.fetch(ReusableBookStoreView.class),
+                        table.fetch(BookStoreFetcher.$.name()),
+                        table
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".NAME"), sql);
+    }
+
+    @Test
+    public void testNativePlainAdmissionKeepsEntityFetcherProtectedLeavesFresh() {
+        // An unhinted mixed tuple admits only the converted DTO slot. An entity-fetcher and a
+        // bare-entity sibling must keep their own SQL values, including protected leaves, and
+        // must not inherit the cached root's stale version.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, BookStore, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(
+                        table.fetch(ReusableBookStoreView.class),
+                        table.fetch(BookStoreFetcher.$.name().version()),
+                        table
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertEquals(0, rows.get(0).get_2().version());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertEquals(0, rows.get(0).get_3().version());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".VERSION"), sql);
+    }
+
+    @Test
+    public void testNativeContentOnlyAdmissionKeepsEntitySiblingFresh() {
+        // The configured mask is scoped to the converted DTO slot: an entity-fetcher and a
+        // bare-entity sibling keep their own SQL values, including protected leaves, and must
+        // not inherit the cached root's stale name or version.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, BookStore, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(
+                        table.fetch(ReusableBookStoreView.class),
+                        table.fetch(BookStoreFetcher.$.name().version()),
+                        table
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertEquals(0, rows.get(0).get_2().version());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertEquals(0, rows.get(0).get_3().version());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".NAME"), sql);
+        assertTrue(sql.contains(".VERSION"), sql);
+    }
+
+    @Test
+    public void testNativeContentOnlyAdmissionServesJoinedDtoSlotWithoutHint() {
+        // A configured content-only mask rooted at a joined slot's own type serves the approved
+        // leaf from cache while join membership and every entity sibling stay SQL-authoritative.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        cache.clearHistory();
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, String, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(
+                        table.store().fetch(ReusableBookStoreView.class),
+                        table.name(),
+                        table.store()
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(oreillyId, rows.get(0).get_1().getId());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("Learning GraphQL", rows.get(0).get_2());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains("BOOK_STORE"), sql);
+    }
+
+    @Test
+    public void testNativeAdmissionServesJoinedDtoSlotWithoutHint() {
+        // An automatic mask is rooted at the selected slot's own type, so a joined DTO
+        // slot participates without the whole query being declined.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        BookTable table = BookTable.$;
+        jdbc(con -> client.getEntities().forConnection(con)
+                .findByIds(BookStore.class, Collections.singletonList(oreillyId)));
+        clearExecutions();
+        List<Tuple2<ReusableBookStoreView, String>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(
+                        table.store().fetch(ReusableBookStoreView.class),
+                        table.name()
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(oreillyId, rows.get(0).get_1().getId());
+        assertEquals("O'REILLY", rows.get(0).get_1().getName());
+        assertEquals("Learning GraphQL", rows.get(0).get_2());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains("BOOK_STORE"), sql);
+        assertTrue(sql.contains("tb_2_.ID"), sql);
+        assertFalse(sql.contains("tb_2_.NAME"), sql);
     }
 
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {

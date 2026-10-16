@@ -79,7 +79,7 @@ final class ObjectCacheQueryExecution {
         TypedQueryData data = query.getData();
         MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
 
-        Fetcher<?> cachedContent = query.getCachedContent();
+        Fetcher<?> cachedContent = query.resolveCachedContent();
         if (cachedContent != null) {
             return tryExecuteWithContent(
                     query, con, sqlClient, connectionManager, cachedContent, data.cachedContent == null
@@ -394,7 +394,9 @@ final class ObjectCacheQueryExecution {
             return null;
         }
 
-        CacheContentMask rootMask = CacheContentMask.of(cachedContent);
+        // The whole-projection mask is only used by an explicit hint. Automatic admission
+        // resolves a per-slot mask instead, so a bare entity slot stays fresh.
+        CacheContentMask rootMask = data.useObjectCache ? CacheContentMask.of(cachedContent) : null;
 
         // The retained graph must not read any object cache: a locally derived,
         // cache-disabled client keeps every loader query fresh and consistent with the
@@ -434,14 +436,27 @@ final class ObjectCacheQueryExecution {
                     TableImplementor<?> tableImplementor =
                             TableProxies.resolve(selectedTable, astContext);
                     Fetcher<?> fetcher = fetcherSelection.getFetcher();
-                    CacheContentMask node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                    CacheContentMask node;
+                    if (rootMask != null) {
+                        node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                    } else {
+                        // An automatic mask is already rooted at the selected entity type, so it is
+                        // bound directly to its slot. Resolving it through the root's join path would
+                        // look for the join property inside the slot's own mask and decline every
+                        // joined DTO slot.
+                        Fetcher<?> slotMask = query.contentMaskForSlot(fetcherSelection);
+                        node = slotMask != null && joinPathTo(tableImplementor, rootImplementor) != null ?
+                                CacheContentMask.of(slotMask) : null;
+                    }
                     if (node == null) {
                         slots[i] = MaskSlot.fresh(fetcherSelection.getConverter());
                         retainedSelections.add(stripConverter(fetcherSelection));
                         continue;
                     }
                     maskMatched = true;
-                    if (configuredContent && fetcher != null) {
+                    boolean configuredSlot = rootMask != null ?
+                            configuredContent : query.isConfiguredContentForSlot(fetcherSelection);
+                    if (configuredSlot && fetcher != null) {
                         // Configured fields approve content; they do not demand a wider DTO projection.
                         node = node.selectedBy(fetcher, sqlClient);
                     }
@@ -467,7 +482,8 @@ final class ObjectCacheQueryExecution {
                 }
                 TableImplementor<?> tableImplementor =
                         TableProxies.resolve(selectedTable, astContext);
-                CacheContentMask node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                CacheContentMask node = rootMask != null ?
+                        maskNodeFor(rootMask, tableImplementor, rootImplementor) : null;
                 if (node == null) {
                     slots[i] = MaskSlot.fresh(null);
                     retainedSelections.add(selection);
@@ -666,17 +682,8 @@ final class ObjectCacheQueryExecution {
             TableImplementor<?> tableImplementor,
             TableImplementor<?> rootImplementor
     ) {
-        List<ImmutableProp> path = new ArrayList<>();
-        TableImplementor<?> table = tableImplementor;
-        while (table != null && table != rootImplementor) {
-            ImmutableProp joinProp = table.getJoinProp();
-            if (joinProp == null || table.isTreated() || table.isRemote() || table.isInverse()) {
-                return null;
-            }
-            path.add(0, joinProp);
-            table = table.getParent();
-        }
-        if (table != rootImplementor) {
+        List<ImmutableProp> path = joinPathTo(tableImplementor, rootImplementor);
+        if (path == null) {
             return null;
         }
         CacheContentMask node = rootMask;
@@ -692,6 +699,28 @@ final class ObjectCacheQueryExecution {
             }
         }
         return node;
+    }
+
+    /**
+     * The plain whitelisted to-one join path from the root to a selected table, or
+     * {@code null} when the table is not a plain to-one descent (treated, remote, inverse
+     * or unreachable).
+     */
+    private static List<ImmutableProp> joinPathTo(
+            TableImplementor<?> tableImplementor,
+            TableImplementor<?> rootImplementor
+    ) {
+        List<ImmutableProp> path = new ArrayList<>();
+        TableImplementor<?> table = tableImplementor;
+        while (table != null && table != rootImplementor) {
+            ImmutableProp joinProp = table.getJoinProp();
+            if (joinProp == null || table.isTreated() || table.isRemote() || table.isInverse()) {
+                return null;
+            }
+            path.add(0, joinProp);
+            table = table.getParent();
+        }
+        return table == rootImplementor ? path : null;
     }
 
     /** The bare table selected by a Table/KTable selection, or null for any other slot. */
@@ -892,7 +921,7 @@ final class ObjectCacheQueryExecution {
         return sqlClient.getFilters().getTargetFilter(joinProp) == null;
     }
 
-    private static boolean hasObjectCacheInHierarchy(JSqlClientImplementor sqlClient, ImmutableType type) {
+    static boolean hasObjectCacheInHierarchy(JSqlClientImplementor sqlClient, ImmutableType type) {
         if (sqlClient.getCaches().getObjectCache(type) != null) {
             return true;
         }

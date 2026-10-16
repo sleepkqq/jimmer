@@ -1,6 +1,8 @@
 package org.babyfish.jimmer.sql.ast.impl.query;
 
 import org.babyfish.jimmer.Slice;
+import org.babyfish.jimmer.meta.ImmutableType;
+import org.babyfish.jimmer.meta.TargetLevel;
 import org.babyfish.jimmer.sql.ast.Expression;
 import org.babyfish.jimmer.sql.ast.Selection;
 import org.babyfish.jimmer.sql.ast.impl.Ast;
@@ -12,7 +14,10 @@ import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
 import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
+import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherFactory;
+import org.babyfish.jimmer.sql.fetcher.impl.FetcherSelection;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherUtil;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.runtime.ConnectionManager;
@@ -336,7 +341,9 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     @Override
     public ConfigurableRootQuery<T, R> useObjectCache(boolean enabled) {
         TypedQueryData data = getData();
-        if (data.useObjectCache == enabled && data.cachedContent == null) {
+        if (data.useObjectCache == enabled
+                && data.objectCacheDisabled == !enabled
+                && data.cachedContent == null) {
             return this;
         }
         return new ConfigurableRootQueryImpl<>(
@@ -366,6 +373,122 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 getMutableQuery().getSqlClient().getCaches().getObjectCacheContentFetcher(
                         ((TableImplementor<?>) table).getImmutableType()
                 ) : null;
+    }
+
+    private static ImmutableType resolveDeclaredCacheType(Caches caches, ImmutableType type) {
+        if (caches.getObjectCache(type) != null || caches.getObjectCacheContentFetcher(type) != null) {
+            return type;
+        }
+        for (ImmutableType derived : type.getAllDerivedTypes()) {
+            if (caches.getObjectCache(derived) != null || caches.getObjectCacheContentFetcher(derived) != null) {
+                return derived;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The eligible stored leaves of a complete-snapshot declaration, derived from the
+     * projected DTO/View itself. Id, discriminator, protected (version / logical-deleted),
+     * formula, association, view, remote and non-stored properties are dropped, so the mask
+     * approves stored scalar leaves only and keeps every edge SQL-authoritative.
+     */
+    private static Fetcher<?> deriveEligibleLeaves(Fetcher<?> fetcher) {
+        return FetcherFactory.filterExpanded(fetcher, (type, prop, path) ->
+                !prop.isId()
+                        && !prop.isDiscriminator()
+                        && !prop.isVersion()
+                        && !prop.isLogicalDeleted()
+                        && !prop.isFormula()
+                        && !prop.isAssociation(TargetLevel.PERSISTENT)
+                        && !prop.isView()
+                        && !prop.isRemote()
+                        && prop.hasStorage()
+                        && prop.getSqlTemplate() == null
+        );
+    }
+
+    /**
+     * The content mask for one {@code FetcherSelection} slot, or {@code null} to keep the
+     * slot SQL-fresh. An explicit hint keeps the legacy whole-projection mask. Automatic
+     * admission (no hint) applies only to a converted DTO/View slot whose declared entity
+     * cache exists: a content-only declaration supplies its configured approved leaves, a
+     * complete-snapshot declaration derives the eligible stored leaves from the projection.
+     * A bare entity slot stays fresh, so a mixed tuple never serves its entity sibling from
+     * the cache.
+     */
+    Fetcher<?> contentMaskForSlot(FetcherSelection<?> fetcherSelection) {
+        TypedQueryData data = getData();
+        if (data.useObjectCache) {
+            return getCachedContent();
+        }
+        if (data.objectCacheDisabled) {
+            return null;
+        }
+        if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
+            return null;
+        }
+        Fetcher<?> fetcher = fetcherSelection.getFetcher();
+        if (fetcher == null) {
+            return null;
+        }
+        Caches caches = getMutableQuery().getSqlClient().getCaches();
+        ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
+        if (declared == null) {
+            return null;
+        }
+        if (caches.isObjectCacheContentOnly(declared)) {
+            return caches.getObjectCacheContentFetcher(declared);
+        }
+        return deriveEligibleLeaves(fetcher);
+    }
+
+    /**
+     * Whether an automatic mask must be intersected with the slot's native projection: a
+     * configured content-only policy approves stored leaves without demanding a wider DTO
+     * shape. An explicit hint and a derived complete-snapshot mask are self-contained.
+     */
+    boolean isConfiguredContentForSlot(FetcherSelection<?> fetcherSelection) {
+        if (getData().useObjectCache || getData().objectCacheDisabled) {
+            return false;
+        }
+        if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
+            return false;
+        }
+        Fetcher<?> fetcher = fetcherSelection.getFetcher();
+        if (fetcher == null) {
+            return false;
+        }
+        Caches caches = getMutableQuery().getSqlClient().getCaches();
+        ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
+        return declared != null && caches.isObjectCacheContentOnly(declared);
+    }
+
+    /**
+     * The content mask governing the optional content path for the whole query, used only to
+     * decide whether the path may be entered. An explicit per-query mask always wins;
+     * otherwise the first converted slot with a declared cache. {@code useObjectCache(false)}
+     * suppresses it. Streaming, for-each and merged plans keep {@link #getCachedContent()} so
+     * their cache-disabled fallback decisions never change.
+     */
+    Fetcher<?> resolveCachedContent() {
+        Fetcher<?> explicit = getCachedContent();
+        if (explicit != null) {
+            return explicit;
+        }
+        if (getData().objectCacheDisabled) {
+            return null;
+        }
+        for (Selection<?> selection : getData().selections) {
+            if (!(selection instanceof FetcherSelection<?>)) {
+                continue;
+            }
+            Fetcher<?> mask = contentMaskForSlot((FetcherSelection<?>) selection);
+            if (mask != null) {
+                return mask;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -442,7 +565,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         JSqlClientImplementor sqlClient = getMutableQuery().getSqlClient();
         boolean queryPurpose =
                 getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY;
-        if (getCachedContent() != null) {
+        if (resolveCachedContent() != null) {
             // An explicit or configured content mask is a cache-content hint, not an
             // authorization cache. Whenever it cannot be honored - a non-QUERY purpose,
             // a locking read, an unproven transaction state or any decline - the complete
