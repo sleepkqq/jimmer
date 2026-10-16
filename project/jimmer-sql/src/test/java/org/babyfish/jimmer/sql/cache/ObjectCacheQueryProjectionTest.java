@@ -399,6 +399,43 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNativePolymorphicAdmissionServesEligibleLeavesWithoutHint() {
+        // A complete-snapshot declaration on the polymorphic base type must admit an unhinted
+        // base-rooted DTO query without any configured whitelist: the eligible stored leaves
+        // are derived from the projected DTO, while the discriminator, membership and every
+        // non-leaf stay SQL-authoritative.
+        ImmutableType clientType = ImmutableType.get(Client.class);
+        MapCache<Client> clientCache = new MapCache<>(clientType);
+        JSqlClient client = createClient(type -> type == clientType ? clientCache : null);
+        clientCache.put(100L, OrganizationDraft.$.produce(draft -> {
+            draft.setId(100L);
+            draft.setName("CACHED-NAME");
+            draft.setTaxCode("CACHED-TAX");
+        }));
+        clientCache.put(101L, PersonDraft.$.produce(draft -> {
+            draft.setId(101L);
+            draft.setName("CACHED-PERSON");
+        }));
+        ClientTable table = ClientTable.$;
+        clearExecutions();
+        List<ClientImplicitCatchAllView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().in(CLIENT_IDS))
+                .select(table.fetch(ClientImplicitCatchAllView.class))
+                .execute(con)));
+        assertEquals(2, rows.size());
+        ClientImplicitCatchAllView.Organization organization =
+                assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
+        assertEquals("CACHED-NAME", organization.getName());
+        assertEquals("CACHED-TAX", organization.getTaxCode());
+        ClientImplicitCatchAllView.Default person =
+                assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
+        assertEquals("CACHED-PERSON", person.getName());
+        assertCacheTouched(clientCache, 100L);
+        assertCacheTouched(clientCache, 101L);
+    }
+
+    @Test
     public void testNonPolymorphicDtoConverter() {
         BookStoreTable table = BookStoreTable.$;
         jdbc(con -> sqlClient.getEntities().forConnection(con)
