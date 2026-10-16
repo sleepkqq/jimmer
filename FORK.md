@@ -230,8 +230,11 @@ The admission reuses every existing guard: QUERY purpose, a non-locking read and
 connection with a proven inactive transaction; cacheable slots only (no effective join
 fetch, no JOINED-inheritance root). An explicit `useObjectCache(false)` always wins.
 Entity projections keep the documented explicit opt-in, so existing fresh-SQL entity reads
-are unchanged; streaming and count queries remain hint-only. No query-result caching is
-introduced and no association edge or authorization fact is served from the cache.
+are unchanged; streaming and count queries remain hint-only. Native ID lookups
+(`findById`/`findByIds`/`findMapByIds`) are also unchanged: they keep their existing
+complete-snapshot-or-fresh behavior and are not re-admitted by this policy. No
+query-result caching is introduced and no association edge or authorization fact is
+served from the cache.
 
 ### Missing targets in ordinary association caches in 1.1.9
 
