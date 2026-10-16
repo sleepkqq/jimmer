@@ -88,8 +88,13 @@ public class DatabaseAutoIdInsertTest extends AbstractMutationTest {
         NativeDatabases.assumeNativeDatabase();
 
         jdbc(NativeDatabases.MYSQL_DATA_SOURCE, false, con -> {
-            con
-                    .createStatement()
+            // A previous MySQL identity test may already have inserted a
+            // tree_node row with id 100; in that case MySQL ignores the lower
+            // requested auto_increment. Drop only these test rows first so the
+            // requested value takes effect.
+            con.createStatement()
+                    .executeUpdate("delete from tree_node where name = 'Computer'");
+            con.createStatement()
                     .executeUpdate("alter table tree_node auto_increment = 100");
         });
 
@@ -123,6 +128,11 @@ public class DatabaseAutoIdInsertTest extends AbstractMutationTest {
         NativeDatabases.assumeNativeDatabase();
 
         jdbc(NativeDatabases.MYSQL_BATCH_DATA_SOURCE, false, con -> {
+            // Drop rows left by an earlier run of this or the sibling identity test;
+            // otherwise MySQL ignores a lower requested auto_increment.
+            con
+                    .createStatement()
+                    .executeUpdate("delete from tree_node where name = 'Computer'");
             con
                     .createStatement()
                     .executeUpdate("alter table tree_node auto_increment = 100");
