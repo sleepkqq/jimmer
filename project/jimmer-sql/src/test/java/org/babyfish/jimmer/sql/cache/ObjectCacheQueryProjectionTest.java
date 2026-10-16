@@ -356,7 +356,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             draft.setName("CACHED-BOOK");
         }));
         BookTable table = BookTable.$;
-        AuthorTableEx author = AuthorTableEx.$;
+        AuthorTable author = AuthorTable.$;
         clearExecutions();
         List<DtoTuple> rows = new ArrayList<>();
         jdbc(con -> rows.addAll(client.createQuery(table)
