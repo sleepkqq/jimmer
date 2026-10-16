@@ -28,6 +28,7 @@ import org.babyfish.jimmer.sql.model.Author;
 import org.babyfish.jimmer.sql.model.AuthorDraft;
 import org.babyfish.jimmer.sql.model.AuthorFetcher;
 import org.babyfish.jimmer.sql.model.AuthorTable;
+import org.babyfish.jimmer.sql.model.AuthorTableEx;
 import org.babyfish.jimmer.sql.model.Book;
 import org.babyfish.jimmer.sql.model.BookDraft;
 import org.babyfish.jimmer.sql.model.BookFetcher;
@@ -356,7 +357,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             draft.setName("CACHED-BOOK");
         }));
         BookTable table = BookTable.$;
-        AuthorTable author = AuthorTable.$;
+        AuthorTableEx author = AuthorTableEx.$;
         clearExecutions();
         List<DtoTuple> rows = new ArrayList<>();
         jdbc(con -> rows.addAll(client.createQuery(table)
