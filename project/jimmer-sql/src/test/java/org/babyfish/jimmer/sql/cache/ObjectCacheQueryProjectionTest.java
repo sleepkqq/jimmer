@@ -373,7 +373,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertEquals("CACHED-BOOK", rows.get(0).getBook().getName());
         assertEquals(2, rows.get(0).getAuthorCount());
         assertCacheTouched(cache, learningGraphQLId1);
-        String sql = String.join("\n", getExecutions().stream().map(Object::toString).toList());
+        String sql = String.join("\n", getExecutions().stream().map(Execution::getSql).toList());
         assertTrue(sql.contains("(select count(1)"), sql);
     }
 
