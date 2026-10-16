@@ -4377,6 +4377,41 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNativePlainAdmissionKeepsEntityFetcherProtectedLeavesFresh() {
+        // An unhinted mixed tuple admits only the converted DTO slot. An entity-fetcher and a
+        // bare-entity sibling must keep their own SQL values, including protected leaves, and
+        // must not inherit the cached root's stale version.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, BookStore, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(
+                        table.fetch(ReusableBookStoreView.class),
+                        table.fetch(BookStoreFetcher.$.name().version()),
+                        table
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertEquals(0, rows.get(0).get_2().version());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertEquals(0, rows.get(0).get_3().version());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains(".VERSION"), sql);
+    }
+
+    @Test
     public void testNativeContentOnlyAdmissionKeepsEntitySiblingFresh() {
         ImmutableType type = ImmutableType.get(BookStore.class);
         MapCache<BookStore> cache = new MapCache<>(type);
