@@ -100,6 +100,8 @@ import org.babyfish.jimmer.sql.runtime.EntityManager;
 import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
 import org.babyfish.jimmer.sql.tuple.EntityTuple;
+import org.babyfish.jimmer.sql.tuple.DtoTuple;
+import org.babyfish.jimmer.sql.tuple.DtoTupleMapper;
 import org.babyfish.jimmer.sql.tuple.EntityTupleMapper;
 import org.babyfish.jimmer.support.ProxyRecorder;
 import org.jetbrains.annotations.NotNull;
@@ -337,6 +339,41 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                     });
                 }
         );
+    }
+
+    @Test
+    public void testNativeAdmissionServesTypedTupleDtoWithoutHint() {
+        // A generated @TypedTuple (DtoTuple) is a real DTO-slot, not a bare single-fetch
+        // View. The typed root fact supplies both a cached BookView slot and a scalar
+        // authorCount weak join slot. The cache owns only the eligible stored Book leaf;
+        // the scalar and membership remain authoritative SQL while the cache is consulted
+        // for the DTO owner.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+        }));
+        BookTable table = BookTable.$;
+        AuthorTableEx author = AuthorTableEx.$;
+        clearExecutions();
+        List<DtoTuple> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(DtoTupleMapper
+                        .book(table.fetch(BookViewForTupleTest.class))
+                        .authorCount(client.createSubQuery(author)
+                                .where(author.books().id().eq(table.id()))
+                                .selectCount()))
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(learningGraphQLId1, rows.get(0).getBook().getId());
+        assertEquals("CACHED-BOOK", rows.get(0).getBook().getName());
+        assertEquals(2, rows.get(0).getAuthorCount());
+        assertCacheTouched(cache, learningGraphQLId1);
+        String sql = String.join("\n", getExecutions().stream().map(Object::toString).toList());
+        assertTrue(sql.contains("(select count(1)"), sql);
     }
 
     @Test

@@ -5,6 +5,7 @@ import org.babyfish.jimmer.sql.cache.Cache
 import org.babyfish.jimmer.sql.di.AbstractJSqlClientDelegate
 import org.babyfish.jimmer.sql.kt.KSqlClient
 import org.babyfish.jimmer.sql.kt.ast.expression.asc
+import org.babyfish.jimmer.sql.kt.ast.expression.asNonNull
 import org.babyfish.jimmer.sql.kt.ast.expression.eq
 import org.babyfish.jimmer.sql.kt.ast.expression.value
 import org.babyfish.jimmer.sql.kt.ast.expression.valueIn
@@ -14,10 +15,15 @@ import org.babyfish.jimmer.sql.kt.common.createCache
 import org.babyfish.jimmer.sql.kt.fetcher.newFetcher
 import org.babyfish.jimmer.sql.kt.filter.KFilter
 import org.babyfish.jimmer.sql.kt.filter.KFilterArgs
+import org.babyfish.jimmer.sql.kt.query.tuple.DtoTupleMapper
 import org.babyfish.jimmer.sql.kt.model.classic.book.Book
 import org.babyfish.jimmer.sql.kt.model.classic.book.by
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookView
+import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookViewForTupleTest
 import org.babyfish.jimmer.sql.kt.model.classic.book.id
+import org.babyfish.jimmer.sql.kt.model.classic.book.storeId
+import org.babyfish.jimmer.sql.kt.model.classic.store.BookStore
+import org.babyfish.jimmer.sql.kt.model.classic.store.id
 import org.babyfish.jimmer.sql.kt.model.filter.File
 import org.babyfish.jimmer.sql.kt.model.filter.id
 import org.babyfish.jimmer.sql.kt.model.inheritance.single.employee.Employee
@@ -191,6 +197,42 @@ class ObjectCacheHintTest : AbstractQueryTest() {
         // only), so a fallback to ordinary DTO SQL would emit EDITION and fail here.
         assertTrue(executions.isNotEmpty())
         executions.forEach { assertFalse(it.sql.contains("EDITION"), it.sql) }
+    }
+
+    @Test
+    fun testTypedTupleWithWeakJoinServedFromObjectCache() {
+        // The consumer shape is a generated @TypedTuple with a DTO slot plus a
+        // scalar taken from a weak outer join. This is not a bare fetch(View):
+        // the DTO owner is served from the warm object cache while the weak-join
+        // scalar and the row membership stay SQL-authoritative.
+        nontransactional { con ->
+            _sqlClient.entities.forConnection(con).findById(Book::class, 3L)
+        }
+        clearExecutions()
+        nontransactional { con ->
+            val rows = _sqlClient.createQuery(Book::class) {
+                val store = table.asTableEx().weakOuterJoin(BookStore::class) {
+                    source.storeId.asNonNull() eq target.id
+                }
+                where(table.id eq 3L)
+                select(
+                    DtoTupleMapper
+                        .book(table.fetch(BookViewForTupleTest::class))
+                        .authorCount(store.id.asNonNull())
+                )
+            }.execute(con)
+            assertEquals(1, rows.size)
+            assertEquals(3L, rows[0].book.id)
+            assertEquals("Learning GraphQL", rows[0].book.name)
+            assertEquals(1L, rows[0].authorCount)
+        }
+        assertTrue(executions.isNotEmpty())
+        val sql = executions.single().sql
+        // The weak join and its scalar must survive the cache optimization.
+        assertTrue(sql.contains("BOOK_STORE"), sql)
+        // The cached root leaf must not be re-read; a fallback to the full DTO
+        // projection would emit the BOOK table's own NAME column.
+        assertFalse(sql.contains("tb_1_.NAME"), sql)
     }
 
     @Test
