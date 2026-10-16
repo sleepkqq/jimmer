@@ -85,7 +85,7 @@ public class UpsertMaskTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into BOOK as tb_1_(ID, NAME, EDITION, PRICE) values(?, ?, ?, ?) " +
+                                "insert into BOOK( ID, NAME, EDITION, PRICE) values(?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "NAME = excluded.NAME, EDITION = excluded.EDITION, " +
                                         "PRICE = tb_1_.PRICE + excluded.PRICE returning ID, PRICE"

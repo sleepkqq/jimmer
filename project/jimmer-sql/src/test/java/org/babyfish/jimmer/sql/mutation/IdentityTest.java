@@ -867,7 +867,7 @@ public class IdentityTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into DEPARTMENT as tb_1_(NAME, DELETED_MILLIS) values(?, ?) " +
+                                "insert into DEPARTMENT( NAME, DELETED_MILLIS) values(?, ?) " +
                                         "on conflict(NAME, DELETED_MILLIS) do update set " +
                                         "/* fake update to return all ids */ DELETED_MILLIS = tb_1_.DELETED_MILLIS " +
                                         "returning ID"
@@ -877,7 +877,7 @@ public class IdentityTest extends AbstractMutationTest {
                     });
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into EMPLOYEE as tb_1_(NAME, GENDER, DEPARTMENT_ID, DELETED_MILLIS) " +
+                                "insert into EMPLOYEE( NAME, GENDER, DEPARTMENT_ID, DELETED_MILLIS) " +
                                         "values(?, ?, ?, ?) " +
                                         "on conflict(NAME, DELETED_MILLIS) " +
                                         "do update set GENDER = excluded.GENDER, DEPARTMENT_ID = excluded.DEPARTMENT_ID " +
@@ -1069,7 +1069,7 @@ public class IdentityTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into DEPARTMENT as tb_1_(NAME, DELETED_MILLIS) " +
+                                "insert into DEPARTMENT( NAME, DELETED_MILLIS) " +
                                         "values(?, ?) " +
                                         "on conflict(NAME, DELETED_MILLIS) " +
                                         "do update set " +
@@ -1390,7 +1390,7 @@ public class IdentityTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into DEPARTMENT as tb_1_(NAME, DELETED_MILLIS) values(?, ?) " +
+                                "insert into DEPARTMENT( NAME, DELETED_MILLIS) values(?, ?) " +
                                         "on conflict(NAME, DELETED_MILLIS) " +
                                         "do nothing returning ID"
                         );
@@ -1399,7 +1399,7 @@ public class IdentityTest extends AbstractMutationTest {
                     });
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into EMPLOYEE as tb_1_(NAME, GENDER, DEPARTMENT_ID, DELETED_MILLIS) " +
+                                "insert into EMPLOYEE( NAME, GENDER, DEPARTMENT_ID, DELETED_MILLIS) " +
                                         "values(?, ?, ?, ?) " +
                                         "on conflict(NAME, DELETED_MILLIS) " +
                                         "do nothing returning ID"

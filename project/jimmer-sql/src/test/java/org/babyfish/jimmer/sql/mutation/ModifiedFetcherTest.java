@@ -1507,7 +1507,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into SYS_USER as tb_1_(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
+                                "insert into SYS_USER( ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
                                         "values(?, ?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "ACCOUNT = excluded.ACCOUNT, " +
@@ -1554,7 +1554,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into SYS_USER as tb_1_(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
+                                "insert into SYS_USER( ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
                                         "values(?, ?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "ACCOUNT = excluded.ACCOUNT, " +
@@ -1603,7 +1603,7 @@ public class ModifiedFetcherTest extends AbstractMutationTest {
                 ctx -> {
                     ctx.statement(it -> {
                         it.sql(
-                                "insert into SYS_USER as tb_1_(ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
+                                "insert into SYS_USER( ID, ACCOUNT, EMAIL, AREA, NICK_NAME) " +
                                         "values(?, ?, ?, ?, ?) " +
                                         "on conflict(ID) do update set " +
                                         "ACCOUNT = excluded.ACCOUNT, " +
