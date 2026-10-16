@@ -394,7 +394,9 @@ final class ObjectCacheQueryExecution {
             return null;
         }
 
-        CacheContentMask rootMask = CacheContentMask.of(cachedContent);
+        // The whole-projection mask is only used by an explicit hint. Automatic admission
+        // resolves a per-slot mask instead, so a bare entity slot stays fresh.
+        CacheContentMask rootMask = data.useObjectCache ? CacheContentMask.of(cachedContent) : null;
 
         // The retained graph must not read any object cache: a locally derived,
         // cache-disabled client keeps every loader query fresh and consistent with the
@@ -434,14 +436,22 @@ final class ObjectCacheQueryExecution {
                     TableImplementor<?> tableImplementor =
                             TableProxies.resolve(selectedTable, astContext);
                     Fetcher<?> fetcher = fetcherSelection.getFetcher();
-                    CacheContentMask node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                    Fetcher<?> slotMask = rootMask != null ?
+                            cachedContent : query.contentMaskForSlot(fetcherSelection);
+                    CacheContentMask node = rootMask != null ?
+                            maskNodeFor(rootMask, tableImplementor, rootImplementor) :
+                            (slotMask != null ?
+                                    maskNodeFor(CacheContentMask.of(slotMask), tableImplementor, rootImplementor) :
+                                    null);
                     if (node == null) {
                         slots[i] = MaskSlot.fresh(fetcherSelection.getConverter());
                         retainedSelections.add(stripConverter(fetcherSelection));
                         continue;
                     }
                     maskMatched = true;
-                    if (configuredContent && fetcher != null) {
+                    boolean configuredSlot = rootMask != null ?
+                            configuredContent : query.isConfiguredContentForSlot(fetcherSelection);
+                    if (configuredSlot && fetcher != null) {
                         // Configured fields approve content; they do not demand a wider DTO projection.
                         node = node.selectedBy(fetcher, sqlClient);
                     }
@@ -467,7 +477,8 @@ final class ObjectCacheQueryExecution {
                 }
                 TableImplementor<?> tableImplementor =
                         TableProxies.resolve(selectedTable, astContext);
-                CacheContentMask node = maskNodeFor(rootMask, tableImplementor, rootImplementor);
+                CacheContentMask node = rootMask != null ?
+                        maskNodeFor(rootMask, tableImplementor, rootImplementor) : null;
                 if (node == null) {
                     slots[i] = MaskSlot.fresh(null);
                     retainedSelections.add(selection);
