@@ -4386,20 +4386,58 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         }));
         BookStoreTable table = BookStoreTable.$;
         clearExecutions();
-        List<Tuple2<ReusableBookStoreView, BookStore>> rows = new ArrayList<>();
+        List<Tuple3<ReusableBookStoreView, BookStore, BookStore>> rows = new ArrayList<>();
         jdbc(con -> rows.addAll(client.createQuery(table)
                 .where(table.id().eq(oreillyId))
                 .select(
                         table.fetch(ReusableBookStoreView.class),
-                        table.fetch(BookStoreFetcher.$.name())
+                        table.fetch(BookStoreFetcher.$.name()),
+                        table
                 )
                 .execute(con)));
         assertEquals(1, rows.size());
         assertEquals("CACHED", rows.get(0).get_1().getName());
         assertEquals("O'REILLY", rows.get(0).get_2().name());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
         assertCacheTouched(cache, oreillyId);
         String sql = getExecutions().get(0).getSql();
         assertTrue(sql.contains(".NAME"), sql);
+    }
+
+    @Test
+    public void testNativeContentOnlyAdmissionServesJoinedDtoSlotWithoutHint() {
+        // A configured content-only mask rooted at a joined slot's own type serves the approved
+        // leaf from cache while join membership and every entity sibling stay SQL-authoritative.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                type, null, null, Arrays.asList("name"));
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        cache.clearHistory();
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<Tuple3<ReusableBookStoreView, String, BookStore>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(
+                        table.store().fetch(ReusableBookStoreView.class),
+                        table.name(),
+                        table.store()
+                )
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(oreillyId, rows.get(0).get_1().getId());
+        assertEquals("CACHED", rows.get(0).get_1().getName());
+        assertEquals("Learning GraphQL", rows.get(0).get_2());
+        assertEquals("O'REILLY", rows.get(0).get_3().name());
+        assertCacheTouched(cache, oreillyId);
+        String sql = getExecutions().get(0).getSql();
+        assertTrue(sql.contains("BOOK_STORE"), sql);
     }
 
     @Test
