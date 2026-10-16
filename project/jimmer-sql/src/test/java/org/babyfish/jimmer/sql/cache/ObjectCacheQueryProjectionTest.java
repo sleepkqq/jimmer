@@ -340,6 +340,36 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNativePolymorphicAdmissionServesConfiguredContentWithoutHint() {
+        // A content-only declaration on a SINGLE_TABLE subtype must be admitted by an
+        // unhinted base-type root query: only the configured leaf is served from cache,
+        // while the discriminator, membership and every other leaf stay SQL-authoritative.
+        MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
+        JSqlClient client = createClient(
+                type -> type.getJavaClass() == Organization.class ? organizationCache : null,
+                ImmutableType.get(Organization.class), null, null, Arrays.asList("taxCode"));
+        organizationCache.put(100L, OrganizationDraft.$.produce(draft -> {
+            draft.setId(100L);
+            draft.setName("CACHED-NAME");
+            draft.setTaxCode("CACHED-TAX");
+        }));
+        ClientTable table = ClientTable.$;
+        clearExecutions();
+        List<ClientImplicitCatchAllView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().in(CLIENT_IDS))
+                .select(table.fetch(ClientImplicitCatchAllView.class))
+                .execute(con)));
+        assertEquals(2, rows.size());
+        ClientImplicitCatchAllView.Organization organization =
+                assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
+        assertEquals("CACHED-TAX", organization.getTaxCode());
+        assertEquals("Acme", organization.getName());
+        assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
+        assertCacheTouched(organizationCache, 100L);
+    }
+
+    @Test
     public void testNonPolymorphicDtoConverter() {
         BookStoreTable table = BookStoreTable.$;
         jdbc(con -> sqlClient.getEntities().forConnection(con)
