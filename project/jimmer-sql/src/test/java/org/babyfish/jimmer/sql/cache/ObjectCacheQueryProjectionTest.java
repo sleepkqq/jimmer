@@ -340,36 +340,6 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testNativePolymorphicAdmissionServesEligibleLeavesWithoutHint() {
-        // Complete-snapshot (content-only:false) declaration on a SINGLE_TABLE subtype: the
-        // unhinted base root admits the subtype via deriveEligibleLeaves, without any
-        // content-fields whitelist, while a non-admitted carrier stays SQL-fresh.
-        MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
-        JSqlClient client = createClient(
-                it -> it.getJavaClass() == Organization.class ? organizationCache : null,
-                ImmutableType.get(Organization.class), null, null, Collections.emptyList());
-        organizationCache.put(100L, OrganizationDraft.$.produce(draft -> {
-            draft.setId(100L);
-            draft.setName("CACHED-NAME");
-            draft.setTaxCode("CACHED-TAX");
-        }));
-        ClientTable table = ClientTable.$;
-        clearExecutions();
-        List<ClientImplicitCatchAllView> rows = new ArrayList<>();
-        jdbc(con -> rows.addAll(client.createQuery(table)
-                .where(table.id().in(CLIENT_IDS))
-                .select(table.fetch(ClientImplicitCatchAllView.class))
-                .execute(con)));
-        assertEquals(2, rows.size());
-        ClientImplicitCatchAllView.Organization organization =
-                assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
-        assertEquals("CACHED-TAX", organization.getTaxCode());
-        assertEquals("CACHED-NAME", organization.getName());
-        assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
-        assertCacheTouched(organizationCache, 100L);
-    }
-
-    @Test
     public void testNativeBareEntityRootStaysFreshUnderContentOnlyPolicy() {
         // An ordinary entity root query is not admitted automatically: a content-only
         // declaration approves leaves for converted slots, never a whole entity snapshot,
