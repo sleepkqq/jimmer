@@ -4323,7 +4323,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testLockingContentOnlyHintDeclinesIntoCacheDisabledGraph() {
+    public void testContentOnlyHintDeclinesIntoCacheDisabledGraphForLockingAndNonQueryPurpose() {
         // A locking read must decline exactly like an ordinary one: the selected inverse
         // slot owns Book.authors itself, so this exercises the ordinary association loader
         // rather than the content-only owner's already-isolated subtree. A warmed membership
