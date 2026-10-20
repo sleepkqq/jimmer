@@ -258,8 +258,10 @@ automatically; id, discriminator, version, logical deletion, formulas, associati
 views, remote properties and non-stored properties are never admitted, so protected
 and authorization-relevant facts stay SQL-authoritative.
 
-`content-only: true` remains the opt-in that keeps ordinary entity/DTO reads and
-association loading SQL-backed. Existing guards are unchanged: QUERY purpose, a
+`content-only: true` remains the opt-in that enables derived admission and keeps bare
+entity and ID reads and association loading SQL-backed; a converted DTO/View projection
+is admitted, so a DTO read that must observe the current row needs an explicit
+`useObjectCache(false)`. Existing guards are unchanged: QUERY purpose, a
 non-locking read, a proven inactive transaction, cacheable slots only, whole-query
 fallback on any missing, negative or incompatible value, and SQL authority over
 membership, join topology, order, duplicates, pagination, global filters and
