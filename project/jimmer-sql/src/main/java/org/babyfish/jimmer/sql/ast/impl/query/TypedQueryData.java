@@ -52,6 +52,12 @@ class TypedQueryData {
 
     final boolean useObjectCache;
 
+    /**
+     * True when the query explicitly disabled the object cache, so the declarative
+     * native admission must not silently re-enable it.
+     */
+    final boolean objectCacheDisabled;
+
     final Fetcher<?> cachedContent;
 
     private PropExpressionImplementor<?> idOnlyExpression;
@@ -73,6 +79,7 @@ class TypedQueryData {
         hint = null;
         jdbcOptions = JdbcOptions.EMPTY;
         useObjectCache = false;
+        objectCacheDisabled = false;
         cachedContent = null;
     }
 
@@ -95,6 +102,7 @@ class TypedQueryData {
         hint = null;
         this.jdbcOptions = jdbcOptions;
         useObjectCache = false;
+        objectCacheDisabled = false;
         cachedContent = null;
     }
 
@@ -113,7 +121,8 @@ class TypedQueryData {
             String hint,
             JdbcOptions jdbcOptions,
             boolean useObjectCache,
-            Fetcher<?> cachedContent
+            Fetcher<?> cachedContent,
+            boolean objectCacheDisabled
     ) {
         this.selections = selections;
         this.tupleCreator = tupleCreator;
@@ -130,6 +139,7 @@ class TypedQueryData {
         this.jdbcOptions = jdbcOptions;
         this.useObjectCache = useObjectCache;
         this.cachedContent = cachedContent;
+        this.objectCacheDisabled = objectCacheDisabled;
     }
 
     public TypedQueryData reselect(List<Selection<?>> selections, TupleCreator<?> tupleCreator) {
@@ -155,7 +165,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -193,7 +204,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -213,7 +225,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -233,7 +246,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -253,7 +267,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -273,7 +288,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -293,7 +309,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -313,7 +330,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -346,7 +364,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
@@ -366,12 +385,15 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 
     public TypedQueryData useObjectCache(boolean useObjectCache) {
-        if (this.useObjectCache == useObjectCache && cachedContent == null) {
+        if (this.useObjectCache == useObjectCache
+                && this.objectCacheDisabled == !useObjectCache
+                && cachedContent == null) {
             return this;
         }
         return new TypedQueryData(
@@ -389,7 +411,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 useObjectCache,
-                null
+                null,
+                !useObjectCache
         );
     }
 
@@ -417,7 +440,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 true,
-                cachedContent
+                cachedContent,
+                false
         );
     }
 
@@ -442,7 +466,8 @@ class TypedQueryData {
                 hint,
                 jdbcOptions,
                 false,
-                cachedContent
+                cachedContent,
+                objectCacheDisabled
         );
     }
 

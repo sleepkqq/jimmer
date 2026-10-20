@@ -627,6 +627,10 @@ public class EntitiesImpl implements Entities {
                     );
                 }
         );
+        // The ID loader owns its complete-snapshot cache branch above; when that branch
+        // did not apply (content-only policy, locking read) this read must stay
+        // SQL-authoritative instead of falling into ordinary-query admission.
+        query = query.useObjectCache(false);
         if (forUpdate) {
             query = query.forUpdate(true);
         }
