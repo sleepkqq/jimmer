@@ -272,8 +272,11 @@ hint cannot be honored, the complete original projection runs on the isolated
 cache-disabled graph rather than falling back to SELECT-loaded associations on the
 ordinary client, so a declined hint cannot expose an unrelated association cache.
 
-Migration: delete `content-fields` from every cache declaration; no service mask,
-hint or fetch-plan change is required, because the projection now supplies the mask.
+Migration (only when moving to a release that includes this change -- `1.1.11` and
+earlier still require `content-fields`, and a `content-only` declaration without that
+list admits nothing there): delete `content-fields` from every cache declaration; no
+service mask, hint or fetch-plan change is required, because the projection now supplies
+the mask.
 
 Foreign content is cached as a whole-projection snapshot and is expected to be refreshed
 by cache invalidation -- for example a CDC stream that evicts the changed row -- rather
