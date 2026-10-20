@@ -4,6 +4,7 @@ import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
 import jakarta.enterprise.inject.Instance;
 
+import org.babyfish.jimmer.sql.cache.CacheAdmissionPolicy;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
 
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
@@ -23,8 +24,10 @@ public class JimmerLocalCacheProducer {
     @Unremovable
     @DefaultBean
     public CacheFactory jimmerCacheFactory(JimmerCacheConfig config, JimmerCacheGuardConfig guard,
-            Instance<CacheReadiness> readiness) {
-        CacheFactory factory = new JimmerLocalCacheFactory(config);
+            Instance<CacheReadiness> readiness, Instance<CacheAdmissionPolicy> admissionPolicy) {
+        CacheFactory factory = new JimmerLocalCacheFactory(
+                config,
+                AdmissionPolicies.resolve(admissionPolicy));
         if (!guard.enabled()) return factory;
         if (!readiness.isResolvable()) {
             throw new IllegalStateException("quarkus.jimmer.cache.guard requires exactly one CacheReadiness bean");

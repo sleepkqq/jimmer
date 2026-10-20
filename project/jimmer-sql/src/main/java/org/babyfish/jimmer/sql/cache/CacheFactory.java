@@ -18,6 +18,14 @@ public interface CacheFactory {
     }
 
     /**
+     * Whether a converted DTO/View root slot of this type may use the declared object cache.
+     * Defaults to true; install a {@link CacheAdmissionPolicy} to make it request-sensitive.
+     */
+    default boolean isObjectCacheAdmissible(ImmutableType type) {
+        return true;
+    }
+
+    /**
      * Create cache for an entity type.
      *
      * <p>If you don't want all entity types to support object caching,

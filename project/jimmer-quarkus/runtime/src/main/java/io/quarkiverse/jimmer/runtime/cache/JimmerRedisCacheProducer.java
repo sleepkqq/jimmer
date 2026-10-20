@@ -7,6 +7,7 @@ import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
 
+import org.babyfish.jimmer.sql.cache.CacheAdmissionPolicy;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.babyfish.jimmer.sql.cache.CacheTracker;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -52,6 +53,7 @@ public class JimmerRedisCacheProducer {
             Instance<CacheTracker> tracker,
             JimmerCacheGuardConfig guard,
             Instance<CacheReadiness> readiness,
+            Instance<CacheAdmissionPolicy> admissionPolicy,
             @ConfigProperty(name = "quarkus.redis.timeout", defaultValue = "10s") Duration timeout) {
         String defaultSchema = runtimeConfig.dataSources()
                 .get(DataSourceUtil.DEFAULT_DATASOURCE_NAME)
@@ -72,7 +74,8 @@ public class JimmerRedisCacheProducer {
                 config,
                 defaultSchema,
                 tracker.isResolvable() ? tracker.get() : null,
-                timeout);
+                timeout,
+                AdmissionPolicies.resolve(admissionPolicy));
         return condition == null ? factory : new GuardedCacheFactory(factory, condition::ready);
     }
 }

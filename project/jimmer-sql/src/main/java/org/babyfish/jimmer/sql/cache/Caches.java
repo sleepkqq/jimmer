@@ -21,6 +21,14 @@ public interface Caches {
         return false;
     }
 
+    /**
+     * Whether a converted DTO/View root slot of this type may use its declared object cache.
+     * The default admits every type; an application policy can deny own/editable/command reads.
+     */
+    default boolean isObjectCacheAdmissible(ImmutableType type) {
+        return true;
+    }
+
     @Nullable
     default <K, V> Cache<K, V> getPropertyCache(TypedProp<?, ?> prop) {
         return getPropertyCache(prop.unwrap());

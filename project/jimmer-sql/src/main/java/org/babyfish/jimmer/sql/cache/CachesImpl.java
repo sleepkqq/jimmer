@@ -32,6 +32,8 @@ public class CachesImpl implements Caches {
 
     private final Set<ImmutableType> objectCacheContentOnlyTypes;
 
+    private final CacheAdmissionPolicy admissionPolicy;
+
     public CachesImpl(
             Triggers triggers,
             Map<ImmutableType, Cache<?, ?>> objectCacheMap,
@@ -39,7 +41,7 @@ public class CachesImpl implements Caches {
             CacheOperator operator,
             CacheAbandonedCallback abandonedCallback
     ) {
-        this(triggers, objectCacheMap, propCacheMap, operator, abandonedCallback, Collections.emptySet());
+        this(triggers, objectCacheMap, propCacheMap, operator, abandonedCallback, Collections.emptySet(), type -> true);
     }
 
     public CachesImpl(
@@ -49,6 +51,18 @@ public class CachesImpl implements Caches {
             CacheOperator operator,
             CacheAbandonedCallback abandonedCallback,
             Set<ImmutableType> objectCacheContentOnlyTypes
+    ) {
+        this(triggers, objectCacheMap, propCacheMap, operator, abandonedCallback, objectCacheContentOnlyTypes, type -> true);
+    }
+
+    public CachesImpl(
+            Triggers triggers,
+            Map<ImmutableType, Cache<?, ?>> objectCacheMap,
+            Map<ImmutableProp, Cache<?, ?>> propCacheMap,
+            CacheOperator operator,
+            CacheAbandonedCallback abandonedCallback,
+            Set<ImmutableType> objectCacheContentOnlyTypes,
+            CacheAdmissionPolicy admissionPolicy
     ) {
         Map<ImmutableType, UsedCache<?, ?>> objectCacheWrapperMap = new LinkedHashMap<>();
         for (Map.Entry<ImmutableType, Cache<?, ?>> e : objectCacheMap.entrySet()) {
@@ -71,6 +85,7 @@ public class CachesImpl implements Caches {
         this.objectCacheContentOnlyTypes = Collections.unmodifiableSet(
                 new LinkedHashSet<>(objectCacheContentOnlyTypes)
         );
+        this.admissionPolicy = Objects.requireNonNull(admissionPolicy, "admissionPolicy cannot be null");
     }
 
     public CachesImpl(
@@ -86,6 +101,7 @@ public class CachesImpl implements Caches {
         disabledTypes = cfg.getDisabledTypes();
         disabledProps = cfg.getDisabledProps();
         objectCacheContentOnlyTypes = base.objectCacheContentOnlyTypes;
+        admissionPolicy = base.admissionPolicy;
     }
 
     public Map<ImmutableType, UsedCache<?, ?>> getObjectCacheMap() {
@@ -103,6 +119,11 @@ public class CachesImpl implements Caches {
             return null;
         }
         return UsedCacheImpl.export((UsedCache<K, V>)objectCacheMap.get(type));
+    }
+
+    @Override
+    public boolean isObjectCacheAdmissible(ImmutableType type) {
+        return admissionPolicy.isAdmissible(type);
     }
 
     @Override

@@ -452,6 +452,9 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             return null;
         }
         Caches caches = getMutableQuery().getSqlClient().getCaches();
+        if (!caches.isObjectCacheAdmissible(fetcher.getImmutableType())) {
+            return null;
+        }
         if (data.useObjectCache) {
             Fetcher<?> explicitMask = getCachedContent();
             if (explicitMask != null) {
@@ -489,7 +492,8 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
     Fetcher<?> resolveCachedContent() {
         Fetcher<?> explicit = getCachedContent();
         if (explicit != null) {
-            return explicit;
+            return getMutableQuery().getSqlClient().getCaches()
+                    .isObjectCacheAdmissible(explicit.getImmutableType()) ? explicit : null;
         }
         if (getData().objectCacheDisabled) {
             return null;

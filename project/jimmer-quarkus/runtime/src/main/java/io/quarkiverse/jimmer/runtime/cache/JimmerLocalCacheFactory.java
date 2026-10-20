@@ -10,6 +10,7 @@ import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.cache.AbstractCacheFactory;
 import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.CacheAdmissionPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,7 +29,14 @@ public class JimmerLocalCacheFactory extends AbstractCacheFactory {
     private final Map<String, JimmerCacheConfig.EntityCacheConfig> configByType;
     private final boolean operationLog;
 
+    private final CacheAdmissionPolicy admissionPolicy;
+
     public JimmerLocalCacheFactory(JimmerCacheConfig config) {
+        this(config, null);
+    }
+
+    public JimmerLocalCacheFactory(JimmerCacheConfig config, CacheAdmissionPolicy admissionPolicy) {
+        this.admissionPolicy = admissionPolicy;
         this.operationLog = config.logOperations();
         this.configByType = new LinkedHashMap<>();
         for (JimmerCacheConfig.EntityCacheConfig entity : config.entities()) {
@@ -51,6 +59,11 @@ public class JimmerLocalCacheFactory extends AbstractCacheFactory {
             return null;
         }
         return LocalOnlyCaches.create(type, null, config, null, operationLog, false);
+    }
+
+    @Override
+    public boolean isObjectCacheAdmissible(ImmutableType type) {
+        return admissionPolicy == null || admissionPolicy.isAdmissible(type);
     }
 
     @Override
