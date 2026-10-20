@@ -4369,6 +4369,35 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertFalse(names.contains("CACHED-AUTHOR"), names::toString);
         assertTrue(authorIds.getAllKeys.isEmpty(), authorIds.getAllKeys::toString);
         assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
+
+        // The decline is purpose-independent: a non-QUERY execution of the same projection
+        // must not consult the warmed association caches either.
+        clearExecutions();
+        List<Book> mutated = new ArrayList<>();
+        jdbc(con -> mutated.addAll(
+                Queries.createQuery(
+                        (JSqlClientImplementor) client,
+                        ImmutableType.get(BookStore.class),
+                        ExecutionPurpose.MUTATE,
+                        FilterLevel.DEFAULT,
+                        (q, t) -> {
+                            BookStoreTable store = (BookStoreTable) t;
+                            return q.where(store.asTableEx().books().id().eq(learningGraphQLId1))
+                                    .select(store.asTableEx().books().fetch(
+                                            BookFetcher.$.authors(AuthorFetcher.$.firstName())
+                                    ))
+                                    .useObjectCache();
+                        }
+                ).execute(con)
+        ));
+        assertEquals(1, mutated.size());
+        List<String> mutatedNames = mutated.get(0).authors().stream()
+                .map(Author::firstName)
+                .collect(Collectors.toList());
+        assertTrue(mutatedNames.contains("Alex"), mutatedNames::toString);
+        assertFalse(mutatedNames.contains("CACHED-AUTHOR"), mutatedNames::toString);
+        assertTrue(authorIds.getAllKeys.isEmpty(), authorIds.getAllKeys::toString);
+        assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
     }
 
     @Test
