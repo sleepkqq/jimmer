@@ -4324,9 +4324,11 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
 
     @Test
     public void testLockingContentOnlyHintDeclinesIntoCacheDisabledGraph() {
-        // A locking read must decline exactly like an ordinary one: a warmed association
-        // id-list cache and a stale target body are never consulted for a content-only
-        // hint whose projection has no eligible slot.
+        // A locking read must decline exactly like an ordinary one: the selected inverse
+        // slot owns Book.authors itself, so this exercises the ordinary association loader
+        // rather than the content-only owner's already-isolated subtree. A warmed membership
+        // mapping and a stale target body are never consulted for a content-only hint whose
+        // projection has no eligible slot.
         ImmutableType storeType = ImmutableType.get(BookStore.class);
         ImmutableType authorType = ImmutableType.get(Author.class);
         MapCache<BookStore> storeCache = new MapCache<>(storeType);
@@ -4348,20 +4350,19 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         authorIds.put(learningGraphQLId1, Collections.emptyList());
         BookStoreTable table = BookStoreTable.$;
         clearExecutions();
-        List<BookStore> rows = new ArrayList<>();
+        List<Book> rows = new ArrayList<>();
         jdbc(con -> rows.addAll(
                 client.createQuery(table)
-                        .where(table.id().eq(oreillyId))
-                        .select(table.fetch(BookStoreFetcher.$.books(
+                        .where(table.asTableEx().books().id().eq(learningGraphQLId1))
+                        .select(table.asTableEx().books().fetch(
                                 BookFetcher.$.authors(AuthorFetcher.$.firstName())
-                        )))
+                        ))
                         .useObjectCache()
                         .forUpdate()
                         .execute(con)
         ));
         assertEquals(1, rows.size());
-        List<String> names = rows.get(0).books().stream()
-                .flatMap(book -> book.authors().stream())
+        List<String> names = rows.get(0).authors().stream()
                 .map(Author::firstName)
                 .collect(Collectors.toList());
         assertTrue(names.contains("Alex"), names::toString);
