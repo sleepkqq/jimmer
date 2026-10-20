@@ -227,8 +227,10 @@ An ordinary, hint-free root query whose projection contains a native generated D
 slot for an entity with a declared object cache is admitted without any per-query
 `useObjectCache()` call and without any service-side field list or cache wrapper. A
 complete-snapshot cache (the default, `content-only: false`) serves the projection through
-the existing plain object-cache path; a `content-only` cache serves exactly the stored
-scalar leaves of the executed projection through the existing content path.
+the existing plain object-cache path. In the `1.1.11` tag a `content-only` cache serves the
+leaves named in its `content-fields` list through the existing content path, and a
+`content-only` declaration without that list admits nothing; the field list was removed
+after `1.1.11`, as described below.
 Membership, order, pagination, visibility, global filters and every non-approved scalar
 slot stay SQL-authoritative, and the whole projection falls back to the complete fresh
 graph whenever the cache cannot satisfy the page.
@@ -272,6 +274,16 @@ ordinary client, so a declined hint cannot expose an unrelated association cache
 
 Migration: delete `content-fields` from every cache declaration; no service mask,
 hint or fetch-plan change is required, because the projection now supplies the mask.
+
+Foreign content is cached as a whole-projection snapshot and is expected to be refreshed
+by cache invalidation -- for example a CDC stream that evicts the changed row -- rather
+than by splitting one projection into cached display fields and SQL-fresh ones. The next
+read after an invalidation reloads the complete current row, so freshness of a foreign
+display field is bounded by the invalidation propagation interval, not by a per-field
+policy; a deliberately restored old snapshot in a test does not establish a
+selective-freshness requirement. Own, editable and command reads never use this
+admission and stay SQL-fresh, as do version, authorization, membership, ordering,
+pagination and transaction guards.
 
 ### Missing targets in ordinary association caches in 1.1.9
 
