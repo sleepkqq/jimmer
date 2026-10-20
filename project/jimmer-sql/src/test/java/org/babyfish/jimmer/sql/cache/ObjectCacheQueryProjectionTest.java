@@ -6,6 +6,8 @@ import org.babyfish.jimmer.runtime.ImmutableSpi;
 import org.babyfish.jimmer.sql.JoinType;
 import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.ast.Expression;
+import org.babyfish.jimmer.sql.ast.table.BaseTable;
+import org.babyfish.jimmer.sql.model.BookProps;
 import org.babyfish.jimmer.sql.ast.impl.EntitiesImpl;
 import org.babyfish.jimmer.sql.ast.impl.query.FilterLevel;
 import org.babyfish.jimmer.sql.ast.impl.query.Queries;
@@ -4321,6 +4323,73 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testLockingContentOnlyHintDeclinesIntoCacheDisabledGraph() {
+        // A locking read must decline exactly like an ordinary one: a warmed association
+        // id-list cache and a stale target body are never consulted for a content-only
+        // hint whose projection has no eligible slot.
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        ImmutableType authorType = ImmutableType.get(Author.class);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        MapCache<Author> authorCache = new MapCache<>(authorType);
+        MapCache<List<?>> authorIds = MapCache.forProp(BookProps.AUTHORS.unwrap());
+        JSqlClient client = createClientWithIdListCache(
+                it -> it == storeType ? storeCache : it == authorType ? authorCache : null,
+                storeType, BookProps.AUTHORS.unwrap(), authorIds
+        );
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+        }));
+        authorCache.put(alexId, AuthorDraft.$.produce(draft -> {
+            draft.setId(alexId);
+            draft.setFirstName("CACHED-AUTHOR");
+        }));
+        // A stale membership mapping that would hide Alex if any loader read it.
+        authorIds.put(learningGraphQLId1, Collections.emptyList());
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.books(
+                                BookFetcher.$.authors(AuthorFetcher.$.firstName())
+                        )))
+                        .useObjectCache()
+                        .forUpdate()
+                        .execute(con)
+        ));
+        assertEquals(1, rows.size());
+        List<String> names = rows.get(0).books().stream()
+                .flatMap(book -> book.authors().stream())
+                .map(Author::firstName)
+                .collect(Collectors.toList());
+        assertTrue(names.contains("Alex"), names::toString);
+        assertFalse(names.contains("CACHED-AUTHOR"), names::toString);
+        assertTrue(authorIds.getAllKeys.isEmpty(), authorIds.getAllKeys::toString);
+        assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
+    }
+
+    @Test
+    public void testHintedBaseTableRootDeclinesWithoutCasting() {
+        // A derived/base-table root has no entity type to resolve; the hint must decline
+        // gracefully instead of casting the base table to Table.
+        BookTable table = BookTable.$;
+        BaseTable baseTable = sqlClient
+                .createBaseQuery(table)
+                .addSelect(table.name())
+                .asBaseTable();
+        List<Long> counts = new ArrayList<>();
+        jdbc(con -> counts.addAll(
+                sqlClient.createQuery(baseTable)
+                        .select(Expression.rowCount())
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertFalse(counts.isEmpty());
+    }
+
+    @Test
     public void testBooleanHintKeepsLegacyEntityHydrationBesideDtoSlot() {
         // A bare useObjectCache() hint must keep the legacy plan for ordinary caches: a
         // converted DTO sibling must not switch the query to the content path and leave a
@@ -4786,9 +4855,38 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         });
     }
 
+    private JSqlClient createClientWithIdListCache(
+            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
+            ImmutableType contentOnlyType,
+            ImmutableProp listProp,
+            Cache<?, List<?>> listCache
+    ) {
+        return getSqlClient(builder -> {
+            builder.setConnectionManager(NON_TX_MANAGER);
+            builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
+                @Override
+                public boolean isObjectCacheContentOnly(ImmutableType type) {
+                    return type == contentOnlyType;
+                }
+
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return objectCacheFactory.apply(type);
+                }
+
+                @Override
+                public Cache<?, List<?>> createAssociatedIdListCache(ImmutableProp prop) {
+                    return prop == listProp ? listCache : null;
+                }
+            }));
+        });
+    }
+
     private static class MapCache<T> implements Cache<Object, T> {
 
         private final ImmutableType type;
+
+        private final ImmutableProp prop;
 
         private final Map<Object, T> map = new LinkedHashMap<>();
 
@@ -4796,6 +4894,16 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
 
         private MapCache(ImmutableType type) {
             this.type = type;
+            this.prop = null;
+        }
+
+        private MapCache(ImmutableType type, ImmutableProp prop) {
+            this.type = type;
+            this.prop = prop;
+        }
+
+        static <T> MapCache<T> forProp(ImmutableProp prop) {
+            return new MapCache<>(prop.getDeclaringType(), prop);
         }
 
         @NotNull
@@ -4807,7 +4915,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         @Nullable
         @Override
         public ImmutableProp prop() {
-            return null;
+            return prop;
         }
 
         @NotNull

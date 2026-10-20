@@ -384,6 +384,11 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             return false;
         }
         MutableRootQueryImpl<T> mutableQuery = getMutableQuery();
+        if (mutableQuery.getTable() instanceof BaseTable) {
+            // Derived/CTE roots have no entity table to resolve and no entity cache to
+            // honor; the hint declines gracefully to the original SQL.
+            return false;
+        }
         AstContext astContext = new AstContext(mutableQuery.getSqlClient());
         astContext.pushStatement(mutableQuery);
         try {
@@ -594,20 +599,21 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
             }
             return executeBypassed(con, data, sqlClient);
         }
-        if (data.useObjectCache
-                && data.forUpdate == null
-                && queryPurpose) {
-            ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
-            if (connectionManager.isTransactionKnownInactive(con)) {
-                List<R> rows = ObjectCacheQueryExecution.tryExecute(this, con, sqlClient, connectionManager);
-                if (rows != null) {
-                    return rows;
-                }
-            }
+        if (data.useObjectCache) {
             if (hasContentCacheHint()) {
-                // The bare hint carried a content-only intent that no eligible projection
-                // could honor; the complete original projection runs without any cache.
+                // A bare content-only hint that no eligible projection could honor must
+                // never run a cache-enabled loader, including locking and non-QUERY reads.
                 return executeBypassed(con, data, sqlClient);
+            }
+            if (data.forUpdate == null
+                    && queryPurpose) {
+                ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
+                if (connectionManager.isTransactionKnownInactive(con)) {
+                    List<R> rows = ObjectCacheQueryExecution.tryExecute(this, con, sqlClient, connectionManager);
+                    if (rows != null) {
+                        return rows;
+                    }
+                }
             }
         }
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
