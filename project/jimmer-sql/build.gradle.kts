@@ -62,5 +62,11 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.test {
     maxHeapSize = "2g"
-    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).takeIf { it > 0 } ?: 1
+    val nativeDatabase = System.getenv("jimmer-sql-test-native-database")
+    // ponytail: shared native schemas require one fork; isolate them per worker before parallelizing.
+    maxParallelForks = if (!nativeDatabase.isNullOrEmpty() && nativeDatabase != "false") {
+        1
+    } else {
+        (Runtime.getRuntime().availableProcessors() / 2).takeIf { it > 0 } ?: 1
+    }
 }
