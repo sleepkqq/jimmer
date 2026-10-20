@@ -175,6 +175,10 @@ attempt after an initial network timeout fetching a POM; no source or tag was ch
 
 ### Configured content fields in 1.1.7
 
+> Superseded: per-field cache configuration was removed after 1.1.11. See
+> "Projection-derived content admission, no field lists" below. This section records
+> what the 1.1.7 tag did; `content-fields` no longer exists in the fork.
+
 `content-only` entity caches can declare `content-fields` as a list of approved stored
 scalar properties. Ordinary `useObjectCache()` then uses that native policy with an
 existing DTO Language projection; consumers do not need handwritten fetchers or parallel
@@ -199,6 +203,9 @@ the source and tag were unchanged.
 
 ### Configured policy projection matching in 1.1.8
 
+> Superseded by the same removal after 1.1.11: admission is now derived from the
+> projection, so there is no configured policy to intersect.
+
 Configured `content-fields` approve eligible leaves rather than requiring every DTO
 to select the full list. The boolean/no-argument hint resolves the policy at execution
 and intersects it with each native selected projection, including concrete-type branches.
@@ -220,8 +227,8 @@ An ordinary, hint-free root query whose projection contains a native generated D
 slot for an entity with a declared object cache is admitted without any per-query
 `useObjectCache()` call and without any service-side field list or cache wrapper. A
 complete-snapshot cache (the default, `content-only: false`) serves the projection through
-the existing plain object-cache path; a `content-only` cache with configured
-`content-fields` serves exactly those approved leaves through the existing content path.
+the existing plain object-cache path; a `content-only` cache serves exactly the stored
+scalar leaves of the executed projection through the existing content path.
 Membership, order, pagination, visibility, global filters and every non-approved scalar
 slot stay SQL-authoritative, and the whole projection falls back to the complete fresh
 graph whenever the cache cannot satisfy the page.
@@ -235,6 +242,29 @@ are unchanged; streaming and count queries remain hint-only. Native ID lookups
 complete-snapshot-or-fresh behavior and are not re-admitted by this policy. No
 query-result caching is introduced and no association edge or authorization fact is
 served from the cache.
+
+### Projection-derived content admission, no field lists (unreleased)
+
+`content-fields` is removed from the fork. A per-field cache list duplicated the
+projection in configuration: a property added to an entity or DTO later would be
+missing from the list until someone remembered to edit YAML, so some leaves came from
+the cache and others from SQL for the same projection. Admission is now derived from
+the executed projection itself: for an entity with a declared object cache and a
+`content-only` policy, the admitted mask is that projection's stored scalar leaves,
+recomputed on every execution. Newly projected stored properties participate
+automatically; id, discriminator, version, logical deletion, formulas, associations,
+views, remote properties and non-stored properties are never admitted, so protected
+and authorization-relevant facts stay SQL-authoritative.
+
+`content-only: true` remains the opt-in that keeps ordinary entity/DTO reads and
+association loading SQL-backed. Existing guards are unchanged: QUERY purpose, a
+non-locking read, a proven inactive transaction, cacheable slots only, whole-query
+fallback on any missing, negative or incompatible value, and SQL authority over
+membership, join topology, order, duplicates, pagination, global filters and
+visibility. Explicit Fetcher masks and `useObjectCache(false)` keep their meaning.
+
+Migration: delete `content-fields` from every cache declaration; no service mask,
+hint or fetch-plan change is required, because the projection now supplies the mask.
 
 ### Missing targets in ordinary association caches in 1.1.9
 

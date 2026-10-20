@@ -365,22 +365,15 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         if (!data.useObjectCache) {
             return null;
         }
-        if (data.cachedContent != null) {
-            return data.cachedContent;
-        }
-        Object table = getMutableQuery().getTableLikeImplementor();
-        return table instanceof TableImplementor<?> ?
-                getMutableQuery().getSqlClient().getCaches().getObjectCacheContentFetcher(
-                        ((TableImplementor<?>) table).getImmutableType()
-                ) : null;
+        return data.cachedContent;
     }
 
     private static ImmutableType resolveDeclaredCacheType(Caches caches, ImmutableType type) {
-        if (caches.getObjectCache(type) != null || caches.getObjectCacheContentFetcher(type) != null) {
+        if (caches.getObjectCache(type) != null) {
             return type;
         }
         for (ImmutableType derived : type.getAllDerivedTypes()) {
-            if (caches.getObjectCache(derived) != null || caches.getObjectCacheContentFetcher(derived) != null) {
+            if (caches.getObjectCache(derived) != null) {
                 return derived;
             }
         }
@@ -410,58 +403,43 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
 
     /**
      * The content mask for one {@code FetcherSelection} slot, or {@code null} to keep the
-     * slot SQL-fresh. An explicit hint keeps the legacy whole-projection mask. Automatic
+     * slot SQL-fresh. An explicit per-query mask keeps its whole-projection mask; a bare
+     * {@code useObjectCache()} hint approves its own projection's stored leaves. Automatic
      * admission (no hint) applies only to a converted DTO/View slot whose declared entity
-     * cache exists: a content-only declaration supplies its configured approved leaves, a
-     * complete-snapshot declaration derives the eligible stored leaves from the projection.
-     * A bare entity slot stays fresh, so a mixed tuple never serves its entity sibling from
-     * the cache.
+     * cache exists, and derives the mask from the projection itself, so a newly projected
+     * stored leaf is approved without any per-field declaration. A bare entity slot without
+     * a hint stays fresh, so a mixed tuple never serves its entity sibling from the cache.
      */
     Fetcher<?> contentMaskForSlot(FetcherSelection<?> fetcherSelection) {
         TypedQueryData data = getData();
-        if (data.useObjectCache) {
-            return getCachedContent();
-        }
         if (data.objectCacheDisabled) {
-            return null;
-        }
-        if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
             return null;
         }
         Fetcher<?> fetcher = fetcherSelection.getFetcher();
         if (fetcher == null) {
             return null;
+        }
+        Fetcher<?> explicit = getCachedContent();
+        if (explicit != null) {
+            return explicit;
         }
         Caches caches = getMutableQuery().getSqlClient().getCaches();
         ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
         if (declared == null) {
             return null;
         }
-        if (caches.isObjectCacheContentOnly(declared)) {
-            return caches.getObjectCacheContentFetcher(declared);
+        // A boolean/no-argument hint carries no configured field list; it now means the
+        // same automatic admission as an unhinted converted slot, so fall through.
+        if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
+            return null;
+        }
+        // Automatic admission seeds one cache payload per masked slot node. A declared
+        // cache on a derived type only cannot seed the base slot, so require the cache on
+        // the queried type itself and leave a subtype-only declaration SQL-fresh.
+        if (caches.getObjectCache(fetcher.getImmutableType()) == null) {
+            return null;
         }
         return deriveEligibleLeaves(fetcher);
-    }
-
-    /**
-     * Whether an automatic mask must be intersected with the slot's native projection: a
-     * configured content-only policy approves stored leaves without demanding a wider DTO
-     * shape. An explicit hint and a derived complete-snapshot mask are self-contained.
-     */
-    boolean isConfiguredContentForSlot(FetcherSelection<?> fetcherSelection) {
-        if (getData().useObjectCache || getData().objectCacheDisabled) {
-            return false;
-        }
-        if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
-            return false;
-        }
-        Fetcher<?> fetcher = fetcherSelection.getFetcher();
-        if (fetcher == null) {
-            return false;
-        }
-        Caches caches = getMutableQuery().getSqlClient().getCaches();
-        ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
-        return declared != null && caches.isObjectCacheContentOnly(declared);
     }
 
     /**

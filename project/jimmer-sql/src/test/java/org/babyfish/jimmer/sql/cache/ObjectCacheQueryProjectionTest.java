@@ -386,7 +386,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -407,14 +407,14 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testNativePolymorphicAdmissionServesConfiguredContentWithoutHint() {
-        // A content-only declaration on a SINGLE_TABLE subtype must be admitted by an
-        // unhinted base-type root query: only the configured leaf is served from cache,
-        // while the discriminator, membership and every other leaf stay SQL-authoritative.
+    public void testNativeSubtypeOnlyDeclarationStaysSqlFresh() {
+        // Automatic admission seeds one cache payload per masked slot node, so a cache
+        // declared only on a derived type cannot seed a base-rooted slot. The query stays
+        // SQL-authoritative instead of silently hydrating part of the projection.
         MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
         JSqlClient client = createClient(
                 type -> type.getJavaClass() == Organization.class ? organizationCache : null,
-                ImmutableType.get(Organization.class), null, null, Arrays.asList("taxCode"));
+                ImmutableType.get(Organization.class), null, null);
         organizationCache.put(100L, OrganizationDraft.$.produce(draft -> {
             draft.setId(100L);
             draft.setName("CACHED-NAME");
@@ -430,10 +430,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertEquals(2, rows.size());
         ClientImplicitCatchAllView.Organization organization =
                 assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
-        assertEquals("CACHED-TAX", organization.getTaxCode());
+        assertEquals("ACME-001", organization.getTaxCode());
         assertEquals("Acme", organization.getName());
         assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
-        assertCacheTouched(organizationCache, 100L);
+        assertTrue(organizationCache.getAllKeys.isEmpty(), organizationCache.getAllKeys::toString);
     }
 
     @Test
@@ -2511,7 +2511,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             // The unsupported projection is declined before any cache access.
             assertTrue(bookCache.getAllKeys.isEmpty());
             JSqlClient configured = createClient(type -> type.getJavaClass() == Book.class ? bookCache : null,
-                    ImmutableType.get(Book.class), null, null, Collections.singletonList("name"));
+                    ImmutableType.get(Book.class), null, null);
             jdbc(con -> assertEquals("FRESH-NAME", configured.createQuery(table)
                     .where(table.id().eq(learningGraphQLId1))
                     .select(table.fetch(forward))
@@ -4189,13 +4189,13 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testConfiguredContentFieldsUseDtoProjectionAndKeepScalarSlotsFresh() {
+    public void testHintedDtoProjectionKeepsScalarSlotsFresh() {
         ImmutableType type = ImmutableType.get(BookStore.class);
         MapCache<BookStore> cache = new MapCache<>(type);
         MapCache<Author> authorCache = new MapCache<>(ImmutableType.get(Author.class));
         JSqlClient client = createClient(it -> it == type ? cache :
                         it.getJavaClass() == Author.class ? authorCache : null,
-                type, null, null, Arrays.asList("name", "website"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4275,15 +4275,19 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testConfiguredContentFieldsUsePolymorphicDtoBranches() {
+    public void testHintedPolymorphicDtoBranches() {
         ImmutableType type = ImmutableType.get(Client.class);
         MapCache<Client> cache = new MapCache<>(type);
         JSqlClient client = createClient(it -> it == type ? cache : null,
-                type, null, null, Collections.singletonList("taxCode"));
+                type, null, null);
         cache.put(100L, OrganizationDraft.$.produce(draft -> {
             draft.setId(100L);
             draft.setName("CACHED-NAME");
             draft.setTaxCode("CACHED-TAX");
+        }));
+        cache.put(101L, PersonDraft.$.produce(draft -> {
+            draft.setId(101L);
+            draft.setName("Bob");
         }));
         ClientTable table = ClientTable.$;
         List<ClientImplicitCatchAllView> rows = new ArrayList<>();
@@ -4296,15 +4300,16 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 .execute(con)));
         ClientImplicitCatchAllView.Organization organization =
                 assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
-        assertEquals("Acme", organization.getName());
+        assertEquals("CACHED-NAME", organization.getName());
         assertEquals("CACHED-TAX", organization.getTaxCode());
         assertEquals("Bob", assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1)).getName());
         assertCacheTouched(cache, 100L);
-        assertFalse(cache.getAllKeys.stream().anyMatch(keys -> keys.contains(101L)));
+        // The derived mask approves the projected `name` leaf for every branch, so the
+        // Default client is a legitimate seed too.
+        assertTrue(cache.getAllKeys.stream().anyMatch(keys -> keys.contains(101L)));
         assertEquals(1, getExecutions().size());
         assertFalse(getExecutions().get(0).getSql().contains(".TAX_CODE"));
-        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
-        assertNotNull(client.getCaches().getObjectCacheContentFetcher(ImmutableType.get(Organization.class)));
+        assertFalse(getExecutions().get(0).getSql().contains(".NAME"));
 
         cache.clearHistory();
         jdbc(con -> assertEquals("Acme", client.createQuery(table)
@@ -4316,34 +4321,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testConfiguredContentFieldsRejectUnknownOrProtectedProperties() {
-        ImmutableType type = ImmutableType.get(BookStore.class);
-        for (String name : Arrays.asList("missing", "id", "version", "books", "avgPrice")) {
-            assertThrows(IllegalArgumentException.class, () -> createClient(
-                    it -> it == type ? new MapCache<>(type) : null,
-                    type, null, null, Collections.singletonList(name)), name);
-        }
-        assertThrows(IllegalArgumentException.class, () -> getSqlClient(builder ->
-                builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
-                    @Override
-                    public Collection<String> getObjectCacheContentFields(ImmutableType cacheType) {
-                        return Collections.singletonList("name");
-                    }
-
-                    @Override
-                    public Cache<?, ?> createObjectCache(ImmutableType cacheType) {
-                        return cacheType == type ? new MapCache<>(type) : null;
-                    }
-                }))));
-    }
-
-    @Test
-    public void testNativeAdmissionServesConfiguredContentFieldsWithoutHint() {
+    public void testNativeAdmissionServesProjectedContentWithoutHint() {
         ImmutableType type = ImmutableType.get(BookStore.class);
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name", "website"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4584,7 +4567,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4621,7 +4604,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4696,27 +4679,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ImmutableProp cachedProp,
             Cache<?, ?> propCache
     ) {
-        return createClient(objectCacheFactory, contentOnlyType, cachedProp, propCache, Collections.emptyList());
-    }
-
-    private JSqlClient createClient(
-            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
-            ImmutableType contentOnlyType,
-            ImmutableProp cachedProp,
-            Cache<?, ?> propCache,
-            Collection<String> contentFields
-    ) {
         return getSqlClient(builder -> {
             builder.setConnectionManager(NON_TX_MANAGER);
             builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
                 @Override
                 public boolean isObjectCacheContentOnly(ImmutableType type) {
                     return type == contentOnlyType;
-                }
-
-                @Override
-                public Collection<String> getObjectCacheContentFields(ImmutableType type) {
-                    return type == contentOnlyType ? contentFields : Collections.emptyList();
                 }
 
                 @Override

@@ -80,7 +80,6 @@ class QuarkusConnectionManagerTransactionKnownInactiveTest {
                     "quarkus.jimmer.cache.entities[0].type", "BookStore",
                     "quarkus.jimmer.cache.entities[0].mode", "FULL",
                     "quarkus.jimmer.cache.entities[0].content-only", "true",
-                    "quarkus.jimmer.cache.entities[0].content-fields", "name",
                     "quarkus.jimmer.cache.entities[1].type", "Book",
                     "quarkus.jimmer.cache.entities[1].mode", "FULL");
         }

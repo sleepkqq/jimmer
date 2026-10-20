@@ -29,13 +29,12 @@ class LocalOnlyCacheFactoryTest {
     @Test
     void buildsCaffeineOnlyCacheForConfiguredEntity() {
         JimmerLocalCacheFactory factory = new JimmerLocalCacheFactory(
-                config(entity("Book", CacheMode.LOCAL_ONLY, true, "name")));
+                config(entity("Book", CacheMode.LOCAL_ONLY, true)));
 
         Cache<?, ?> cache = factory.createObjectCache(ImmutableType.get(Book.class));
 
         assertNotNull(cache);
         assertTrue(factory.isObjectCacheContentOnly(ImmutableType.get(Book.class)));
-        assertEquals(List.of("name"), factory.getObjectCacheContentFields(ImmutableType.get(Book.class)));
     }
 
     @Test

@@ -411,10 +411,13 @@ tracking and in-flight invalidation fences remain in the built-in factories.
 The extension has no Kafka dependency; applications or libraries own the provider.
 The guard is disabled by default.
 
-An entity can set `content-only: true` to retain its cache for explicit object-cache
-content masks while keeping ordinary entity/DTO lookups and association loading
-SQL-backed. A configured base type's policy also covers derived entity types and their
-declared fields. This is opt-in and does not change the legacy behavior of other entities.
+An entity can set `content-only: true` to retain its cache for automatic content
+admission while keeping ordinary entity/DTO lookups and association loading
+SQL-backed. There is no per-field cache configuration: admitted content is derived
+from each executed projection, so a newly projected property needs no YAML change,
+and unapproved facts (associations, formulas, version and other protected metadata)
+stay SQL-authoritative. A configured base type's policy also covers derived entity
+types. This is opt-in and does not change the legacy behavior of other entities.
 Custom application `CacheFactory` beans must implement the core content-only policy themselves.
 
 For programmatically constructed factories, use `new GuardedCacheFactory(factory, state::ready)` or
