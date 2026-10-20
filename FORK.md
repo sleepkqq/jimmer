@@ -281,9 +281,15 @@ than by splitting one projection into cached display fields and SQL-fresh ones. 
 read after an invalidation reloads the complete current row, so freshness of a foreign
 display field is bounded by the invalidation propagation interval, not by a per-field
 policy; a deliberately restored old snapshot in a test does not establish a
-selective-freshness requirement. Own, editable and command reads never use this
-admission and stay SQL-fresh, as do version, authorization, membership, ordering,
-pagination and transaction guards.
+selective-freshness requirement.
+
+Admission follows projection metadata and execution guards, not application intent. A
+converted DTO/View projection is admitted, and can therefore return cached content,
+whether the caller treats it as a display or an edit form. Only command-purpose
+executions, locking reads, an explicit `useObjectCache(false)` and bare entity
+projections stay on the SQL path, together with version, authorization, membership,
+ordering, pagination and transaction guards. A read that must observe the current row
+uses a bare entity projection or an explicit `useObjectCache(false)`.
 
 ### Missing targets in ordinary association caches in 1.1.9
 
