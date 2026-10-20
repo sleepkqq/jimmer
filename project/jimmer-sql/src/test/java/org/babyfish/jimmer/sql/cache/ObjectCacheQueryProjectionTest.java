@@ -4275,6 +4275,92 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testBareContentOnlyHintDeclinesIntoCacheDisabledGraph() {
+        // A bare hint on a content-only root whose projection has no converted slot cannot
+        // be honored. The complete projection must then run with every cache disabled, so a
+        // warmed association target is never served from its object cache.
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        ImmutableType authorType = ImmutableType.get(Author.class);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        MapCache<Author> authorCache = new MapCache<>(authorType);
+        JSqlClient client = createClient(
+                it -> it == storeType ? storeCache : it == authorType ? authorCache : null,
+                storeType, null, null
+        );
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+        }));
+        authorCache.put(alexId, AuthorDraft.$.produce(draft -> {
+            draft.setId(alexId);
+            draft.setFirstName("CACHED-AUTHOR");
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.books(
+                                BookFetcher.$.authors(AuthorFetcher.$.firstName())
+                        )))
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertEquals(1, rows.size());
+        List<String> names = rows.get(0).books().stream()
+                .flatMap(book -> book.authors().stream())
+                .map(Author::firstName)
+                .collect(Collectors.toList());
+        assertTrue(names.contains("Alex"), names::toString);
+        assertFalse(names.contains("CACHED-AUTHOR"), names::toString);
+        // The declined hint never falls back to SELECT-loaded associations on the ordinary
+        // client, so neither cache is consulted.
+        assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
+        assertTrue(storeCache.getAllKeys.isEmpty(), storeCache.getAllKeys::toString);
+    }
+
+    @Test
+    public void testBooleanHintKeepsLegacyEntityHydrationBesideDtoSlot() {
+        // A bare useObjectCache() hint must keep the legacy plan for ordinary caches: a
+        // converted DTO sibling must not switch the query to the content path and leave a
+        // selectively cached entity slot SQL-fresh.
+        ImmutableType bookType = ImmutableType.get(Book.class);
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        MapCache<Book> bookCache = new MapCache<>(bookType);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        JSqlClient client = createClient(
+                it -> it == bookType ? bookCache : it == storeType ? storeCache : null
+        );
+        bookCache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+        }));
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+        }));
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<Tuple2<Book, ReusableBookStoreView>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(learningGraphQLId1))
+                        .select(
+                                table.fetch(BookFetcher.$.name()),
+                                table.store().fetch(ReusableBookStoreView.class)
+                        )
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED-BOOK", rows.get(0).get_1().name());
+        assertEquals("CACHED-STORE", rows.get(0).get_2().getName());
+        assertCacheTouched(bookCache, learningGraphQLId1);
+        assertCacheTouched(storeCache, oreillyId);
+    }
+
+    @Test
     public void testHintedPolymorphicDtoBranches() {
         ImmutableType type = ImmutableType.get(Client.class);
         MapCache<Client> cache = new MapCache<>(type);

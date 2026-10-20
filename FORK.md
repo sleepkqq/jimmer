@@ -263,6 +263,13 @@ fallback on any missing, negative or incompatible value, and SQL authority over
 membership, join topology, order, duplicates, pagination, global filters and
 visibility. Explicit Fetcher masks and `useObjectCache(false)` keep their meaning.
 
+A bare `useObjectCache()` keeps its legacy execution for ordinary caches: only a
+`content-only` declaration opts that projection into derived admission, so adding a DTO
+sibling never stops an ordinary entity slot from using its existing cache. When a bare
+hint cannot be honored, the complete original projection runs on the isolated
+cache-disabled graph rather than falling back to SELECT-loaded associations on the
+ordinary client, so a declined hint cannot expose an unrelated association cache.
+
 Migration: delete `content-fields` from every cache declaration; no service mask,
 hint or fetch-plan change is required, because the projection now supplies the mask.
 

@@ -9,6 +9,7 @@ import org.babyfish.jimmer.sql.ast.impl.Ast;
 import org.babyfish.jimmer.sql.ast.impl.AstContext;
 import org.babyfish.jimmer.sql.ast.impl.AstVisitor;
 import org.babyfish.jimmer.sql.ast.impl.table.TableImplementor;
+import org.babyfish.jimmer.sql.ast.impl.table.TableProxies;
 import org.babyfish.jimmer.sql.ast.query.*;
 import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.spi.TableLike;
@@ -368,6 +369,32 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         return data.cachedContent;
     }
 
+    /**
+     * Whether this query carries an object-cache content hint: an explicit fetcher mask, or
+     * a bare hint on a content-only root. A declined content hint must not fall back to
+     * ordinary SELECT-loaded associations, because an unrelated association cache could
+     * serve stale membership or content; those plans use the isolated cache-disabled graph.
+     */
+    boolean hasContentCacheHint() {
+        TypedQueryData data = getData();
+        if (data.cachedContent != null) {
+            return true;
+        }
+        if (!data.useObjectCache) {
+            return false;
+        }
+        MutableRootQueryImpl<T> mutableQuery = getMutableQuery();
+        AstContext astContext = new AstContext(mutableQuery.getSqlClient());
+        astContext.pushStatement(mutableQuery);
+        try {
+            return mutableQuery.getSqlClient().getCaches().isObjectCacheContentOnly(
+                    TableProxies.resolve(mutableQuery.getTable(), astContext).getImmutableType()
+            );
+        } finally {
+            astContext.popStatement();
+        }
+    }
+
     private static ImmutableType resolveDeclaredCacheType(Caches caches, ImmutableType type) {
         if (caches.getObjectCache(type) != null) {
             return type;
@@ -419,17 +446,22 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         if (fetcher == null) {
             return null;
         }
-        Fetcher<?> explicit = getCachedContent();
-        if (explicit != null) {
-            return explicit;
-        }
         Caches caches = getMutableQuery().getSqlClient().getCaches();
+        if (data.useObjectCache) {
+            Fetcher<?> explicitMask = getCachedContent();
+            if (explicitMask != null) {
+                return explicitMask;
+            }
+            // A bare hint keeps its legacy execution for ordinary caches; only a
+            // content-only declaration opts that projection into derived admission.
+            if (!caches.isObjectCacheContentOnly(fetcher.getImmutableType())) {
+                return null;
+            }
+        }
         ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
         if (declared == null) {
             return null;
         }
-        // A boolean/no-argument hint carries no configured field list; it now means the
-        // same automatic admission as an unhinted converted slot, so fall through.
         if (fetcherSelection.getConverter() == null && fetcherSelection.getDtoMetadata() == null) {
             return null;
         }
@@ -571,6 +603,11 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 if (rows != null) {
                     return rows;
                 }
+            }
+            if (hasContentCacheHint()) {
+                // The bare hint carried a content-only intent that no eligible projection
+                // could honor; the complete original projection runs without any cache.
+                return executeBypassed(con, data, sqlClient);
             }
         }
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
@@ -718,7 +755,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         }
         // A content-mask query never streams the cached hint; it stays a fresh,
         // whole-graph read on a cache-disabled derived client.
-        JSqlClientImplementor sqlClient = getCachedContent() != null ?
+        JSqlClientImplementor sqlClient = hasContentCacheHint() ?
                 getMutableQuery().getSqlClient().caches(CacheDisableConfig::disableAll) :
                 getMutableQuery().getSqlClient();
         Tuple3<String, List<Object>, List<Integer>> sqlResult = preExecute(sqlClient);
@@ -771,7 +808,7 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         // A content-mask query never uses the cached hint for forEach; it stays a
         // fresh, whole-graph read on a cache-disabled derived client. The legacy
         // hint without a configured policy keeps its ordinary client and batching.
-        boolean masked = getCachedContent() != null;
+        boolean masked = hasContentCacheHint();
         JSqlClientImplementor sqlClient = masked ?
                 getMutableQuery().getSqlClient().caches(CacheDisableConfig::disableAll) :
                 getMutableQuery().getSqlClient();
