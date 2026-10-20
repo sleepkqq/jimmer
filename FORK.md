@@ -245,7 +245,7 @@ complete-snapshot-or-fresh behavior and are not re-admitted by this policy. No
 query-result caching is introduced and no association edge or authorization fact is
 served from the cache.
 
-### Projection-derived content admission, no field lists (unreleased)
+### Projection-derived content admission, no field lists in 1.1.12
 
 `content-fields` is removed from the fork. A per-field cache list duplicated the
 projection in configuration: a property added to an entity or DTO later would be
@@ -274,9 +274,10 @@ hint cannot be honored, the complete original projection runs on the isolated
 cache-disabled graph rather than falling back to SELECT-loaded associations on the
 ordinary client, so a declined hint cannot expose an unrelated association cache.
 
-Migration (only when moving to a release that includes this change -- `1.1.11` and
+Migration (only when moving to a release that includes this change: `1.1.11` and
 earlier still require `content-fields`, and a `content-only` declaration without that
-list admits nothing there): delete `content-fields` from every cache declaration; no
+list admits nothing there; `1.1.12` and later have no such key): delete `content-fields`
+from every cache declaration; no
 service mask, hint or fetch-plan change is required, because the projection now supplies
 the mask.
 
@@ -351,10 +352,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.11`, replace
+For version `1.1.12`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.11`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.11`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.12`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.12`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
