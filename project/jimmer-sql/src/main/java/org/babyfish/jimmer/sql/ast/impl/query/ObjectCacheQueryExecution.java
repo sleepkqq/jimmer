@@ -394,9 +394,10 @@ final class ObjectCacheQueryExecution {
             return null;
         }
 
-        // The whole-projection mask is only used by an explicit hint. Automatic admission
-        // resolves a per-slot mask instead, so a bare entity slot stays fresh.
-        CacheContentMask rootMask = data.useObjectCache ? CacheContentMask.of(cachedContent) : null;
+        // The whole-projection mask is only used by an explicit fetcher hint. Automatic
+        // admission resolves a per-slot mask instead, and a boolean hint resolves nothing
+        // of its own, so a bare entity slot stays fresh either way.
+        CacheContentMask rootMask = data.cachedContent != null ? CacheContentMask.of(cachedContent) : null;
 
         // The retained graph must not read any object cache: a locally derived,
         // cache-disabled client keeps every loader query fresh and consistent with the
@@ -454,12 +455,6 @@ final class ObjectCacheQueryExecution {
                         continue;
                     }
                     maskMatched = true;
-                    boolean configuredSlot = rootMask != null ?
-                            configuredContent : query.isConfiguredContentForSlot(fetcherSelection);
-                    if (configuredSlot && fetcher != null) {
-                        // Configured fields approve content; they do not demand a wider DTO projection.
-                        node = node.selectedBy(fetcher, sqlClient);
-                    }
                     Fetcher<?> retained = fetcher != null && node != null ?
                             CacheContentMask.retainedFetcher(fetcher, node, sqlClient) : null;
                     if (retained != null &&

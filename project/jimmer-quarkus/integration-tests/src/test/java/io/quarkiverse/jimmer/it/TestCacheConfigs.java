@@ -2,7 +2,6 @@ package io.quarkiverse.jimmer.it;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 
 import io.quarkiverse.jimmer.runtime.cache.CacheMode;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
@@ -38,7 +37,7 @@ final class TestCacheConfigs {
         return entity(type, mode, false);
     }
 
-    static JimmerCacheConfig.EntityCacheConfig entity(String type, CacheMode mode, boolean contentOnly, String... fields) {
+    static JimmerCacheConfig.EntityCacheConfig entity(String type, CacheMode mode, boolean contentOnly) {
         return new JimmerCacheConfig.EntityCacheConfig() {
             @Override
             public String type() {
@@ -73,11 +72,6 @@ final class TestCacheConfigs {
             @Override
             public boolean contentOnly() {
                 return contentOnly;
-            }
-
-            @Override
-            public Optional<List<String>> contentFields() {
-                return fields.length == 0 ? Optional.empty() : Optional.of(List.of(fields));
             }
 
             @Override

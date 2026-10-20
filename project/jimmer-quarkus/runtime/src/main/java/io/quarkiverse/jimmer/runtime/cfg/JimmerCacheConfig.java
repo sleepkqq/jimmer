@@ -91,13 +91,12 @@ public interface JimmerCacheConfig {
         boolean cacheAssociations();
 
         /**
-         * Keep this entity cache for explicit content-only query hints; ordinary entity reads remain SQL-backed.
+         * Keep this entity's object cache for automatic content query admission; ordinary entity
+         * reads remain SQL-backed. Admitted content is derived from each projection, so newly
+         * projected stored properties are included without any per-field configuration.
          */
         @WithDefault("false")
         boolean contentOnly();
-
-        /** Stored scalar properties allowed by no-argument query hints; requires {@code content-only}. */
-        Optional<List<String>> contentFields();
 
         /**
          * Random jitter percent added to the remote TTL to avoid a synchronized mass expiry (cache stampede).

@@ -256,7 +256,7 @@ public class MergedTypedRootQueryImpl<R> implements TypedRootQueryImplementor<R>
                     return true;
                 }
             } else if (query instanceof ConfigurableRootQueryImpl<?, ?> &&
-                    ((ConfigurableRootQueryImpl<?, ?>) query).getCachedContent() != null) {
+                    ((ConfigurableRootQueryImpl<?, ?>) query).hasContentCacheHint()) {
                 return true;
             }
         }

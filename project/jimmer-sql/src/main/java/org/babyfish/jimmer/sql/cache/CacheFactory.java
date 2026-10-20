@@ -5,8 +5,6 @@ import org.babyfish.jimmer.meta.ImmutableType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 public interface CacheFactory {
@@ -17,11 +15,6 @@ public interface CacheFactory {
      */
     default boolean isObjectCacheContentOnly(ImmutableType type) {
         return false;
-    }
-
-    /** Stored scalar properties approved for content-only query hints, including derived types. */
-    default Collection<String> getObjectCacheContentFields(ImmutableType type) {
-        return Collections.emptyList();
     }
 
     /**

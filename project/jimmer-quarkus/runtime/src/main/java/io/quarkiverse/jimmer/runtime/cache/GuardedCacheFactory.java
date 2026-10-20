@@ -38,11 +38,6 @@ public class GuardedCacheFactory implements FilterStateAwareCacheFactory {
     }
 
     @Override
-    public Collection<String> getObjectCacheContentFields(ImmutableType type) {
-        return delegate.getObjectCacheContentFields(type);
-    }
-
-    @Override
     public Cache<?, ?> createAssociatedIdCache(ImmutableProp prop) {
         return GuardedCache.wrap(delegate.createAssociatedIdCache(prop), ready);
     }

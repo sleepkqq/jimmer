@@ -6,6 +6,8 @@ import org.babyfish.jimmer.runtime.ImmutableSpi;
 import org.babyfish.jimmer.sql.JoinType;
 import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.ast.Expression;
+import org.babyfish.jimmer.sql.ast.table.BaseTable;
+import org.babyfish.jimmer.sql.model.BookProps;
 import org.babyfish.jimmer.sql.ast.impl.EntitiesImpl;
 import org.babyfish.jimmer.sql.ast.impl.query.FilterLevel;
 import org.babyfish.jimmer.sql.ast.impl.query.Queries;
@@ -386,7 +388,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -407,14 +409,14 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testNativePolymorphicAdmissionServesConfiguredContentWithoutHint() {
-        // A content-only declaration on a SINGLE_TABLE subtype must be admitted by an
-        // unhinted base-type root query: only the configured leaf is served from cache,
-        // while the discriminator, membership and every other leaf stay SQL-authoritative.
+    public void testNativeSubtypeOnlyDeclarationStaysSqlFresh() {
+        // Automatic admission seeds one cache payload per masked slot node, so a cache
+        // declared only on a derived type cannot seed a base-rooted slot. The query stays
+        // SQL-authoritative instead of silently hydrating part of the projection.
         MapCache<Organization> organizationCache = new MapCache<>(ImmutableType.get(Organization.class));
         JSqlClient client = createClient(
                 type -> type.getJavaClass() == Organization.class ? organizationCache : null,
-                ImmutableType.get(Organization.class), null, null, Arrays.asList("taxCode"));
+                ImmutableType.get(Organization.class), null, null);
         organizationCache.put(100L, OrganizationDraft.$.produce(draft -> {
             draft.setId(100L);
             draft.setName("CACHED-NAME");
@@ -430,10 +432,10 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertEquals(2, rows.size());
         ClientImplicitCatchAllView.Organization organization =
                 assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
-        assertEquals("CACHED-TAX", organization.getTaxCode());
+        assertEquals("ACME-001", organization.getTaxCode());
         assertEquals("Acme", organization.getName());
         assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1));
-        assertCacheTouched(organizationCache, 100L);
+        assertTrue(organizationCache.getAllKeys.isEmpty(), organizationCache.getAllKeys::toString);
     }
 
     @Test
@@ -2511,7 +2513,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             // The unsupported projection is declined before any cache access.
             assertTrue(bookCache.getAllKeys.isEmpty());
             JSqlClient configured = createClient(type -> type.getJavaClass() == Book.class ? bookCache : null,
-                    ImmutableType.get(Book.class), null, null, Collections.singletonList("name"));
+                    ImmutableType.get(Book.class), null, null);
             jdbc(con -> assertEquals("FRESH-NAME", configured.createQuery(table)
                     .where(table.id().eq(learningGraphQLId1))
                     .select(table.fetch(forward))
@@ -4189,13 +4191,13 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testConfiguredContentFieldsUseDtoProjectionAndKeepScalarSlotsFresh() {
+    public void testHintedDtoProjectionKeepsScalarSlotsFresh() {
         ImmutableType type = ImmutableType.get(BookStore.class);
         MapCache<BookStore> cache = new MapCache<>(type);
         MapCache<Author> authorCache = new MapCache<>(ImmutableType.get(Author.class));
         JSqlClient client = createClient(it -> it == type ? cache :
                         it.getJavaClass() == Author.class ? authorCache : null,
-                type, null, null, Arrays.asList("name", "website"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4275,15 +4277,202 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testConfiguredContentFieldsUsePolymorphicDtoBranches() {
+    public void testBareContentOnlyHintDeclinesIntoCacheDisabledGraph() {
+        // A bare hint on a content-only root whose projection has no converted slot cannot
+        // be honored. The complete projection must then run with every cache disabled, so a
+        // warmed association target is never served from its object cache.
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        ImmutableType authorType = ImmutableType.get(Author.class);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        MapCache<Author> authorCache = new MapCache<>(authorType);
+        JSqlClient client = createClient(
+                it -> it == storeType ? storeCache : it == authorType ? authorCache : null,
+                storeType, null, null
+        );
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+        }));
+        authorCache.put(alexId, AuthorDraft.$.produce(draft -> {
+            draft.setId(alexId);
+            draft.setFirstName("CACHED-AUTHOR");
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<BookStore> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(oreillyId))
+                        .select(table.fetch(BookStoreFetcher.$.books(
+                                BookFetcher.$.authors(AuthorFetcher.$.firstName())
+                        )))
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertEquals(1, rows.size());
+        List<String> names = rows.get(0).books().stream()
+                .flatMap(book -> book.authors().stream())
+                .map(Author::firstName)
+                .collect(Collectors.toList());
+        assertTrue(names.contains("Alex"), names::toString);
+        assertFalse(names.contains("CACHED-AUTHOR"), names::toString);
+        // The declined hint never falls back to SELECT-loaded associations on the ordinary
+        // client, so neither cache is consulted.
+        assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
+        assertTrue(storeCache.getAllKeys.isEmpty(), storeCache.getAllKeys::toString);
+    }
+
+    @Test
+    public void testContentOnlyHintDeclinesIntoCacheDisabledGraphForLockingAndNonQueryPurpose() {
+        // A locking read must decline exactly like an ordinary one: the selected inverse
+        // slot owns Book.authors itself, so this exercises the ordinary association loader
+        // rather than the content-only owner's already-isolated subtree. A warmed membership
+        // mapping and a stale target body are never consulted for a content-only hint whose
+        // projection has no eligible slot.
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        ImmutableType authorType = ImmutableType.get(Author.class);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        MapCache<Author> authorCache = new MapCache<>(authorType);
+        MapCache<List<?>> authorIds = MapCache.forProp(BookProps.AUTHORS.unwrap());
+        JSqlClient client = createClientWithIdListCache(
+                it -> it == storeType ? storeCache : it == authorType ? authorCache : null,
+                storeType, BookProps.AUTHORS.unwrap(), authorIds
+        );
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+        }));
+        authorCache.put(alexId, AuthorDraft.$.produce(draft -> {
+            draft.setId(alexId);
+            draft.setFirstName("CACHED-AUTHOR");
+        }));
+        // A stale membership mapping that would hide Alex if any loader read it.
+        authorIds.put(learningGraphQLId1, Collections.emptyList());
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<Book> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.asTableEx().books().id().eq(learningGraphQLId1))
+                        .select(table.asTableEx().books().fetch(
+                                BookFetcher.$.authors(AuthorFetcher.$.firstName())
+                        ))
+                        .useObjectCache()
+                        .forUpdate()
+                        .execute(con)
+        ));
+        assertEquals(1, rows.size());
+        List<String> names = rows.get(0).authors().stream()
+                .map(Author::firstName)
+                .collect(Collectors.toList());
+        assertTrue(names.contains("Alex"), names::toString);
+        assertFalse(names.contains("CACHED-AUTHOR"), names::toString);
+        assertTrue(authorIds.getAllKeys.isEmpty(), authorIds.getAllKeys::toString);
+        assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
+
+        // The decline is purpose-independent: a non-QUERY execution of the same projection
+        // must not consult the warmed association caches either.
+        clearExecutions();
+        List<Book> mutated = new ArrayList<>();
+        jdbc(con -> mutated.addAll(
+                Queries.createQuery(
+                        (JSqlClientImplementor) client,
+                        ImmutableType.get(BookStore.class),
+                        ExecutionPurpose.MUTATE,
+                        FilterLevel.DEFAULT,
+                        (q, t) -> {
+                            BookStoreTable store = (BookStoreTable) t;
+                            return q.where(store.asTableEx().books().id().eq(learningGraphQLId1))
+                                    .select(store.asTableEx().books().fetch(
+                                            BookFetcher.$.authors(AuthorFetcher.$.firstName())
+                                    ))
+                                    .useObjectCache();
+                        }
+                ).execute(con)
+        ));
+        assertEquals(1, mutated.size());
+        List<String> mutatedNames = mutated.get(0).authors().stream()
+                .map(Author::firstName)
+                .collect(Collectors.toList());
+        assertTrue(mutatedNames.contains("Alex"), mutatedNames::toString);
+        assertFalse(mutatedNames.contains("CACHED-AUTHOR"), mutatedNames::toString);
+        assertTrue(authorIds.getAllKeys.isEmpty(), authorIds.getAllKeys::toString);
+        assertTrue(authorCache.getAllKeys.isEmpty(), authorCache.getAllKeys::toString);
+    }
+
+    @Test
+    public void testHintedBaseTableRootDeclinesWithoutCasting() {
+        // A derived/base-table root has no entity type to resolve; the hint must decline
+        // gracefully instead of casting the base table to Table.
+        BookTable table = BookTable.$;
+        BaseTable baseTable = sqlClient
+                .createBaseQuery(table)
+                .addSelect(table.name())
+                .asBaseTable();
+        List<Long> counts = new ArrayList<>();
+        jdbc(con -> counts.addAll(
+                sqlClient.createQuery(baseTable)
+                        .select(Expression.rowCount())
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertFalse(counts.isEmpty());
+    }
+
+    @Test
+    public void testBooleanHintKeepsLegacyEntityHydrationBesideDtoSlot() {
+        // A bare useObjectCache() hint must keep the legacy plan for ordinary caches: a
+        // converted DTO sibling must not switch the query to the content path and leave a
+        // selectively cached entity slot SQL-fresh.
+        ImmutableType bookType = ImmutableType.get(Book.class);
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        MapCache<Book> bookCache = new MapCache<>(bookType);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        JSqlClient client = createClient(
+                it -> it == bookType ? bookCache : it == storeType ? storeCache : null
+        );
+        bookCache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+        }));
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+        }));
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<Tuple2<Book, ReusableBookStoreView>> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(
+                client.createQuery(table)
+                        .where(table.id().eq(learningGraphQLId1))
+                        .select(
+                                table.fetch(BookFetcher.$.name()),
+                                table.store().fetch(ReusableBookStoreView.class)
+                        )
+                        .useObjectCache()
+                        .execute(con)
+        ));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED-BOOK", rows.get(0).get_1().name());
+        assertEquals("CACHED-STORE", rows.get(0).get_2().getName());
+        assertCacheTouched(bookCache, learningGraphQLId1);
+        assertCacheTouched(storeCache, oreillyId);
+    }
+
+    @Test
+    public void testHintedPolymorphicDtoBranches() {
         ImmutableType type = ImmutableType.get(Client.class);
         MapCache<Client> cache = new MapCache<>(type);
         JSqlClient client = createClient(it -> it == type ? cache : null,
-                type, null, null, Collections.singletonList("taxCode"));
+                type, null, null);
         cache.put(100L, OrganizationDraft.$.produce(draft -> {
             draft.setId(100L);
             draft.setName("CACHED-NAME");
             draft.setTaxCode("CACHED-TAX");
+        }));
+        cache.put(101L, PersonDraft.$.produce(draft -> {
+            draft.setId(101L);
+            draft.setName("Bob");
         }));
         ClientTable table = ClientTable.$;
         List<ClientImplicitCatchAllView> rows = new ArrayList<>();
@@ -4296,15 +4485,16 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 .execute(con)));
         ClientImplicitCatchAllView.Organization organization =
                 assertInstanceOf(ClientImplicitCatchAllView.Organization.class, rows.get(0));
-        assertEquals("Acme", organization.getName());
+        assertEquals("CACHED-NAME", organization.getName());
         assertEquals("CACHED-TAX", organization.getTaxCode());
         assertEquals("Bob", assertInstanceOf(ClientImplicitCatchAllView.Default.class, rows.get(1)).getName());
         assertCacheTouched(cache, 100L);
-        assertFalse(cache.getAllKeys.stream().anyMatch(keys -> keys.contains(101L)));
+        // The derived mask approves the projected `name` leaf for every branch, so the
+        // Default client is a legitimate seed too.
+        assertTrue(cache.getAllKeys.stream().anyMatch(keys -> keys.contains(101L)));
         assertEquals(1, getExecutions().size());
         assertFalse(getExecutions().get(0).getSql().contains(".TAX_CODE"));
-        assertTrue(getExecutions().get(0).getSql().contains(".NAME"));
-        assertNotNull(client.getCaches().getObjectCacheContentFetcher(ImmutableType.get(Organization.class)));
+        assertFalse(getExecutions().get(0).getSql().contains(".NAME"));
 
         cache.clearHistory();
         jdbc(con -> assertEquals("Acme", client.createQuery(table)
@@ -4316,34 +4506,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testConfiguredContentFieldsRejectUnknownOrProtectedProperties() {
-        ImmutableType type = ImmutableType.get(BookStore.class);
-        for (String name : Arrays.asList("missing", "id", "version", "books", "avgPrice")) {
-            assertThrows(IllegalArgumentException.class, () -> createClient(
-                    it -> it == type ? new MapCache<>(type) : null,
-                    type, null, null, Collections.singletonList(name)), name);
-        }
-        assertThrows(IllegalArgumentException.class, () -> getSqlClient(builder ->
-                builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
-                    @Override
-                    public Collection<String> getObjectCacheContentFields(ImmutableType cacheType) {
-                        return Collections.singletonList("name");
-                    }
-
-                    @Override
-                    public Cache<?, ?> createObjectCache(ImmutableType cacheType) {
-                        return cacheType == type ? new MapCache<>(type) : null;
-                    }
-                }))));
-    }
-
-    @Test
-    public void testNativeAdmissionServesConfiguredContentFieldsWithoutHint() {
+    public void testNativeAdmissionServesProjectedContentWithoutHint() {
         ImmutableType type = ImmutableType.get(BookStore.class);
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name", "website"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4584,7 +4752,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4621,7 +4789,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         MapCache<BookStore> cache = new MapCache<>(type);
         JSqlClient client = createClient(
                 it -> it == type ? cache : null,
-                type, null, null, Arrays.asList("name"));
+                type, null, null);
         cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
             draft.setId(oreillyId);
             draft.setName("CACHED");
@@ -4696,27 +4864,12 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ImmutableProp cachedProp,
             Cache<?, ?> propCache
     ) {
-        return createClient(objectCacheFactory, contentOnlyType, cachedProp, propCache, Collections.emptyList());
-    }
-
-    private JSqlClient createClient(
-            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
-            ImmutableType contentOnlyType,
-            ImmutableProp cachedProp,
-            Cache<?, ?> propCache,
-            Collection<String> contentFields
-    ) {
         return getSqlClient(builder -> {
             builder.setConnectionManager(NON_TX_MANAGER);
             builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
                 @Override
                 public boolean isObjectCacheContentOnly(ImmutableType type) {
                     return type == contentOnlyType;
-                }
-
-                @Override
-                public Collection<String> getObjectCacheContentFields(ImmutableType type) {
-                    return type == contentOnlyType ? contentFields : Collections.emptyList();
                 }
 
                 @Override
@@ -4732,9 +4885,38 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         });
     }
 
+    private JSqlClient createClientWithIdListCache(
+            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
+            ImmutableType contentOnlyType,
+            ImmutableProp listProp,
+            Cache<?, List<?>> listCache
+    ) {
+        return getSqlClient(builder -> {
+            builder.setConnectionManager(NON_TX_MANAGER);
+            builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
+                @Override
+                public boolean isObjectCacheContentOnly(ImmutableType type) {
+                    return type == contentOnlyType;
+                }
+
+                @Override
+                public Cache<?, ?> createObjectCache(ImmutableType type) {
+                    return objectCacheFactory.apply(type);
+                }
+
+                @Override
+                public Cache<?, List<?>> createAssociatedIdListCache(ImmutableProp prop) {
+                    return prop == listProp ? listCache : null;
+                }
+            }));
+        });
+    }
+
     private static class MapCache<T> implements Cache<Object, T> {
 
         private final ImmutableType type;
+
+        private final ImmutableProp prop;
 
         private final Map<Object, T> map = new LinkedHashMap<>();
 
@@ -4742,6 +4924,16 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
 
         private MapCache(ImmutableType type) {
             this.type = type;
+            this.prop = null;
+        }
+
+        private MapCache(ImmutableType type, ImmutableProp prop) {
+            this.type = type;
+            this.prop = prop;
+        }
+
+        static <T> MapCache<T> forProp(ImmutableProp prop) {
+            return new MapCache<>(prop.getDeclaringType(), prop);
         }
 
         @NotNull
@@ -4753,7 +4945,7 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         @Nullable
         @Override
         public ImmutableProp prop() {
-            return null;
+            return prop;
         }
 
         @NotNull
