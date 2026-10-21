@@ -113,6 +113,13 @@ final class ObjectCacheQueryExecution {
         try {
             Table<?> rootTable = (Table<?>) mutableQuery.getTable();
             TableImplementor<?> rootImplementor = TableProxies.resolve(rootTable, astContext);
+            // A bare hint on a non-content-only root falls back to declared entity caches.
+            // The application policy still owns admission there, exactly as it does for the
+            // converted-slot content path.
+            if (data.useObjectCache
+                    && !sqlClient.getCaches().isObjectCacheAdmissible(rootImplementor.getImmutableType())) {
+                return null;
+            }
 
             for (int i = 0; i < size; i++) {
                 Selection<?> selection = selections.get(i);

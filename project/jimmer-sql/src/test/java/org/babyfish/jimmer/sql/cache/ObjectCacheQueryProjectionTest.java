@@ -409,6 +409,65 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testAdmissionPolicyDeniesConvertedSlotAndKeepsSqlFresh() {
+        // An application policy can refuse snapshot admission for a request that needs
+        // own/editable content. The converted slot must run as ordinary SQL even though a
+        // declared object cache holds a stale payload, and the scalar slot stays SQL too.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null, denied -> denied != type);
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+        }));
+        BookTable table = BookTable.$;
+        AuthorTableEx author = AuthorTableEx.$;
+        clearExecutions();
+        List<DtoTuple> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(DtoTupleMapper
+                        .book(table.fetch(BookViewForTupleTest.class))
+                        .authorCount(client.createSubQuery(author)
+                                .where(author.books().id().eq(table.id()))
+                                .selectCount()))
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals(learningGraphQLId1, rows.get(0).getBook().getId());
+        assertEquals("Learning GraphQL", rows.get(0).getBook().getName());
+        assertEquals(2, rows.get(0).getAuthorCount());
+        assertTrue(cache.getAllKeys.isEmpty(), cache.getAllKeys::toString);
+        String sql = String.join("\n", getExecutions().stream().map(Execution::getSql).toList());
+        assertTrue(sql.contains("NAME"), sql);
+        assertTrue(sql.contains("(select count(1)"), sql);
+    }
+
+    @Test
+    public void testAdmissionPolicyOverridesExplicitUseObjectCache() {
+        // The policy is checked before an explicit hint, so a business scope that needs
+        // fresh content cannot be overridden by a query-level cache hint.
+        ImmutableType type = ImmutableType.get(BookStore.class);
+        MapCache<BookStore> cache = new MapCache<>(type);
+        JSqlClient client = createClient(it -> it == type ? cache : null, denied -> denied != type);
+        cache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED");
+            draft.setVersion(777);
+        }));
+        BookStoreTable table = BookStoreTable.$;
+        clearExecutions();
+        List<ReusableBookStoreView> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(oreillyId))
+                .select(table.fetch(ReusableBookStoreView.class))
+                .useObjectCache()
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("O'REILLY", rows.get(0).getName());
+        assertTrue(cache.getAllKeys.isEmpty(), cache.getAllKeys::toString);
+    }
+
+    @Test
     public void testNativeSubtypeOnlyDeclarationStaysSqlFresh() {
         // Automatic admission seeds one cache payload per masked slot node, so a cache
         // declared only on a derived type cannot seed a base-rooted slot. The query stays
@@ -4848,7 +4907,14 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {
-        return createClient(objectCacheFactory, null);
+        return createClient(objectCacheFactory, (ImmutableType) null, null, null);
+    }
+
+    private JSqlClient createClient(
+            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
+            CacheAdmissionPolicy admissionPolicy
+    ) {
+        return createClient(objectCacheFactory, null, null, null, admissionPolicy);
     }
 
     private JSqlClient createClient(
@@ -4864,12 +4930,27 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
             ImmutableProp cachedProp,
             Cache<?, ?> propCache
     ) {
+        return createClient(objectCacheFactory, contentOnlyType, cachedProp, propCache, null);
+    }
+
+    private JSqlClient createClient(
+            Function<ImmutableType, Cache<?, ?>> objectCacheFactory,
+            ImmutableType contentOnlyType,
+            ImmutableProp cachedProp,
+            Cache<?, ?> propCache,
+            CacheAdmissionPolicy admissionPolicy
+    ) {
         return getSqlClient(builder -> {
             builder.setConnectionManager(NON_TX_MANAGER);
             builder.setCaches(cfg -> cfg.setCacheFactory(new CacheFactory() {
                 @Override
                 public boolean isObjectCacheContentOnly(ImmutableType type) {
                     return type == contentOnlyType;
+                }
+
+                @Override
+                public boolean isObjectCacheAdmissible(ImmutableType type) {
+                    return admissionPolicy == null || admissionPolicy.isAdmissible(type);
                 }
 
                 @Override

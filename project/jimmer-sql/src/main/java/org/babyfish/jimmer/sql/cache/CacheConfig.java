@@ -239,7 +239,8 @@ public class CacheConfig {
                 finalPropCacheMap,
                 operator,
                 CompositeCacheAbandonedCallback.combine(abandonedCallbacks),
-                objectCacheContentOnlyTypes
+                objectCacheContentOnlyTypes,
+                type -> cacheFactory == null || cacheFactory.isObjectCacheAdmissible(type)
         );
     }
 }

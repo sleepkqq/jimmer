@@ -11,6 +11,7 @@ import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.cache.AbstractCacheFactory;
 import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.CacheAdmissionPolicy;
 import org.babyfish.jimmer.sql.cache.CacheCreator;
 import org.babyfish.jimmer.sql.cache.CacheTracker;
 import org.slf4j.Logger;
@@ -38,6 +39,7 @@ public class JimmerRedisCacheFactory extends AbstractCacheFactory {
     private final SchemaRemoteKeyPrefixProvider keyPrefixProvider;
     private final boolean operationLog;
     private final Duration timeout;
+    private final CacheAdmissionPolicy admissionPolicy;
 
     public JimmerRedisCacheFactory(
             RedisDataSource redisDataSource,
@@ -53,7 +55,18 @@ public class JimmerRedisCacheFactory extends AbstractCacheFactory {
             String defaultSchema,
             CacheTracker tracker,
             Duration timeout) {
+        this(redisDataSource, config, defaultSchema, tracker, timeout, null);
+    }
+
+    public JimmerRedisCacheFactory(
+            RedisDataSource redisDataSource,
+            JimmerCacheConfig config,
+            String defaultSchema,
+            CacheTracker tracker,
+            Duration timeout,
+            CacheAdmissionPolicy admissionPolicy) {
         this.timeout = RedisCacheCreator.requireTimeout(timeout);
+        this.admissionPolicy = admissionPolicy;
         this.redisDataSource = redisDataSource;
         this.tracker = tracker;
         this.keyPrefixProvider = new SchemaRemoteKeyPrefixProvider(defaultSchema);
@@ -93,6 +106,11 @@ public class JimmerRedisCacheFactory extends AbstractCacheFactory {
             return SubscriptionCache.wrap(LocalOnlyCaches.create(type, null, config, tracker, operationLog, false), tracker);
         }
         return creator(config).createForObject(type);
+    }
+
+    @Override
+    public boolean isObjectCacheAdmissible(ImmutableType type) {
+        return admissionPolicy == null || admissionPolicy.isAdmissible(type);
     }
 
     @Override
