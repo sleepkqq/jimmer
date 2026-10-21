@@ -114,6 +114,11 @@ public class JimmerRedisCacheFactory extends AbstractCacheFactory {
     }
 
     @Override
+    public boolean isObjectCacheAdmissible(ImmutableType type, Object row) {
+        return admissionPolicy == null || admissionPolicy.isAdmissible(type, row);
+    }
+
+    @Override
     public boolean isObjectCacheContentOnly(ImmutableType type) {
         JimmerCacheConfig.EntityCacheConfig config = configByType.get(type.getJavaClass().getSimpleName());
         return config != null && config.contentOnly();

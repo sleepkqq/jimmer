@@ -29,6 +29,14 @@ public interface Caches {
         return true;
     }
 
+    /**
+     * Whether this freshly read row may be served from its declared object cache.
+     * The default keeps the query-level verdict.
+     */
+    default boolean isObjectCacheAdmissible(ImmutableType type, Object row) {
+        return isObjectCacheAdmissible(type);
+    }
+
     @Nullable
     default <K, V> Cache<K, V> getPropertyCache(TypedProp<?, ?> prop) {
         return getPropertyCache(prop.unwrap());

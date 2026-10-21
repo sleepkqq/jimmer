@@ -26,6 +26,7 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple8;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple9;
 import org.babyfish.jimmer.sql.cache.CacheTypeMismatchException;
 import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
+import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.Field;
 import org.babyfish.jimmer.sql.fetcher.impl.FetchPath;
@@ -567,11 +568,21 @@ final class ObjectCacheQueryExecution {
         // a node-level proof would leak the slot's admission onto the navigated id and
         // resurrect a warm but deleted target.
         Map<CacheContentMask, Map<Object, ImmutableType>> provenSeeds = new LinkedHashMap<>();
+        // A row whose current values deny cache admission is loaded once, SQL-fresh, with
+        // the same projection the cached rows are overlaid with. Sibling rows of the same
+        // page still come from the cache.
+        Map<CacheContentMask, Map<Object, ImmutableType>> deniedSeeds = new LinkedHashMap<>();
+        Map<CacheContentMask, Fetcher<?>> nodeProjections = new LinkedHashMap<>();
+        Caches caches = sqlClient.getCaches();
         for (int i = 0; i < size; i++) {
             MaskSlot slot = slots[i];
             if (slot == null || !slot.masked) {
                 continue;
             }
+            nodeProjections.putIfAbsent(
+                    slot.node,
+                    slot.projection != null ? slot.projection : allTableFieldsFetcher(slot.node.getType())
+            );
             PropId idPropId = slot.node.getType().getIdProp().getId();
             for (Object[] seed : seeds) {
                 Object seedValue = seed[i];
@@ -579,6 +590,17 @@ final class ObjectCacheQueryExecution {
                     continue;
                 }
                 ImmutableSpi fresh = (ImmutableSpi) seedValue;
+                if (!caches.isObjectCacheAdmissible(slot.node.getType(), fresh)) {
+                    // The decision uses the current SQL values of this exact row, not the
+                    // page or the request: its retained value is incomplete, so its full
+                    // projection is loaded once after the cached rows are hydrated.
+                    Object id = fresh.__get(idPropId);
+                    if (id != null) {
+                        deniedSeeds.computeIfAbsent(slot.node, it -> new LinkedHashMap<>())
+                                .put(id, fresh.__type());
+                    }
+                    continue;
+                }
                 if (slot.node.needsCache(fresh, sqlClient)) {
                     Object id = fresh.__get(idPropId);
                     if (id != null) {
@@ -622,6 +644,19 @@ final class ObjectCacheQueryExecution {
                 LOGGER.debug("Object-cache content hint declined: {}", ex.getMessage());
             }
             return null;
+        }
+        for (Map.Entry<CacheContentMask, Map<Object, ImmutableType>> e : deniedSeeds.entrySet()) {
+            Map<Object, ImmutableSpi> fresh = loadFreshContent(
+                    entitiesImpl,
+                    readClient,
+                    e.getKey(),
+                    nodeProjections.get(e.getKey()),
+                    e.getValue()
+            );
+            if (fresh == null) {
+                return null;
+            }
+            cachedByNode.computeIfAbsent(e.getKey(), it -> new LinkedHashMap<>()).putAll(fresh);
         }
 
         // Validate the complete page before any converter runs, so a later incomplete
@@ -826,6 +861,34 @@ final class ObjectCacheQueryExecution {
             if (!result.containsKey(id)) {
                 return null;
             }
+        }
+        return result;
+    }
+
+    /**
+     * Loads the full projection of rows whose own current values refused cache admission.
+     * The read runs on the same connection and on the cache-disabled derived client, so it
+     * is authoritative SQL and never re-serves the payload it was denied. Any missing row
+     * declines the whole hint instead of shortening the page.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Map<Object, ImmutableSpi> loadFreshContent(
+            EntitiesImpl entitiesImpl,
+            JSqlClientImplementor readClient,
+            CacheContentMask node,
+            Fetcher<?> projection,
+            Map<Object, ImmutableType> ids
+    ) {
+        Map<Object, ImmutableSpi> result = new LinkedHashMap<>();
+        Map<Object, Object> loaded = entitiesImpl
+                .forSqlClient(readClient)
+                .findMapByIdsForQuery(node.getType(), (Fetcher) projection, node.getType(), ids.keySet(), null);
+        for (Object id : ids.keySet()) {
+            Object value = loaded.get(id);
+            if (!(value instanceof ImmutableSpi)) {
+                return null;
+            }
+            result.put(id, (ImmutableSpi) value);
         }
         return result;
     }

@@ -26,6 +26,14 @@ public interface CacheFactory {
     }
 
     /**
+     * Whether the freshly read row of this type may be served from the object cache.
+     * Defaults to the query-level verdict.
+     */
+    default boolean isObjectCacheAdmissible(ImmutableType type, Object row) {
+        return isObjectCacheAdmissible(type);
+    }
+
+    /**
      * Create cache for an entity type.
      *
      * <p>If you don't want all entity types to support object caching,

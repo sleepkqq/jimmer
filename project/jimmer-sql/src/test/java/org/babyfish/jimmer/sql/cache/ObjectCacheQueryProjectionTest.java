@@ -4906,6 +4906,82 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
         assertFalse(sql.contains("tb_2_.NAME"), sql);
     }
 
+    @Test
+    public void testAdmissionPolicyDecidesPerRowOfTheSamePage() {
+        // One page can mix rows whose own current values need SQL-fresh content with rows
+        // that may come from the snapshot. The decision is per row: the denied row is
+        // loaded once with its full projection, its sibling still reads the cache.
+        ImmutableType type = ImmutableType.get(Book.class);
+        MapCache<Book> cache = new MapCache<>(type);
+        JSqlClient client = createClient(
+                it -> it == type ? cache : null,
+                new CacheAdmissionPolicy() {
+                    @Override
+                    public boolean isAdmissible(ImmutableType type) {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean isAdmissible(ImmutableType type, Object row) {
+                        return !(row instanceof Book) ||
+                                !learningGraphQLId1.equals(((Book) row).id());
+                    }
+                }
+        );
+        cache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-1");
+            draft.setStore(BookStoreDraft.$.produce(store -> {
+                store.setId(oreillyId);
+                store.setName("CACHED-STORE");
+            }));
+        }));
+        cache.put(learningGraphQLId2, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId2);
+            draft.setName("CACHED-2");
+            draft.setStore(BookStoreDraft.$.produce(store -> {
+                store.setId(oreillyId);
+                store.setName("CACHED-STORE");
+            }));
+        }));
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<BookViewForTupleTest> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().in(Arrays.asList(learningGraphQLId1, learningGraphQLId2)))
+                .select(table.fetch(BookViewForTupleTest.class))
+                .execute(con)));
+        assertEquals(2, rows.size());
+        BookViewForTupleTest denied = rows.stream()
+                .filter(it -> learningGraphQLId1.equals(it.getId()))
+                .findFirst()
+                .orElseThrow(AssertionError::new);
+        assertFalse("CACHED-1".equals(denied.getName()), denied.getName());
+        assertEquals("O'REILLY", denied.getStore().getName());
+        BookViewForTupleTest cached = rows.stream()
+                .filter(it -> learningGraphQLId2.equals(it.getId()))
+                .findFirst()
+                .orElseThrow(AssertionError::new);
+        assertEquals("CACHED-2", cached.getName());
+        // A nested navigated slot stays SQL-authoritative even for the cached row.
+        assertEquals("O'REILLY", cached.getStore().getName());
+        for (Collection<Object> keys : cache.getAllKeys) {
+            assertFalse(keys.contains(learningGraphQLId1), keys::toString);
+        }
+        assertCacheTouched(cache, learningGraphQLId2);
+        // Retained skeleton + one nested store read, then the denied row's full
+        // projection + its nested store read: no row is read twice.
+        List<Execution> executions = getExecutions();
+        assertEquals(4, executions.size(), executions::toString);
+        assertEquals(
+                1,
+                executions.stream()
+                        .filter(it -> it.getSql().contains("tb_1_.NAME, tb_1_.STORE_ID"))
+                        .count(),
+                executions::toString
+        );
+    }
+
     private JSqlClient createClient(Function<ImmutableType, Cache<?, ?>> objectCacheFactory) {
         return createClient(objectCacheFactory, (ImmutableType) null, null, null);
     }
@@ -4951,6 +5027,11 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
                 @Override
                 public boolean isObjectCacheAdmissible(ImmutableType type) {
                     return admissionPolicy == null || admissionPolicy.isAdmissible(type);
+                }
+
+                @Override
+                public boolean isObjectCacheAdmissible(ImmutableType type, Object row) {
+                    return admissionPolicy == null || admissionPolicy.isAdmissible(type, row);
                 }
 
                 @Override
