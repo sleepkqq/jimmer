@@ -240,7 +240,17 @@ public class CacheConfig {
                 operator,
                 CompositeCacheAbandonedCallback.combine(abandonedCallbacks),
                 objectCacheContentOnlyTypes,
-                type -> cacheFactory == null || cacheFactory.isObjectCacheAdmissible(type)
+                new CacheAdmissionPolicy() {
+                    @Override
+                    public boolean isAdmissible(ImmutableType type) {
+                        return cacheFactory == null || cacheFactory.isObjectCacheAdmissible(type);
+                    }
+
+                    @Override
+                    public boolean isAdmissible(ImmutableType type, Object row) {
+                        return cacheFactory == null || cacheFactory.isObjectCacheAdmissible(type, row);
+                    }
+                }
         );
     }
 }

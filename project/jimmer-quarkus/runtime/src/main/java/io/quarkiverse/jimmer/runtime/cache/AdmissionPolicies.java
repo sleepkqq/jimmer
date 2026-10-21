@@ -3,6 +3,7 @@ package io.quarkiverse.jimmer.runtime.cache;
 import jakarta.enterprise.context.ContextNotActiveException;
 import jakarta.enterprise.inject.Instance;
 
+import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.cache.CacheAdmissionPolicy;
 
 /**
@@ -21,11 +22,23 @@ final class AdmissionPolicies {
             return null;
         }
         CacheAdmissionPolicy policy = instance.get();
-        return type -> {
-            try {
-                return policy.isAdmissible(type);
-            } catch (ContextNotActiveException ex) {
-                return false;
+        return new CacheAdmissionPolicy() {
+            @Override
+            public boolean isAdmissible(ImmutableType type) {
+                try {
+                    return policy.isAdmissible(type);
+                } catch (ContextNotActiveException ex) {
+                    return false;
+                }
+            }
+
+            @Override
+            public boolean isAdmissible(ImmutableType type, Object row) {
+                try {
+                    return policy.isAdmissible(type, row);
+                } catch (ContextNotActiveException ex) {
+                    return false;
+                }
             }
         };
     }

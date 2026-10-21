@@ -127,6 +127,11 @@ public class CachesImpl implements Caches {
     }
 
     @Override
+    public boolean isObjectCacheAdmissible(ImmutableType type, Object row) {
+        return admissionPolicy.isAdmissible(type, row);
+    }
+
+    @Override
     public boolean isObjectCacheContentOnly(ImmutableType type) {
         for (ImmutableType superType : type.getAllTypes()) {
             if (objectCacheContentOnlyTypes.contains(superType)) {
