@@ -1,0 +1,661 @@
+{
+  "grading_method": "Independent agent grading, hidden condition labels and shuffled answer order; source-verified whole assertions, including code validity. Ambiguity policy recorded before inspecting transfer answers. No post-unmask grade changes.",
+  "baseline": {
+    "passed": 45,
+    "total": 64,
+    "pass_rate": 0.703125,
+    "median_seconds": 19.4635,
+    "mean_context_bytes": 13874.5,
+    "runs": [
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.511,
+        "exit_code": 0,
+        "context_bytes": 11597,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "6649990f439182ee4a6598f9d99f5fb84db92af33d33b613fe2d509d78bb3e46",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "64cb0f0ecd7a17aa767c68d662ac4747cd683327f76ea4b5c3cab3eee3702ec5",
+        "answer": "```java\nProductTable product = ProductTable.$;\nProductPriceImportTable importTable = ProductPriceImportTable.$;\n\nProductPriceImportTable source = sqlClient\n    .createBaseQuery(importTable)\n    .where(importTable.price().isNotNull())\n    .select(importTable)\n    .asBaseTable();\n\nList<Tuple2<Long, String>> affected = sqlClient\n    .createUpsert(product, source)\n    .key(product.sku(), source.sku())\n    .insert(product.title(), \"Imported\")\n    .merge(product.price(), source.price())\n    .returning(product.id(), product.sku())\n    .execute();\n```\n\nThis uses a database-side insert/upsert, updates existing prices by `sku`, assigns the fixed title only on insertion, and returns affected IDs and SKUs."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 33.4,
+        "exit_code": 0,
+        "context_bytes": 13912,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "7ade15377545e6e3d45189a5342dca5e2b39b9aa3a8de977b7387e3a66944a3c",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "bc6755e105bd656fca650e410b7aafeaeff088cf65fc072854bcd201899ac664",
+        "answer": "```kotlin\n@Entity\n@Table(name = \"stock_item\")\n@KeyUniqueConstraint\ninterface StockItem {\n\n    @Id\n    val id: Long\n\n    @Key(group = \"warehouseProduct\")\n    val warehouseId: Long\n\n    @Key(group = \"warehouseProduct\")\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\nThe database must also have a unique constraint on `(warehouse_id, product_id)`.\n\n```kotlin\nfun updateStock(command: StockItem): StockItem {\n    val result = sqlClient.saveCommand(command)\n        .setMode(SaveMode.UPDATE_ONLY)\n        .setVersionMode(VersionMode.OPTIMISTIC_LOCK)\n        .execute()\n\n    if (!result.isAccepted) {\n        throw NoSuchElementException(\"Stock item ${command.id} does not exist\")\n    }\n\n    return result.modifiedEntity\n}\n```\n\n`UPDATE_ONLY` prevents insertion when the ID is missing. A stale `version` causes the optimistic-lock check to fail; the save is rejected or raises Jimmer\u2019s optimistic-lock conflict exception, and the service must not treat it as a successful update. The database uniqueness constraint prevents duplicate warehouse/product pairs."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 11.382,
+        "exit_code": 0,
+        "context_bytes": 10658,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "b75564185391288a8bd993a1446032c7cc499d95095aba17f11c0815f0e391f9",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          false
+        ],
+        "answer_sha256": "09bb22794d2638c0b32519c7d5fcb9bd1f63907e2d603aac3bf9844b0431c0a5",
+        "answer": "```java\nvar trip = Tables.TRIP_TABLE;\n\nvar fetcher = Fetchers.TRIP_FETCHER\n    .id()\n    .name()\n    .destination(\n        Fetchers.DESTINATION_FETCHER\n            .name()\n    )\n    .itineraryStops(\n        Fetchers.ITINERARY_STOP_FETCHER\n            .city(Fetchers.CITY_FETCHER.name())\n            .arrivalTime()\n    );\n\nreturn sql.createQuery(trip)\n    .where(trip.published().eq(true))\n    .where(trip.destination().name().eqIf(destinationName))\n    .where(trip.departureDate().eqIf(departureDate))\n    .orderBy(trip.departureDate().asc(), trip.id().asc())\n    .select(trip.fetch(fetcher))\n    .fetch();\n```\n\nThis keeps publication, destination, and departure-date filtering in SQL and explicitly loads only the requested graph. Internal notes and the full hotel association remain unloaded."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.384,
+        "exit_code": 0,
+        "context_bytes": 15476,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "b63600b9e238f337ce57fd533574293f4d67d69c6898308b44b5aa7df59741f5",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          false
+        ],
+        "answer_sha256": "7f3388cc4c317bbf9170d5a711ee010c115da378748ee31a4e54a355bcdfd3ad",
+        "answer": "```dto\nexport com.museum.Exhibition\n\ninput ExhibitionCreateInput {\n    title\n    openingDate?\n    id(museum) as museumId\n}\n\nExhibitionView {\n    id\n    title\n    openingDate\n    museum {\n        name\n    }\n    exhibitCount\n}\n```\n\n`id` \u0438 `createdAt` \u0432\u043e \u0432\u0445\u043e\u0434\u043d\u043e\u0439 DTO \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u044e\u0442, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043a\u043b\u0438\u0435\u043d\u0442 \u0438\u0445 \u043f\u0435\u0440\u0435\u0434\u0430\u0442\u044c \u043d\u0435 \u043c\u043e\u0436\u0435\u0442. `museumId` \u0437\u0430\u043f\u043e\u043b\u043d\u044f\u0435\u0442 \u0441\u0432\u044f\u0437\u044c `museum`.\n\n\u0414\u043b\u044f `exhibitCount` \u0443 `Exhibition` \u0434\u043e\u043b\u0436\u043d\u043e \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c \u0441\u043e\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0435 \u0432\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u043c\u043e\u0435/\u0445\u0440\u0430\u043d\u0438\u043c\u043e\u0435 \u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, `exhibitCount`). DTO-\u044f\u0437\u044b\u043a \u0441\u0430\u043c \u043f\u043e \u0441\u0435\u0431\u0435 \u043d\u0435 \u043f\u0440\u0435\u0432\u0440\u0430\u0449\u0430\u0435\u0442 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e `exhibits` \u0432 aggregate count; \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044f \u0432 DTO \u043d\u0430\u043c\u0435\u0440\u0435\u043d\u043d\u043e \u043d\u0435 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u0430.\n\n```kotlin\nval input = mapper.readValue<ExhibitionCreateInput>(json)\n\nval saved = sql.save(\n    input.toEntity()\n) {\n    setAssociatedModeAll(AssociatedSaveMode.REPLACE)\n}\n\nval exhibitions = sql.createQuery(Exhibition::class) {\n    select(table.fetch(ExhibitionView::class))\n}.execute()\n```\n\n\u0414\u043b\u044f \u0444\u0438\u043b\u044c\u0442\u0440\u0430\u0446\u0438\u0438, \u0441\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u043a\u0438 \u0438\u043b\u0438 \u043f\u0430\u0433\u0438\u043d\u0430\u0446\u0438\u0438 \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0441\u043e\u043e\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u044e\u0449\u0438\u0435 `where`/`orderBy`/`fetchPage`; `ExhibitionView` \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0435\u0442\u0441\u044f \u043a\u0430\u043a read projection."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 25.002,
+        "exit_code": 0,
+        "context_bytes": 18170,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "43f7416627d8c92b3dc176427d9857890fa94b55ca02d6474c5c9fbe8e80e96a",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "43ec2f796dba5682e6896e0f9d7afbc951b2bdeefefa784d6e1213eb822a8c84",
+        "answer": "Configure a Spring `CacheFactory` with a Caffeine local tier in front of Redis, and register caches for `Product` and `Product.category`:\n\n```java\n@Bean\nCacheFactory cacheFactory(CaffeineCacheFactory caffeine,\n                          RedisCacheFactory redis) {\n    return new ChainCacheBuilder()\n        .add(caffeine) // local first-level cache\n        .add(redis)    // shared second-level cache\n        .build();\n}\n```\n\nRegister:\n\n- an object cache via `createObjectCache(Product)`\n- an association cache via `createAssociatedIdCache(Product, Product.category)`\n\nJimmer then uses these caches transparently during entity loading and association fetching; repository methods do not need manual cache lookups.\n\nUse:\n\n```properties\njimmer.trigger-type=BINLOG_ONLY\n```\n\nand connect committed database CDC events to Jimmer\u2019s `BinLog`, including product-row and foreign-key/association changes. Do not use `TRANSACTION_ONLY` or `BOTH` for new configuration.\n\nAfter a Jimmer product update:\n\n1. The product object-cache entry is invalidated.\n2. Relevant `Product.category` association entries are invalidated when the association changes.\n3. The invalidation must reach both Caffeine and Redis, including other service instances.\n4. CDC processing must succeed before acknowledging the event; failures must be retried.\n\nVerify updates from another writer and on two application instances."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 16.264,
+        "exit_code": 0,
+        "context_bytes": 16515,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "58d05ad11ffa36f49ac08433a7cc8111f0dd1ec9aa05b6f6f1e9bd390ebc73d0",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "34b14543ea6033c88962f46645d15053dd9b69edceb14e1294f585b57d7b4dce",
+        "answer": "Use a database-side aggregate query. Do not load `Visit` entities or sort in Java. Group visits by exhibit, join its museum through scalar paths, and order by `COUNT(*) DESC`.\n\n```java\n@TypedTuple\npublic class ExhibitVisitCount {\n    public long exhibitId();\n    public String exhibitName();\n    public String museumName();\n    public long visitCount();\n}\n```\n\n```java\nvar v = VISIT_TABLE;\nvar count = v.id().count();\n\nreturn sqlClient.createQuery(v)\n    .where(\n        v.visitedAt().ge(from),\n        v.visitedAt().lt(to)       // half-open date range: [from, to)\n    )\n    .groupBy(\n        v.exhibit().id(),\n        v.exhibit().name(),\n        v.exhibit().museum().name()\n    )\n    .orderBy(\n        count.desc(),\n        v.exhibit().id().asc()     // deterministic tie-breaker\n    )\n    .select(ExhibitVisitCount.class)\n    .fetchPage(page, 20);\n```\n\nThis produces grouped SQL with `COUNT`, `GROUP BY`, `ORDER BY count DESC`, and pagination applied by the database. `fetchPage` also supplies the exact total number of grouped exhibits. For a dashboard that only needs \u201chas more,\u201d use `fetchSlice(20, offset)` instead. A database view or native SQL is unnecessary unless query plans demonstrate a measured performance problem."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 35.104,
+        "exit_code": 0,
+        "context_bytes": 10770,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "4a58f312f523ba8fd447bc2374a4f5c304d3fd80bb26af830355412b3d224a35",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "b8a2eac2b83ade28cfa0e70de626e96c0136372e90837be27090d10225f9486e",
+        "answer": "### Entity mapping\n\n```java\nimport org.jetbrains.annotations.Nullable;\n\npublic interface TravelDestination {\n\n    // Existing properties...\n\n    @Nullable\n    String countryCode();\n}\n```\n\nKeep the existing logical-delete annotation/property unchanged. Do not add `@KeyUniqueConstraint`: PostgreSQL\u2019s partial unique index is not equivalent to a normal table unique constraint, and nullable-key upsert semantics must not be falsely advertised to Jimmer.\n\n### PostgreSQL migration\n\nAssuming the logical-delete flag is `deleted`:\n\n```sql\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\nALTER TABLE travel_destination\n    ADD CONSTRAINT travel_destination_country_code_ck\n    CHECK (\n        country_code IS NULL\n        OR country_code ~ '^[A-Za-z]{2}$'\n    );\n\nCREATE UNIQUE INDEX travel_destination_active_country_name_uq\n    ON travel_destination (country_code, name)\n    WHERE deleted = false;\n```\n\nIf logical deletion uses a timestamp, use `WHERE deleted_at IS NULL` instead.\n\nThis is a partial **unique index**, because PostgreSQL cannot create a partial unique constraint. It enforces uniqueness only for non-deleted rows. Existing rows are safe because the new column is nullable and has no default. Multiple rows with `country_code IS NULL` may share the same `name`, since PostgreSQL treats nulls as distinct; non-null `(country_code, name)` pairs must be unique among active destinations."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.76,
+        "exit_code": 0,
+        "context_bytes": 13898,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "b1ae618008b3f330de2710e85f542c5192433f6ed8d4c152f09c99d6fa6f140f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "ed55cafec29228d46b2b31d3fd7c381f67ef57ceded1cab55f68f4b0c7dbbeb9",
+        "answer": "```kotlin\npackage com.example.inventory.repository\n\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\nimport java.util.UUID\n\ninterface WarehouseRepository : KRepository<Warehouse, UUID> {\n\n    // A null fetcher returns the default shape; callers may provide bins\n    // and current-stock-summary fields.\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\nUse it from the service, not the resource:\n\n```kotlin\n@ApplicationScoped\nclass WarehouseService(\n    private val repository: WarehouseRepository\n) {\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse? = repository.findByCode(code, fetcher)\n}\n```\n\nThe derived repository method remains declarative, and nullable return semantics preserve \u201cnot found\u201d behavior."
+      },
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 31.559,
+        "exit_code": 0,
+        "context_bytes": 11597,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "6649990f439182ee4a6598f9d99f5fb84db92af33d33b613fe2d509d78bb3e46",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "d625def9c3f4a0d6925c45705dd22c8ccc4f4aea8dbe91cd88d44bb13879f4fa",
+        "answer": "```java\nProductTable product = ProductTable.$;\nProductPriceImportTable staging = ProductPriceImportTable.$;\n\nProductPriceImportTable source = sqlClient\n    .createBaseQuery(staging)\n    .where(staging.price().isNotNull())\n    .select(staging)\n    .asBaseTable();\n\nList<ProductIdSku> affected = sqlClient\n    .createUpsert(product, source)\n    .key(product.sku(), source.sku())\n    .merge(product.sku(), source.sku(), source.sku())\n    .merge(product.price(), source.price(), source.price())\n    .merge(\n        product.title(),\n        Expressions.value(\"Imported product\"),\n        product.title()\n    )\n    .returning(product.id(), product.sku())\n    .execute();\n```\n\n`source.sku()` must be unique among the selected staging rows. This uses a database-side insert/upsert when supported by the configured dialect."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 37.259,
+        "exit_code": 0,
+        "context_bytes": 13912,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "7ade15377545e6e3d45189a5342dca5e2b39b9aa3a8de977b7387e3a66944a3c",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "a0027452b3482bd77215b90e7e002595339f567491142d8775116f28cd6d1a0a",
+        "answer": "```kotlin\n@Entity\n@Table(name = \"stock_item\")\n@KeyUniqueConstraint // Requires a matching DB UNIQUE(warehouse_id, product_id)\ninterface StockItem {\n    @Id\n    val id: Long\n\n    @Key\n    val warehouseId: Long\n\n    @Key\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\n```kotlin\nfun updateStock(item: StockItem): StockItem {\n    val result = sqlClient\n        .saveCommand(item)\n        .setMode(SaveMode.UPDATE_ONLY) // Never inserts a missing id\n        .execute()\n\n    if (!result.isAccepted) {\n        error(\"StockItem ${item.id} does not exist\")\n    }\n\n    return result.modifiedEntity\n}\n```\n\nThe `@Version` field enables optimistic locking: the update occurs only when the supplied version matches. A stale version raises an optimistic-lock conflict; it is not silently accepted. The composite key plus the database unique constraint prevents duplicate `warehouseId`/`productId` rows."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.366,
+        "exit_code": 0,
+        "context_bytes": 10658,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "b75564185391288a8bd993a1446032c7cc499d95095aba17f11c0815f0e391f9",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "0f72d9072561684d7b7cb7753ecdbf8bd52b26e4ac3e3cc2188a06a7a1d380e8",
+        "answer": "```java\npublic List<Trip> findPublishedTrips(\n        String destinationName,\n        LocalDate departureDate\n) {\n    var trip = TripTable.$;\n    var fetcher = TripFetcher.$\n            .allScalarFields()\n            .destination(DestinationFetcher.$\n                    .allScalarFields())\n            .itineraryStops(ItineraryStopFetcher.$\n                    .allScalarFields()\n                    .city(CityFetcher.$.allScalarFields()));\n\n    return sql.createQuery(trip)\n            .where(trip.published().eq(true))\n            .where(trip.destination().name().eq(destinationName))\n            .where(trip.departureDate().eq(departureDate))\n            .orderBy(trip.id().asc())\n            .select(trip.fetch(fetcher))\n            .execute();\n}\n```\n\nThe fetcher explicitly loads trip scalars, destination name, and each stop\u2019s city/arrival time through `allScalarFields()`. Internal notes and the hotel association are not fetched. Adjust generated association names if the model uses different names."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 16.291,
+        "exit_code": 0,
+        "context_bytes": 15476,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "b63600b9e238f337ce57fd533574293f4d67d69c6898308b44b5aa7df59741f5",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "f206f595433d948b143eb82a09cf56c5f1f434f48c68a9707fa084808a2b815d",
+        "answer": "```dto\n// src/main/dto/com/example/museum/Exhibition.dto\n\ninput ExhibitionCreateInput {\n    title\n    id(museum) as museumId\n    openingDate?\n}\n\nExhibitionView {\n    id\n    title\n    openingDate\n    museum {\n        name\n    }\n    exhibitsCount\n}\n```\n\n`id` \u0438 `createdAt` \u0432 `ExhibitionCreateInput` \u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d\u044b, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043a\u043b\u0438\u0435\u043d\u0442 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0438\u0445 \u043f\u0435\u0440\u0435\u0434\u0430\u0442\u044c. `exhibitsCount` \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c scalar-\u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e\u043c `Exhibition` (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u0432\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u043c\u044b\u043c/formula-\u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e\u043c); DTO-\u044f\u0437\u044b\u043a \u0441\u0430\u043c \u043f\u043e \u0441\u0435\u0431\u0435 \u043d\u0435 \u0441\u0447\u0438\u0442\u0430\u0435\u0442 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e.\n\n\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435:\n\n```kotlin\nfun create(input: ExhibitionCreateInput): ExhibitionView {\n    val saved = sql.save(input.toEntity())\n    return sql.findById(Exhibition::class, saved.modifiedEntity.id) {\n        select(table.fetch(ExhibitionView::class))\n    }!!\n}\n```\n\n\u0417\u0430\u043f\u0440\u043e\u0441 \u0441\u043f\u0438\u0441\u043a\u0430:\n\n```kotlin\nfun findAll(): List<ExhibitionView> =\n    sql.createQuery(Exhibition::class) {\n        orderBy(table.title.asc())\n        select(table.fetch(ExhibitionView::class))\n    }.execute()\n```\n\n\u0415\u0441\u043b\u0438 `openingDate` nullable \u0432 \u0441\u0443\u0449\u043d\u043e\u0441\u0442\u0438, \u0443\u0431\u0435\u0440\u0438\u0442\u0435 `?`: \u0443\u0436\u0435 nullable-\u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e \u043d\u0435\u043b\u044c\u0437\u044f \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u043e \u043f\u043e\u043c\u0435\u0442\u0438\u0442\u044c optional."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 22.636,
+        "exit_code": 0,
+        "context_bytes": 18170,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "43f7416627d8c92b3dc176427d9857890fa94b55ca02d6474c5c9fbe8e80e96a",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "9dd8f6a2435305fd379e4e2bc5beb0fcd04b9062a739388c21d34adafd20c167",
+        "answer": "Configure Jimmer\u2019s cache factory with a Caffeine L1 and Redis L2 chain:\n\n```java\n@Bean\nCacheFactory cacheFactory(\n        CaffeineCacheFactory caffeine,\n        RedisCacheFactory redis\n) {\n    return new ChainCacheBuilder()\n            .add(caffeine) // local first level\n            .add(redis)    // shared second level\n            .build();\n}\n```\n\nRegister:\n\n- an object cache for `Product`;\n- an object cache for `Category`;\n- an association-ID cache for `Product.category`;\n- association caches for any frequently fetched reverse relationship, such as `Category.products`.\n\nUse the Caffeine and Redis cache factories supplied by the installed Jimmer provider; their constructors and Redis binding differ by provider/version, so do not copy Quarkus cache configuration into Spring.\n\nUse:\n\n```properties\njimmer.trigger-type=BINLOG_ONLY\n```\n\nThen connect committed database CDC events to Jimmer\u2019s `BinLog`, including product/category row changes and association/FK changes. The CDC event must be acknowledged only after invalidation succeeds.\n\nAfter a Jimmer product update, Jimmer emits an entity-change event. The object cache entry for that `Product` and affected association entries are invalidated in both Caffeine and Redis. The next transparent entity/fetcher load reads fresh data and repopulates the tiers. No repository-level manual cache reads are required.\n\n`BINLOG_ONLY` is safe only when CDC delivery, retry/redelivery, startup catch-up, and two-instance invalidation testing are implemented. \n"
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.943,
+        "exit_code": 0,
+        "context_bytes": 16515,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "58d05ad11ffa36f49ac08433a7cc8111f0dd1ec9aa05b6f6f1e9bd390ebc73d0",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "7844ce392bb323a3cb1e03e64ea4093d07bfb3fccfc404922ed6c556960ab002",
+        "answer": "Use a database-side aggregate query: filter visits by date, group by exhibit and museum, order by `COUNT(*) DESC`, and fetch only the first 20 rows. No view or native SQL is required.\n\n```kotlin\nfun mostVisitedExhibits(\n    from: Instant,\n    toExclusive: Instant\n): List<MostVisitedExhibit> {\n    val v = VISIT_TABLE\n    val visitCount = v.id.count()\n\n    return sqlClient\n        .createQuery(v)\n        .where(\n            v.visitedAt ge from,\n            v.visitedAt lt toExclusive\n        )\n        .groupBy(\n            v.exhibit().id(),\n            v.exhibit().name(),\n            v.exhibit().museum().name()\n        )\n        .orderBy(\n            visitCount.desc(),\n            v.exhibit().id().asc() // deterministic tie-breaker\n        )\n        .select(\n            v.exhibit().id(),\n            v.exhibit().name(),\n            v.exhibit().museum().name(),\n            visitCount\n        )\n        .fetchPage(0, 20)\n        .rows\n        .map { (exhibitId, exhibitName, museumName, count) ->\n            MostVisitedExhibit(exhibitId, exhibitName, museumName, count)\n        }\n}\n```\n\nDepending on the generated Kotlin API, represent the projection with `Tuple4` or a `@TypedTuple` class. The important points are:\n\n- The date predicate runs before aggregation.\n- `COUNT` and sorting happen in SQL.\n- `fetchPage(0, 20)` limits the result to 20 rows and provides exact pagination metadata.\n- Add a unique exhibit-id tie-breaker so equal counts have stable ordering.\n\nFor an infinite-scroll dashboard, use `fetchSlice(20, 0)` instead and inspect `isTail`; no database view or native SQL is needed."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 40.483,
+        "exit_code": 0,
+        "context_bytes": 10770,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "4a58f312f523ba8fd447bc2374a4f5c304d3fd80bb26af830355412b3d224a35",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "35a4d9e4fd9d9ac32f7142bda91d1880069c495e1d86640f6b0e0a040a655e2d",
+        "answer": "### Entity mapping\n\n```java\n@Immutable\n@Entity\npublic interface TravelDestination {\n\n    @Id\n    UUID id();\n\n    @Nullable\n    @Column(name = \"country_code\", length = 2)\n    String countryCode();\n\n    String name();\n\n    @LogicalDeleted\n    boolean deleted();\n\n    // Keep existing properties and annotations unchanged.\n}\n```\n\nDo **not** add `@KeyUniqueConstraint` for this rule: Jimmer cannot express the PostgreSQL partial-index predicate (`deleted = false`). Keep any existing natural-key annotations only if they represent a separate, matching constraint.\n\n### PostgreSQL migration\n\nAssuming the existing logical-delete column is `deleted`:\n\n```sql\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\nALTER TABLE travel_destination\n    ADD CONSTRAINT travel_destination_country_code_length_ck\n    CHECK (country_code IS NULL OR char_length(country_code) = 2);\n\nCREATE UNIQUE INDEX travel_destination_active_country_name_uidx\n    ON travel_destination (country_code, name)\n    WHERE deleted = false;\n```\n\nThe index creation intentionally fails if active duplicate `(country_code, name)` rows already exist; resolve those duplicates before applying the migration. Existing rows remain valid because `country_code` is nullable.\n\nPostgreSQL treats `NULL` values as distinct in a unique index, so multiple non-deleted destinations with the same `name` and `country_code IS NULL` are allowed. If `NULL` must count as one shared value, use PostgreSQL 15+:\n\n```sql\nCREATE UNIQUE INDEX travel_destination_active_country_name_uidx\n    ON travel_destination (country_code, name) NULLS NOT DISTINCT\n    WHERE deleted = false;\n```\n\nUse the migration runner\u2019s transaction conventions; `CREATE UNIQUE INDEX CONCURRENTLY` is an alternative for large tables but must run outside a transaction."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 29.001,
+        "exit_code": 0,
+        "context_bytes": 13898,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "b1ae618008b3f330de2710e85f542c5192433f6ed8d4c152f09c99d6fa6f140f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "024de337039fdb3d5cd2118587f4be1137cfe318fcd38b8ef2df994e7b7271eb",
+        "answer": "```kotlin\npackage com.example.inventory.repository\n\nimport com.example.inventory.model.Warehouse\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\nimport java.util.UUID\n\ninterface WarehouseRepository : KRepository<Warehouse, UUID> {\n\n    fun findNullableByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\nUse it from the service, not the resource:\n\n```kotlin\n@ApplicationScoped\nclass WarehouseService(\n    private val repository: WarehouseRepository\n) {\n    fun findByCode(code: String, fetcher: Fetcher<Warehouse>?): Warehouse? =\n        repository.findNullableByCode(code, fetcher)\n}\n```\n\nCallers may pass a generated fetcher containing bins and current stock summaries, or `null` for the default shape. `Warehouse?` preserves not-found semantics; Quarkus generates the repository implementation and SQL."
+      }
+    ]
+  },
+  "updated": {
+    "passed": 48,
+    "total": 64,
+    "pass_rate": 0.75,
+    "median_seconds": 23.058,
+    "mean_context_bytes": 14517.875,
+    "runs": [
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 11.947,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "b8be9baa9b4ff4488fdf336921f91a707e09402bbdb763bf8fd4701370bcb100",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "6777c7babd191f2614e093de88fb3637277b9a918f2325183e7d42818c249cd5",
+        "answer": "```java\nProductTable product = ProductTable.$;\nProductPriceImportTable imported = ProductPriceImportTable.$;\n\nvar source = sqlClient\n    .createBaseQuery(imported)\n    .where(imported.price().isNotNull())\n    .select(imported)\n    .asBaseTable();\n\nvar affected = sqlClient\n    .createUpsert(product, source)\n    .key(product.sku(), source.sku())\n    .merge(product.price(), source.price())\n    .insert(product.title(), \"Imported\")\n    .returning(product.id(), product.sku())\n    .execute();\n```\n\nThis uses `sku` as the conflict key, inserts `\"Imported\"` as the title for new products, updates only `price` for existing products, and returns affected IDs/SKUs.\n\nA single database-side statement requires a dialect with native insert-select/upsert support; inspect the emitted SQL and execution plan rather than assuming it."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 30.198,
+        "exit_code": 0,
+        "context_bytes": 14940,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "83a5754339a54bcd204a9f453558830a34a7be3adc1c094bdfd1081c34f3ed8e",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "3e0f9440a4a4a6cb2aef2a037c348274fea4de922fe65e227326d5152bbdb105",
+        "answer": "```kotlin\n@Entity\n@KeyUniqueConstraint\ninterface StockItem {\n    @Id\n    val id: Long\n\n    @Key(group = \"warehouseProduct\")\n    val warehouseId: Long\n\n    @Key(group = \"warehouseProduct\")\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\nThe database must also enforce the composite uniqueness constraint:\n\n```sql\nunique (warehouse_id, product_id)\n```\n\n```kotlin\nfun updateStock(command: StockItem): StockItem {\n    val result = sqlClient.save(command) {\n        setMode(SaveMode.UPDATE_ONLY)\n        // @Version uses optimistic locking by default.\n    }\n\n    if (!result.isAccepted) {\n        throw IllegalStateException(\n            \"Stock item is missing or its version is stale\"\n        )\n    }\n\n    return result.modifiedEntity\n}\n```\n\n`UPDATE_ONLY` prevents insertion when the ID is missing. A version mismatch is rejected normally\u2014no update occurs\u2014so the service must inspect `isAccepted()` and report a stale-version conflict separately if required."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.682,
+        "exit_code": 0,
+        "context_bytes": 10658,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "b75564185391288a8bd993a1446032c7cc499d95095aba17f11c0815f0e391f9",
+        "passed": 0,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "answer_sha256": "a71f1dcbbd32bd8aa99db2e1e9f18d7507005ee7003a38d2f48555af8d105b58",
+        "answer": "```java\nvar trip = TripTable;\n\nvar fetcher = Fetchers.TRIP_FETCHER\n    .allScalarFields() // includes id/name; excludes associations such as notes\n    .destination(\n        Fetchers.DESTINATION_FETCHER\n            .name()\n    )\n    .itineraryStops(\n        Fetchers.ITINERARY_STOP_FETCHER\n            .city(Fetchers.CITY_FETCHER.name())\n            .arrivalTime()\n    );\n\nreturn sqlClient.createQuery(trip)\n    .where(trip.published().eq(true))\n    .where(trip.destination().name().eqIf(destinationName))\n    .where(trip.departureDate().eqIf(departureDate))\n    .orderBy(trip.departureDate().asc(), trip.id().asc())\n    .select(trip.fetch(fetcher))\n    .fetch();\n```\n\nThis keeps publication, destination, and departure-date filtering in SQL and explicitly fetches only the required graph. `notes` and the full `hotel` association are not loaded."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.092,
+        "exit_code": 0,
+        "context_bytes": 16388,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "0f19e98e99f1dc6d7338948a9c7d8fdc1cc99c521edf3d89db145de513c53db6",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "b8ae5df590c6236ff8bf32259378df2d274b31558706c70c67d2712eec3e6da6",
+        "answer": "```dto\n// src/main/dto/com/museum/ExhibitionCreateInput.dto\ninput ExhibitionCreateInput for Exhibition {\n    title\n    openingDate?\n    id(museum) as museumId\n}\n```\n\n`id` \u0438 `createdAt` \u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d\u044b, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u043a\u043b\u0438\u0435\u043d\u0442 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0438\u0445 \u043f\u0435\u0440\u0435\u0434\u0430\u0442\u044c.\n\n```dto\n// src/main/dto/com/museum/ExhibitionView.dto\nExhibitionView for Exhibition {\n    id\n    title\n    openingDate\n    museum {\n        name\n    }\n    exhibitCount\n}\n```\n\n`exhibitCount` \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u043c scalar-\u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e\u043c `Exhibition` (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u0432\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u043c\u044b\u043c/transient \u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e\u043c). DTO \u043d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e `exhibits`. \u0415\u0441\u043b\u0438 \u0442\u0430\u043a\u043e\u0433\u043e \u0441\u0432\u043e\u0439\u0441\u0442\u0432\u0430 \u043d\u0435\u0442, \u043a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e \u043d\u0443\u0436\u043d\u043e \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u044b\u043c aggregate-\u0437\u0430\u043f\u0440\u043e\u0441\u043e\u043c \u0438 \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0432 \u0441\u043e\u0431\u0441\u0442\u0432\u0435\u043d\u043d\u0443\u044e query-\u043f\u0440\u043e\u0435\u043a\u0446\u0438\u044e; \u0441\u0438\u043d\u0442\u0430\u043a\u0441\u0438\u0441 DTO \u0441\u0430\u043c \u043f\u043e \u0441\u0435\u0431\u0435 \u043d\u0435 \u043f\u0440\u0435\u0432\u0440\u0430\u0449\u0430\u0435\u0442 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e \u0432 `count`.\n\n\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u043d\u0438\u0435 \u0432 Kotlin:\n\n```kotlin\nval entity = input.toEntity()\n\nval saved = sql.save(entity) {\n    setAssociatedModeAll(SaveMode.REPLACE)\n}\n```\n\n\u0427\u0442\u0435\u043d\u0438\u0435:\n\n```kotlin\nval page = sql.createQuery(Exhibition::class) {\n    select(table.fetch(ExhibitionView::class))\n}.fetchPage(pageIndex, pageSize)\n```\n\n`museumId` \u0441\u043e\u0437\u0434\u0430\u0451\u0442 \u0441\u0441\u044b\u043b\u043a\u0443 \u043d\u0430 `Museum` \u043f\u0440\u0438 `toEntity()`; `id` \u0438 `createdAt` \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f server-managed."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 28.95,
+        "exit_code": 0,
+        "context_bytes": 18891,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "61f1cc1324ade667c6411c451960b12bfc8b149cc5cc3868dcecc7e3b9cff08a",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "e8c80e2ecd628976339a8cc1c72daec0cc7619edd617c96ab701c51739a0c8b5",
+        "answer": "Configure a Spring `CacheFactory` bean using the installed Caffeine and Redis providers, chaining Caffeine first and Redis second:\n\n```java\n@Bean\nCacheFactory cacheFactory(CaffeineCacheFactory caffeine,\n                          RedisCacheFactory redis) {\n    return new CacheFactory() {\n        @Override\n        public Cache createObjectCache(ImmutableType type) {\n            return new ChainCacheBuilder()\n                    .add(caffeine.createObjectCache(type))\n                    .add(redis.createObjectCache(type))\n                    .build();\n        }\n\n        @Override\n        public Cache createAssociatedIdListCache(\n                ImmutableProp prop) {\n            return new ChainCacheBuilder()\n                    .add(caffeine.createAssociatedIdListCache(prop))\n                    .add(redis.createAssociatedIdListCache(prop))\n                    .build();\n        }\n    };\n}\n```\n\nUse the provider\u2019s actual factory constructors/configuration for:\n\n- Caffeine: local first-level cache, bounded size and short TTL.\n- Redis: shared second-level cache, serialization through the configured `ObjectMapper`, longer TTL.\n- `Product` object cache.\n- The `Product.category` association cache (or the inverse association if that is what the fetch path uses).\n\nJimmer\u2019s entity loading and fetchers then use these caches transparently; repository methods need no manual cache reads.\n\nAfter a Jimmer product update, the committed change must produce a Jimmer invalidation event:\n\n1. Invalidate the product object entry in Caffeine and Redis.\n2. Invalidate affected `Product \u2192 Category` association entries when the foreign key changes.\n3. Propagate the event to every application instance.\n4. Only acknowledge the event after invalidation succeeds; retry failures.\n\nFor new deployments, use `BINLOG_ONLY` with a real committed-change/CDC delivery path rather than deprecated transaction-trigger modes. A Redis TTL is only a fallback, not the consistency mechanism. Verify updates from multiple instances and external writers."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 12.685,
+        "exit_code": 0,
+        "context_bytes": 16515,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "58d05ad11ffa36f49ac08433a7cc8111f0dd1ec9aa05b6f6f1e9bd390ebc73d0",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "27c175c2da3971ad4840994699750ecc8670a74cd284ceb9460fce775fe7e005",
+        "answer": "Use a database aggregate query, not entity loading. Group visits by exhibit and museum, count in SQL, order by that count, and paginate the grouped result.\n\n```java\npublic List<ExhibitVisitRow> mostVisited(\n        LocalDateTime from,\n        LocalDateTime to,\n        int page,\n        int size\n) {\n    var v = VISIT_TABLE;\n\n    return sqlClient.createQuery(v)\n        .where(v.visitedAt().ge(from))\n        .where(v.visitedAt().lt(to))\n        .groupBy(\n            v.exhibit().id(),\n            v.exhibit().name(),\n            v.exhibit().museum().name()\n        )\n        .orderBy(\n            v.id().count().desc(),\n            v.exhibit().id().asc() // deterministic tie-breaker\n        )\n        .select(new ExhibitVisitRow(\n            v.exhibit().id(),\n            v.exhibit().name(),\n            v.exhibit().museum().name(),\n            v.id().count()\n        ))\n        .fetchPage(page, size);\n}\n```\n\n`ExhibitVisitRow` should be a typed tuple/DTO projection appropriate to the project. For a dashboard that only needs the first 20 and a \u201chas more\u201d indicator, prefer:\n\n```java\n.fetchSlice(20, 0)\n```\n\nUse `fetchPage(page, size)` when the UI needs an exact total of matching exhibits; otherwise `fetchSlice` avoids the count query. The generated SQL performs `COUNT(*)`, `GROUP BY`, `ORDER BY COUNT(*) DESC`, and pagination. No database view or native SQL is necessary."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 29.056,
+        "exit_code": 0,
+        "context_bytes": 10770,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "4a58f312f523ba8fd447bc2374a4f5c304d3fd80bb26af830355412b3d224a35",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "2c4cf1787473a91ad0be7d043c3b10028a5cc8bf9c4988663d7b8194418e577f",
+        "answer": "```java\n@Nullable\n@Column(name = \"country_code\")\nString countryCode();\n\nString name();\n```\n\nUse a PostgreSQL partial unique index rather than `@KeyUniqueConstraint`, because PostgreSQL unique constraints cannot include a partial predicate:\n\n```sql\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\nALTER TABLE travel_destination\n    ADD CONSTRAINT travel_destination_country_code_ck\n    CHECK (\n        country_code IS NULL\n        OR country_code ~ '^[A-Z]{2}$'\n    ) NOT VALID;\n\nALTER TABLE travel_destination\n    VALIDATE CONSTRAINT travel_destination_country_code_ck;\n\nCREATE UNIQUE INDEX CONCURRENTLY travel_destination_active_country_name_uq\n    ON travel_destination (country_code, name)\n    WHERE deleted = false\n      AND country_code IS NOT NULL;\n```\n\nExisting rows remain valid with `NULL` country codes. Multiple deleted rows and multiple active rows with `NULL` country codes are allowed; active destinations with non-null country codes must have a unique `(country_code, name)` pair. Run `CREATE INDEX CONCURRENTLY` outside a transaction if required by the migration runner."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 29.63,
+        "exit_code": 0,
+        "context_bytes": 13898,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "b1ae618008b3f330de2710e85f542c5192433f6ed8d4c152f09c99d6fa6f140f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "2aa49b0c7e9571345320be71901f852391e89526392b5b06a275e8cbb14c793f",
+        "answer": "```kotlin\npackage com.acme.inventory.repository\n\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\nimport java.util.UUID\n\ninterface WarehouseRepository : KRepository<Warehouse, UUID> {\n\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\nThe service owns the repository call:\n\n```kotlin\n@ApplicationScoped\nclass WarehouseService(\n    private val warehouses: WarehouseRepository\n) {\n    fun find(code: String, fetcher: Fetcher<Warehouse>? = null): Warehouse? =\n        warehouses.findByCode(code, fetcher)\n}\n```\n\nCallers can provide a generated fetch shape containing bins and current stock summaries; `null` preserves the repository\u2019s default shape, and `Warehouse?` preserves not-found semantics. No SQL belongs in the resource."
+      },
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 10.805,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "b8be9baa9b4ff4488fdf336921f91a707e09402bbdb763bf8fd4701370bcb100",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "356cf8b5fda35497629cfe9ec2dd1d38866a3bd523cbfb6e6642a443f6346309",
+        "answer": "```java\nProductTable product = ProductTable.$;\nProductPriceImportTable imported = ProductPriceImportTable.$;\n\nvar source = sqlClient\n    .createBaseQuery(imported)\n    .where(imported.price().isNotNull())\n    .addSelect(imported.sku())\n    .addSelect(imported.price())\n    .asBaseTable();\n\nList<Tuple2<Long, String>> affected = sqlClient\n    .createUpsert(product, source)\n    .key(product.sku(), source.get_1())\n    .merge(product.price(), source.get_2())\n    .insert(product.title(), Expression.string().value(\"Imported\"))\n    .returning(product.id(), product.sku())\n    .execute();\n```\n\nThis uses a typed `INSERT ... SELECT` upsert: new rows receive the fixed title, while existing rows matched by `sku` have only `price` updated. It is database-side only when the configured dialect supports native upsert-from-select; verify the emitted SQL and ensure staging contains at most one row per SKU."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 16.078,
+        "exit_code": 0,
+        "context_bytes": 14940,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "83a5754339a54bcd204a9f453558830a34a7be3adc1c094bdfd1081c34f3ed8e",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "83c41e3101c2ca92f8fa5dda3cd75ddcdb52fb744629938c029e0731026e22ae",
+        "answer": "```kotlin\nimport org.babyfish.jimmer.sql.*\n\n@Entity\n@KeyUniqueConstraint([\"warehouseId\", \"productId\"])\ninterface StockItem {\n    @Id\n    val id: Long\n\n    @Key(group = \"warehouseProduct\")\n    val warehouseId: Long\n\n    @Key(group = \"warehouseProduct\")\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\nThe database must also have a unique constraint on `(warehouse_id, product_id)`.\n\n```kotlin\nfun updateStock(command: StockItem): StockItem {\n    val result = sqlClient.saveCommand(command)\n        .setMode(SaveMode.UPDATE_ONLY)\n        .setOptimisticLock(OptimisticLockMode.VERSION)\n        .execute()\n\n    if (!result.isAccepted) {\n        error(\"Stock item does not exist: ${command.id}\")\n    }\n\n    return result.modifiedEntity\n}\n```\n\n`UPDATE_ONLY` makes a missing `id` a rejected save rather than an insert. A stale `version` fails the optimistic-lock check (typically with an optimistic-lock conflict exception), so the service should report a concurrent modification and not treat the command as successful. The database unique constraint prevents duplicate warehouse/product pairs."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 24.151,
+        "exit_code": 0,
+        "context_bytes": 10658,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "b75564185391288a8bd993a1446032c7cc499d95095aba17f11c0815f0e391f9",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "c7aac2e7be6a8d5b7dcfcab790ea56409a3d298c1a81e13f7f66c971ef83f3e0",
+        "answer": "```java\nprivate static final TripFetcher TRIP_FETCHER =\n    TripFetcher.$\n        .id()\n        .name()\n        .destination(DestinationFetcher.$.name())\n        .itineraryStops(\n            ItineraryStopFetcher.$\n                .city(CityFetcher.$.name())\n                .arrivalTime()\n        );\n\npublic List<Trip> findPublishedTrips(String destination, LocalDate departureDate) {\n    var t = Tables.TRIP_TABLE;\n\n    return sqlClient\n        .createQuery(t)\n        .where(t.published().eq(true))\n        .where(t.destination().name().eq(destination))\n        .where(t.departureDate().eq(departureDate))\n        .orderBy(t.id().asc())\n        .select(t.fetch(TRIP_FETCHER))\n        .execute();\n}\n```\n\nThe fetcher explicitly loads only trip `id`/`name`, destination `name`, and stop city/arrival time. Internal notes and the hotel association are not fetched. Filtering remains in SQL."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 37.447,
+        "exit_code": 0,
+        "context_bytes": 16388,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "0f19e98e99f1dc6d7338948a9c7d8fdc1cc99c521edf3d89db145de513c53db6",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "a5fa85a7fb6719c5d1b502a35a9862bc30b3381fc37195d4e4bb60c837b1defe",
+        "answer": "```dto\n// src/main/dto/com/museum/ExhibitionCreateInput.dto\ninput ExhibitionCreateInput {\n    title\n    openingDate?\n    id(museum) as museumId\n}\n```\n\n`id` \u0438 `createdAt` \u043d\u0430\u043c\u0435\u0440\u0435\u043d\u043d\u043e \u043d\u0435 \u0432\u043a\u043b\u044e\u0447\u0435\u043d\u044b \u0432\u043e \u0432\u0445\u043e\u0434\u043d\u043e\u0439 DTO. `museumId` \u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u0435\u043d; `openingDate?` \u2014 \u043d\u0435\u043e\u0431\u044f\u0437\u0430\u0442\u0435\u043b\u0435\u043d.\n\n```dto\n// src/main/dto/com/museum/ExhibitionView.dto\nExhibitionView {\n    id\n    title\n    openingDate\n    museum {\n        name\n    }\n    exhibitCount\n}\n```\n\n`exhibitCount` \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c scalar-\u0441\u0432\u043e\u0439\u0441\u0442\u0432\u043e\u043c `Exhibition` (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, \u0432\u044b\u0447\u0438\u0441\u043b\u044f\u0435\u043c\u044b\u043c/\u0444\u043e\u0440\u043c\u0443\u043b\u043e\u0439). DTO \u0441\u0430\u043c \u043f\u043e \u0441\u0435\u0431\u0435 \u043d\u0435 \u043f\u0440\u0435\u043e\u0431\u0440\u0430\u0437\u0443\u0435\u0442 \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044e `exhibits` \u0432 count; \u043a\u043e\u043b\u043b\u0435\u043a\u0446\u0438\u044f \u044d\u043a\u0441\u043f\u043e\u043d\u0430\u0442\u043e\u0432 \u0432 View \u043d\u0435 \u0432\u043a\u043b\u044e\u0447\u0430\u0435\u0442\u0441\u044f.\n\n\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435:\n\n```kotlin\nfun create(input: ExhibitionCreateInput): ExhibitionView {\n    val saved = sql\n        .saveCommand(input.toEntity())\n        .execute()\n        .modifiedEntity\n\n    return sql\n        .createQuery(Exhibition::class) {\n            where(table.id eq saved.id)\n            select(table.fetch(ExhibitionView::class))\n        }\n        .fetchOne()\n}\n```\n\n\u0417\u0430\u043f\u0440\u043e\u0441:\n\n```kotlin\nfun find(id: Long): ExhibitionView =\n    sql.createQuery(Exhibition::class) {\n        where(table.id eq id)\n        select(table.fetch(ExhibitionView::class))\n    }.fetchOne()\n```\n\n_generated `toEntity()` \u0441\u043e\u0445\u0440\u0430\u043d\u044f\u0435\u0442 \u0442\u043e\u043b\u044c\u043a\u043e \u043f\u043e\u043b\u044f \u0432\u0445\u043e\u0434\u043d\u043e\u0433\u043e DTO; `id` \u0438 `createdAt` \u043e\u0441\u0442\u0430\u044e\u0442\u0441\u044f server-managed."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 21.965,
+        "exit_code": 0,
+        "context_bytes": 18891,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "61f1cc1324ade667c6411c451960b12bfc8b149cc5cc3868dcecc7e3b9cff08a",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "50f417d236f24444e2858760d511cfdf0ea273effa0b0c70dbcd8dbf4b78432b",
+        "answer": "Use Jimmer\u2019s cache integration, not repository-level cache calls:\n\n```yaml\njimmer:\n  trigger-type: BINLOG_ONLY\n```\n\nConfigure a `CacheFactory` using the installed Spring cache provider:\n\n- **Object cache:** Product and Category entity caches.\n- **Association cache:** `Product.category`.\n- **Cache chain:** Caffeine as the local tier, Redis as the shared tier, built with the provider\u2019s `ChainCacheBuilder`.\n- **Redis:** configure the Spring `RedisConnectionFactory` and the provider\u2019s Redis binder/serializer.\n- Return `null` from the factory only for types or properties that should not be cached.\n\nJimmer then transparently uses the caches while assembling `Product` and its `Category`; repositories remain unchanged.\n\nAfter a Jimmer product update, the committed change must produce a BinLog/CDC event. Jimmer\u2019s invalidation processor must:\n\n1. Evict or update the `Product` object entry.\n2. Evict affected `Product.category` association entries.\n3. Propagate invalidation to Redis and all local Caffeine tiers.\n4. Acknowledge the CDC event only after invalidation succeeds; failures must retry/redeliver.\n\n`TRANSACTION_ONLY` and `BOTH` should not be used for new configuration. CDC must also cover writes from outside this service, and the setup should be tested across multiple instances and after Redis/consumer reconnects."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 12.622,
+        "exit_code": 0,
+        "context_bytes": 16515,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "58d05ad11ffa36f49ac08433a7cc8111f0dd1ec9aa05b6f6f1e9bd390ebc73d0",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "953dcc41bff3383056e502d4054a986f94d1ede3c3e9fd93837795f43354fe0d",
+        "answer": "Use an aggregate query rooted at `Visit`, not entity loading:\n\n```java\npublic Page<Tuple4<Long, String, String, Long>> mostVisitedExhibits(\n        LocalDateTime from,\n        LocalDateTime to,\n        int page,\n        int size\n) {\n    VisitTable v = VISIT_TABLE;\n    NumericExpression<Long> visits = v.id().count();\n\n    return sqlClient\n        .createQuery(v)\n        .where(v.visitedAt().ge(from))\n        .where(v.visitedAt().lt(to))\n        .groupBy(\n            v.exhibit().id(),\n            v.exhibit().name(),\n            v.exhibit().museum().name()\n        )\n        .orderBy(\n            visits.desc(),\n            v.exhibit().id().asc() // deterministic tie-breaker\n        )\n        .select(\n            v.exhibit().id(),\n            v.exhibit().name(),\n            v.exhibit().museum().name(),\n            visits\n        )\n        .fetchPage(page, size);\n}\n```\n\nThe result contains:\n\n1. exhibit ID\n2. exhibit name\n3. museum name\n4. visit count\n\nFor an infinite-scroll dashboard where an exact total is unnecessary, use:\n\n```java\n.fetchSlice(size, offset)\n```\n\nand inspect `isTail`. A database view or native SQL is unnecessary: Jimmer generates the `WHERE`, `GROUP BY`, `COUNT`, `ORDER BY`, and pagination SQL directly. Only select the required scalar columns; do not fetch `Visit` rows or sort in Java."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 30.57,
+        "exit_code": 0,
+        "context_bytes": 10770,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "4a58f312f523ba8fd447bc2374a4f5c304d3fd80bb26af830355412b3d224a35",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "fe81b80da741d6c18127b43cb38cd11ec61de5fa633264e1918505ceb7374bec",
+        "answer": "### Entity\n\n```java\nimport org.jetbrains.annotations.Nullable;\nimport org.babyfish.jimmer.sql.Entity;\nimport org.babyfish.jimmer.sql.Table;\n\n@Entity\n@Table(name = \"travel_destination\")\npublic interface TravelDestination {\n\n    // Existing properties...\n\n    @Nullable\n    String countryCode();\n\n    String name();\n}\n```\n\nDo not add `@KeyUniqueConstraint`: the required uniqueness is partial (`deleted = false`) and nullable, so the PostgreSQL index is the authoritative constraint.\n\n### PostgreSQL migration\n\n```sql\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\nALTER TABLE travel_destination\n    ADD CONSTRAINT travel_destination_country_code_format_ck\n    CHECK (\n        country_code IS NULL\n        OR country_code ~ '^[A-Z]{2}$'\n    );\n\nCREATE UNIQUE INDEX travel_destination_active_country_name_uq\n    ON travel_destination (country_code, name)\n    WHERE deleted = false;\n```\n\nExisting rows remain valid with `NULL`. PostgreSQL permits multiple active rows with `NULL` `country_code`; non-null `(country_code, name)` pairs must be unique among non-deleted rows. Deleted rows do not participate in uniqueness and may reuse active pairs. Verify the actual logical-delete column name (`deleted` above) and table name before applying."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 27.285,
+        "exit_code": 0,
+        "context_bytes": 13898,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "b1ae618008b3f330de2710e85f542c5192433f6ed8d4c152f09c99d6fa6f140f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "3a783c6d6f890f9d488100dbb4bdea6c02a51bafa9bcb1521126d59727a64d8d",
+        "answer": "```kotlin\n// src/main/kotlin/com/example/inventory/repository/WarehouseRepository.kt\npackage com.example.inventory.repository\n\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\nimport com.example.inventory.model.Warehouse\nimport java.util.UUID\n\ninterface WarehouseRepository : KRepository<Warehouse, UUID> {\n\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\nThe Quarkus/Jimmer repository generator implements the declarative `findByCode` method. Callers may pass a fetcher containing the required bin and current-stock-summary shape; `null` preserves the default shape. A missing warehouse returns `null`, and resource classes should delegate to a service rather than issue SQL directly."
+      }
+    ]
+  }
+}

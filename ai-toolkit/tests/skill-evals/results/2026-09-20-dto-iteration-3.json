@@ -1,0 +1,97 @@
+{
+  "grading_method": "Targeted DTO rerun after explicitly separating dynamic presence handling from optional non-null collections; both repetitions retained.",
+  "baseline": {
+    "passed": 2,
+    "total": 8,
+    "pass_rate": 0.25,
+    "median_seconds": 8.403,
+    "mean_context_bytes": 7383,
+    "runs": [
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.381,
+        "exit_code": 0,
+        "context_bytes": 7383,
+        "prompt_sha256": "9259f7520be4ced20abd5345513f288a84d9bd86687cf0f5a9ae0441bb974f39",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "fac1c5fd70cb34bb700c177d3da295211911f7e079209765e512032cba4afb4b",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    note\n    bins\n}\n```\n\nJSON round-trip assertion: deserializing `{}` leaves both `note` and `bins` unloaded, while `{\"note\":null,\"bins\":[]}` preserves both properties as loaded, with `note == null` and an empty `bins` collection."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.425,
+        "exit_code": 0,
+        "context_bytes": 7383,
+        "prompt_sha256": "9259f7520be4ced20abd5345513f288a84d9bd86687cf0f5a9ae0441bb974f39",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "5e03ea0811e9fe4126e8611a311bc54f3184661e3eec6d8fc4467b3eff15d507",
+        "answer": "```dto\ndynamic input ShelfPatch for com.example.inventory.Shelf {\n    note\n    bins\n}\n```\n\nJSON round-trip assertion: after deserializing `{\"note\":null,\"bins\":[]}`, assert `note` is loaded with value `null` and `bins` is loaded as an empty list; after deserializing `{}`, assert both properties are unloaded, so persistence leaves them unchanged."
+      }
+    ]
+  },
+  "updated": {
+    "passed": 6,
+    "total": 8,
+    "pass_rate": 0.75,
+    "median_seconds": 7.888,
+    "mean_context_bytes": 10141,
+    "runs": [
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.802,
+        "exit_code": 0,
+        "context_bytes": 10141,
+        "prompt_sha256": "0c7565c7f5ae72fadfae87105863d978a0274712aa10b52c16d557cbb8df1b20",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "6440cc2f0338ab50dd7a6767d02aeb7150674e2583d83a0cca743c0c0eb2e2eb",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: deserialize `{ \"id\": \"...\", \"note\": null, \"bins\": [] }`, then assert the generated entity has `note` and `bins` loaded, with `note == null` and an empty `bins`; deserializing with either property omitted must leave that property unloaded."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.974,
+        "exit_code": 0,
+        "context_bytes": 10141,
+        "prompt_sha256": "0c7565c7f5ae72fadfae87105863d978a0274712aa10b52c16d557cbb8df1b20",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "d707c543473e37219ca0de26e7e89855293c8960631386150293b7c0a9b5d3d5",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nAssertion: after deserializing `{\"id\":\"\u2026\",\"note\":null,\"bins\":[]}`, `toEntity()` must mark both `note` and `bins` as loaded, with `note == null` and an empty `bins`; omitting either property must leave that property unloaded."
+      }
+    ]
+  }
+}

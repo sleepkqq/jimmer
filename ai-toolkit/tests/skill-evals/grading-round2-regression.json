@@ -1,0 +1,496 @@
+{
+  "method": "Independent agent grading, hidden condition labels and shuffled answer order; source-verified whole assertions, including code validity. No post-unmask grade changes.",
+  "rubric_notes": [
+    "Applied every assertion conjunctively with no half credit; a correct conceptual flow does not rescue invented API syntax in the code-based assertion implementing it. Java source confirms execute() -> SimpleSaveResult<E>, execute(View.class) -> SimpleSaveResult.View<E,V>, and table-instance/expression-based createQuery syntax (JSqlClient.java:59-64; SimpleEntitySaveCommand.java:401-419; SimpleSaveResult.java:17-139).",
+    "INSERT_IF_ABSENT rejected-root behavior was checked beyond happy-path documentation: Saver.finishSave (Saver.java:265-278) materializes accepted roots only, with a separate exception for association targets; SimpleEntitySaveCommandImpl.execute converts the result to a requested view rather than looking up a conflicting root. A view request therefore does not establish the existing-row contract.",
+    "Task/rubric mismatch: inheritance assertion 1 additionally requires distinguishing MappedSuperclass reuse, which the task does not explicitly request. All four answers supply valid entity inheritance but omit that distinction; the original criterion was retained and failed. Public inheritance/mapping.mdx:124-126 also confirms the untagged root with derived types is abstract, so the shown exhaustive two-branch DTO is valid.",
+    "Task/rubric mismatch: ShelfPatch assertion 3 additionally requires discussing associated save mode/dissociation, although the task asks for a DTO declaration and a JSON round-trip assertion. All four declarations handle presence correctly, but all omit that additional caveat, so assertion 3 fails. Exactly one DTO is interpreted as one top-level ShelfPatch declaration; its allow-listed nested bins ID shape is explicitly permitted by assertion 4.",
+    "Task/rubric mismatch: create-if-absent assertion 3 explicitly demands the technical self-assignment/update-trigger caveat, beyond the task's direct no-update/service-flow question. Only answer-012 states that side-effect warning; the other three fail this assertion while preserving no-update intent.",
+    "Task/rubric mismatch: the cache task requests the current supported setup but does not explicitly ask to discuss BOTH. Assertion 1 nevertheless requires rejecting both deprecated transaction modes. None of the four answers supplies that complete explanation; TriggerType.java marks both TRANSACTION_ONLY and BOTH deprecated.",
+    "The insert-select rubric additionally requires explaining skipped-row exclusion and avoiding universal native-execution guarantees. Merely naming a variable insertedIds was not treated as that explanation in answer-004/015. Answer-016's unconditional no-application-loading claim fails the execution qualification; public insert-from-select.mdx:459-470 documents dialect/shape fallback materialization. Correct API calls and return-order statements were scored independently.",
+    "Equivalent semantics were accepted without mandatory literal API wording: answer-011 explicitly requires intentional type-change enablement and exact matching, satisfying assertion 4 despite not spelling setTypeChangeAllowed. Conversely, omission of an entire requested caveat was not treated as equivalent wording.",
+    "Public Quarkus verification used project/jimmer-quarkus/README.md (1.0.1 dependency coordinates and readiness sections) and JimmerDataSourceRuntimeConfig.java:145-155 (constraintViolationTranslatable=false; sqlStateExceptionTranslator=true). Kotlin revision syntax and root-only semantics match public docs/mutation/save-command/version-mode.mdx:45-59,105-108 and KSaveCommandPartialDsl.kt."
+  ],
+  "cases": {
+    "cache-cdc": {
+      "baseline": [
+        [
+          false,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          false,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "cache-cdc",
+          "repeat": 2,
+          "masked_id": "answer-005",
+          "detail": "Calls TRANSACTION_ONLY deprecated but omits BOTH and its deprecation. Otherwise supplies real importer-inclusive CDC to BinLog, retry without checkpoint on invalidation failure, cache gating and two-instance rollout tests."
+        },
+        {
+          "condition": "updated",
+          "case": "cache-cdc",
+          "repeat": 1,
+          "masked_id": "answer-008",
+          "detail": "Does not identify either transaction mode as deprecated or reject BOTH on that basis. Correct all-writer CDC-to-BinLog flow, successful-invalidation-before-ack ordering, retry, readiness gating and cross-instance rollout checks."
+        },
+        {
+          "condition": "updated",
+          "case": "cache-cdc",
+          "repeat": 2,
+          "masked_id": "answer-017",
+          "detail": "Real all-writer CDC including importer, no ack on Redis failure, retries, readiness bypass and multi-instance/replay checks are present. Missing the required deprecation/rejection of both TRANSACTION_ONLY and BOTH."
+        },
+        {
+          "condition": "baseline",
+          "case": "cache-cdc",
+          "repeat": 1,
+          "masked_id": "answer-018",
+          "detail": "Rejects TRANSACTION_ONLY without explaining both transaction modes are deprecated and omits BOTH. Correct BinLog delivery for all writers, checkpoint-after-invalidation discipline and gated multi-instance rollout/recovery tests."
+        }
+      ]
+    },
+    "insert-if-absent-result": {
+      "baseline": [
+        [
+          true,
+          false,
+          false,
+          true
+        ],
+        [
+          true,
+          false,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          false,
+          false,
+          true
+        ],
+        [
+          true,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "insert-if-absent-result",
+          "repeat": 2,
+          "masked_id": "answer-010",
+          "detail": "Correct rejected-root/View explanation and conceptual acceptance-then-SKU-lookup flow, but SaveResult<Item> is not the Java result API: execute() returns SimpleSaveResult<Item>, so the shown acceptance flow does not compile. Omits technical self-assignment/update-trigger caveat. Correct separate-statement isolation/deletion caveat."
+        },
+        {
+          "condition": "updated",
+          "case": "insert-if-absent-result",
+          "repeat": 2,
+          "masked_id": "answer-012",
+          "detail": "Correct rejection semantics, no-update/self-assignment side-effect warning and concurrency caveat. Rejected lookup code is invented Jimmer Java syntax: createQuery(ItemTable.class), where(ItemTable::sku, eq(...)) and select(ItemTable::id); JSqlClient takes a table instance and expression-based predicates/selections."
+        },
+        {
+          "condition": "baseline",
+          "case": "insert-if-absent-result",
+          "repeat": 1,
+          "masked_id": "answer-025",
+          "detail": "Correct conceptual rejected-root contract and separate-statement concurrency caveat. Broken result declaration: execute(ItemView.class) returns SimpleSaveResult.View<Item, ItemView>, not SaveResult<Item>; getModifiedView belongs to that view-result subtype. Omits self-assignment/update-trigger caveat."
+        },
+        {
+          "condition": "updated",
+          "case": "insert-if-absent-result",
+          "repeat": 1,
+          "masked_id": "answer-028",
+          "detail": "Correct conceptual acceptance/lookup and isolation caveat, but nonexistent SaveResult<Item> makes the Java flow uncompilable; execute() returns SimpleSaveResult<Item>. Missing technical self-assignment/update-trigger warning. The 'conflict row must now exist' comment is too strong, though the later concurrent-deletion caveat qualifies it."
+        }
+      ]
+    },
+    "external-version": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "external-version",
+          "repeat": 2,
+          "masked_id": "answer-002",
+          "detail": "Valid Kotlin ASSIGNMENT plus UPSERT/setUpdateWhere(newNonNull(version) gt table.version); checks isAccepted for ordinary rejection and states root-only scope. Matches public version-mode.mdx and KSaveCommandPartialDsl."
+        },
+        {
+          "condition": "baseline",
+          "case": "external-version",
+          "repeat": 1,
+          "masked_id": "answer-009",
+          "detail": "Correct Kotlin external-version assignment and newer-only update predicate while preserving insertion; handles isAccepted=false normally and explicitly excludes associated children from version-mode propagation."
+        },
+        {
+          "condition": "updated",
+          "case": "external-version",
+          "repeat": 1,
+          "masked_id": "answer-021",
+          "detail": "Uses verified Kotlin ASSIGNMENT/newNonNull/setUpdateWhere APIs with UPSERT, ordinary isAccepted rejection and root-only version policy."
+        },
+        {
+          "condition": "baseline",
+          "case": "external-version",
+          "repeat": 2,
+          "masked_id": "answer-030",
+          "detail": "Correct Kotlin external-version ASSIGNMENT, UPSERT newer-only update predicate, isAccepted rejection handling and explicit non-propagation to child objects."
+        }
+      ]
+    },
+    "dissociation": {
+      "baseline": [
+        [
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "dissociation",
+          "repeat": 2,
+          "masked_id": "answer-001",
+          "detail": "Correct owning Bin.warehouse @OnDissociate(DELETE), unannotated inverse bins, and explicit child deletion versus database parent-delete cascading; RESTRICT need not change."
+        },
+        {
+          "condition": "baseline",
+          "case": "dissociation",
+          "repeat": 1,
+          "masked_id": "answer-003",
+          "detail": "Places DELETE on Bin.warehouse only and correctly separates ORM removal of children from FK behavior when deleting the parent."
+        },
+        {
+          "condition": "updated",
+          "case": "dissociation",
+          "repeat": 1,
+          "masked_id": "answer-023",
+          "detail": "Correct owning to-one annotation and clean inverse collection; clearly distinguishes ORM dissociation deletes from database parent-delete actions and retains RESTRICT for replacement."
+        },
+        {
+          "condition": "baseline",
+          "case": "dissociation",
+          "repeat": 2,
+          "masked_id": "answer-031",
+          "detail": "Correct @OnDissociate(DELETE) placement on Bin.warehouse only, explicit ORM child deletion and separate database ON DELETE CASCADE semantics without requiring an FK change."
+        }
+      ]
+    },
+    "dto-patch": {
+      "baseline": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "dto-patch",
+          "repeat": 2,
+          "masked_id": "answer-013",
+          "detail": "Valid single dynamic ShelfPatch declaration with id, nullable note and bins? { id }; loaded-null/loaded-empty versus omission assertion is correct. Missing required explanation that collection clearing depends on associated save mode/dissociation policy."
+        },
+        {
+          "condition": "updated",
+          "case": "dto-patch",
+          "repeat": 2,
+          "masked_id": "answer-019",
+          "detail": "Correct dynamic optional note/bins shape, allow-listed single DTO and loaded-state omission/null/empty assertion. Does not state the associated save-mode/dissociation requirement for actually clearing bins."
+        },
+        {
+          "condition": "updated",
+          "case": "dto-patch",
+          "repeat": 1,
+          "masked_id": "answer-026",
+          "detail": "Valid dynamic ShelfPatch with nullable note and optional bins association IDs, plus explicit toEntity loaded-state assertions. Collection clear semantics lack the required save-mode/dissociation-policy caveat."
+        },
+        {
+          "condition": "baseline",
+          "case": "dto-patch",
+          "repeat": 1,
+          "masked_id": "answer-029",
+          "detail": "Single allow-listed dynamic DTO correctly preserves omitted note/bins versus explicit null/empty through toEntity. Missing required association save-mode/dissociation explanation for collection clearing."
+        }
+      ]
+    },
+    "quarkus-current": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "quarkus-current",
+          "repeat": 2,
+          "masked_id": "answer-006",
+          "detail": "Correct unified 1.0.1 JitPack runtime/KSP coordinates, Kotlin and model index-dependency configuration, exactly-one CacheReadiness contract, bypass-with-invalidation semantics, tracker/CDC distinction and false/true translator defaults. Verified against public Quarkus README and runtime config."
+        },
+        {
+          "condition": "baseline",
+          "case": "quarkus-current",
+          "repeat": 1,
+          "masked_id": "answer-014",
+          "detail": "Supplies matching fork coordinates/JitPack, Kotlin/Jandex setup, exactly one readiness provider with stable nonblank namespace, read/fill bypass while invalidations continue, local-tracker versus CDC distinction and correct Quarkus translator defaults."
+        },
+        {
+          "condition": "updated",
+          "case": "quarkus-current",
+          "repeat": 1,
+          "masked_id": "answer-022",
+          "detail": "Correct 1.0.1 same-family dependencies and JitPack, Kotlin/Jandex visibility, fully specified CacheReadiness CDI contract and invalidation behavior, tracker versus CDC distinction, and false/true translation defaults."
+        },
+        {
+          "condition": "baseline",
+          "case": "quarkus-current",
+          "repeat": 2,
+          "masked_id": "answer-032",
+          "detail": "Correct fork coordinates/repository, Kotlin/index-dependency configuration, exactly-one CacheReadiness with stable nonblank namespace and bypass/invalidation contract, local Redis readiness distinction and verified Quarkus false/true translator defaults."
+        }
+      ]
+    },
+    "inheritance": {
+      "baseline": [
+        [
+          false,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          false,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "inheritance",
+          "repeat": 1,
+          "masked_id": "answer-007",
+          "detail": "Valid SINGLE_TABLE/discriminator/entity snippets, nullable branch columns and #types/#exhaustive. Missing the required distinction from MappedSuperclass reuse. Derived read-only discriminator and explicitly enabled exact subtype transition satisfy the transition criterion."
+        },
+        {
+          "condition": "baseline",
+          "case": "inheritance",
+          "repeat": 2,
+          "masked_id": "answer-011",
+          "detail": "Correct inheritance annotations, physical nullability and exhaustive DTO branches, but no MappedSuperclass/reuse distinction. Explains derived read-only discriminator, disabled-by-default transitions and intentional enablement with exact matching; semantic enablement is accepted without requiring the literal setter name."
+        },
+        {
+          "condition": "updated",
+          "case": "inheritance",
+          "repeat": 1,
+          "masked_id": "answer-020",
+          "detail": "Valid entity hierarchy and exhaustive DTO syntax, explicit database-nullability explanation and read-only discriminator with opt-in exact type transition. Missing required distinction between entity inheritance and MappedSuperclass reuse."
+        },
+        {
+          "condition": "updated",
+          "case": "inheritance",
+          "repeat": 2,
+          "masked_id": "answer-027",
+          "detail": "Correct mapping syntax, nullable subtype columns, exhaustive branch DTO and explicitly enabled exact subtype transitions with derived discriminator. Does not distinguish MappedSuperclass reuse as required by assertion 1."
+        }
+      ]
+    },
+    "insert-from-select": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          false
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "insert-from-select",
+          "repeat": 2,
+          "masked_id": "answer-004",
+          "detail": "Valid typed base-table source, createInsert mappings, ID conflict key and returning syntax. States unordered results, single-physical-table target and dialect qualification, but never explains that skipped conflicts are excluded from returning."
+        },
+        {
+          "condition": "baseline",
+          "case": "insert-from-select",
+          "repeat": 2,
+          "masked_id": "answer-015",
+          "detail": "Correct typed source, separate archive target, column mappings, ID conflict handling and returning API. Dialect-qualified execution and joined-target exclusion are correct; only unspecified order is explained, not exclusion of skipped conflicts from returned IDs."
+        },
+        {
+          "condition": "baseline",
+          "case": "insert-from-select",
+          "repeat": 1,
+          "masked_id": "answer-016",
+          "detail": "Correct typed insert source/mappings/conflict API, inserted-only returning and unordered IDs. Rejects joined targets, but unconditionally claims INSERT ... SELECT avoids application entity loading; public insert-from-select.mdx documents materialization/save-pipeline fallback for unsupported dialects or shapes."
+        },
+        {
+          "condition": "updated",
+          "case": "insert-from-select",
+          "repeat": 1,
+          "masked_id": "answer-024",
+          "detail": "Correct typed base source, target mappings and ID conflict key; explicitly returns inserted-only unordered IDs, rejects joined targets and acknowledges dialect-dependent source materialization."
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "jimmer-docs-mcp",
+  "version": "1.0.0",
+  "description": "Commit-pinned Jimmer documentation and source retrieval over official Git repositories",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/bundle.js --minify",
+    "start": "node dist/bundle.js",
+    "dev": "tsx src/index.ts",
+    "test": "npm run build && npm run bundle && tsx --test tests/*.test.ts",
+    "test:live": "npm run build && npm run bundle && tsx tests/live-smoke.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "esbuild": "^0.27.7",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

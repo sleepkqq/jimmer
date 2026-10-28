@@ -1,0 +1,10 @@
+{
+  "method": "Targeted DTO rerun after compiler rejected redundant optional modifier; complete pair retained, not selected best answers.",
+  "cases": {
+    "dto-patch": {
+      "baseline": [[false, true, false, false], [false, true, false, false]],
+      "updated": [[true, true, false, true], [false, true, false, true]],
+      "evidence": "Run 1 correctly emits bare nullable note and optional bins?. Run 2 drops ? from non-null bins, so omission semantics remain wrong. Both preserve an explicit shape, but neither mentions associated-mode/dissociation requirements. This prompted making the non-null collection rule explicit and adding a collection to the general BookPatch example."
+    }
+  }
+}

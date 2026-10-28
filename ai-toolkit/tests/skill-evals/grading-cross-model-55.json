@@ -1,0 +1,928 @@
+{
+  "method": "Same source-grounded masked grader per task across all models and conditions; labels unmasked only after all 192 grade vectors were validated. No post-unmask grade changes.",
+  "cases": {
+    "cache-cdc": {
+      "baseline": [
+        [
+          false,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          false,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-017",
+          "reason": "Substantive CDC rollout and retry/no-ack contract, but never names BINLOG_ONLY and omits deprecation of both transaction modes. Generic 'mode intended for CDC' does not choose the required enum."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-133",
+          "reason": "Correct BINLOG_ONLY with deployed all-writer CDC and retry-before-ack plus importer/two-instance verification. Neither BOTH nor both modes' deprecation is explained."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-149",
+          "reason": "Complete deprecation rejection, real committed all-writer BinLog delivery, invalidation-gated checkpoint/retry and multi-instance guarded rollout."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-174",
+          "reason": "Correctly rejects both deprecated modes, supplies actual BinLog CDC, mandates failed-invalidation retry without checkpoint and verifies/gates multi-instance caches."
+        }
+      ]
+    },
+    "insert-if-absent-result": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          true
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          true,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-081",
+          "reason": "No isAccepted rejection explanation/check. getModifiedEntity() is non-null even for rejected roots (SimpleSaveResult), so item!=null takes the wrong branch and reading unloaded generated ID can throw. Self-assignment/trigger caveat absent; visibility/isolation retry caveat present."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-085",
+          "reason": "No acceptance flag; rejected modified entity is non-null and its unloaded id() is not safely tested against null. Omits self-assignment/trigger caveat and treats unique constraint as sufficient without the separate lookup visibility/deletion race."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-099",
+          "reason": "Correct rejection semantics, self-update warning and concurrency handling. execute(ItemView.class) eagerly converts before isAccepted is checked; a rejected root's generated ID may be unloaded, so a normal required-id View can throw before the fallback. SimpleSaveResult.toView and DtoGenerator.addConverterConstructor confirm this rejected-branch defect."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-101",
+          "reason": "Correct conceptual acceptance/lookup, self-assignment trigger warning and isolation caveat, but SaveResult<Item> is not the Java API; execute() returns SimpleSaveResult<Item>, making the shown flow uncompilable."
+        }
+      ]
+    },
+    "external-version": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-037",
+          "reason": "Correct Kotlin assignment mode, UPSERT condition, ordinary acceptance check and explicit root-only version configuration."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-049",
+          "reason": "Correct external-version assignment and strictly newer update predicate; inserts preserved, isAccepted used, children explicitly excluded."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-064",
+          "reason": "Maximum-steps status only; no save configuration or substantive rejection/scope answer."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-150",
+          "reason": "Only maximum-steps status and a request to answer later; none of the criteria supplied."
+        }
+      ]
+    },
+    "dissociation": {
+      "baseline": [
+        [
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-079",
+          "reason": "Correct DELETE on Bin.warehouse only and correct distinction between association replacement and database parent deletion."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-090",
+          "reason": "Owning Bin.warehouse has DELETE, inverse bins does not; child dissociation is correctly separated from FK parent-delete actions."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-163",
+          "reason": "Correct owning to-one DELETE annotation and imports; clearly explains separate ORM dissociation and SQL FK behavior."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-172",
+          "reason": "Correct DELETE on Bin.warehouse only and clear child-removal versus parent-delete distinction; retains RESTRICT."
+        }
+      ]
+    },
+    "dto-patch": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-042",
+          "reason": "Correct dynamic declaration and unloaded/null/empty distinction; omits required associated save-mode/dissociation explanation for persisted collection clearing."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-069",
+          "reason": "Not dynamic input; +note? redundantly optionalizes an already-nullable property, rejected by DtoPropBuilder.java:549-554. bins lacks a target shape; no valid generated presence contract or strict allow-list, and no collection save caveat."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-147",
+          "reason": "Correct dynamic ShelfPatch and loaded-state control for omitted versus explicit null/empty; omits required collection save-mode/dissociation caveat."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-190",
+          "reason": "Exports ShelfPatch as the entity and attaches a body instead of exporting Shelf and declaring dynamic input ShelfPatch. allScalars/alias sketch is not a valid allow-listed PATCH declaration; no generated loaded-state or collection-policy contract."
+        }
+      ]
+    },
+    "quarkus-current": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          true,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-083",
+          "reason": "Correct same-family dependencies, Kotlin/index-dependency configuration, exactly-one CacheReadiness with stable nonblank namespace, read/fill bypass with invalidations and correct defaults."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-100",
+          "reason": "Only a maximum-steps status and future task list; supplies none of the asserted answers."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-106",
+          "reason": "jimmer-quarkus-starter is the wrong artifact (public README uses quarkus-jimmer); classpath alone omits Jandex and Kotlin config. Guard SPI/namespace/fill/invalidation requirements and explicit false/true defaults absent. Correctly distinguishes tracker readiness from CDC catch-up."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-113",
+          "reason": "Correct fork dependencies and Kotlin/Jandex setup; full readiness provider contract, CDC distinction and Quarkus defaults. Omitted platform version is ordinary bootstrap, not a defect."
+        }
+      ]
+    },
+    "inheritance": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          true,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          false
+        ],
+        [
+          false,
+          true,
+          true,
+          false
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-008",
+          "reason": "Maximum-steps status and remaining-task list only; no mapping, nullability, DTO or transition answer."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-012",
+          "reason": "Uses JPA-style DiscriminatorColumn instead of Jimmer's discriminator property; no mapped-superclass distinction. -> subtype DTO blocks are not #types/#exhaustive. Nullability is correct; transition explanation omits derived/read-only and explicit exact opt-in contract."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-062",
+          "reason": "Correct entity-versus-MappedSuperclass mapping, nullability and exhaustive DTO. Transition paragraph mentions allowing type changes but omits the required exact-match restriction (inheritance/mutation.mdx:133-136)."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-073",
+          "reason": "Substantive answer despite status prefix: valid mapping/nullability/exhaustive DTO. Omits MappedSuperclass distinction and exact save matching required for enabled type transitions."
+        }
+      ]
+    },
+    "insert-from-select": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-010",
+          "reason": "Correct direct typed base-table source, mappings/ID conflict key, inserted-only unordered returning, joined-target exclusion and native-dialect qualification."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-051",
+          "reason": "Invented createInsert(Class)/select/onConflict(ConflictAction.IGNORE)/executeAndGetGeneratedIds chain; draft setters take values, not table expressions. No typed base source or valid returning API. Joined exclusion is correct but database-only insert-select is asserted without dialect/shape qualification."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-109",
+          "reason": "Correct typed base source, mappings and ID conflict target; skipped IDs excluded, return order unspecified, native execution qualified and joined targets rejected."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-125",
+          "reason": "Maximum-steps status only; requested API and semantic answers are listed as unfinished tasks."
+        }
+      ]
+    },
+    "catalog-query-derived-upsert": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-094",
+          "reason": "Only restates requirements and lists unfinished work. Supplies no typed mutation, typed source, concrete insert/update assignments, or returning implementation."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-159",
+          "reason": "Valid typed addSelect source, sku key, insert-only title expression, price merge, and Tuple2 returning. Native execution is explicitly conditional on the dialect/Jimmer plan. Deprecated Expression.string().value remains valid (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:601-605)."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-162",
+          "reason": "Despite the unfinished-work preface, the included recommended implementation is a valid typed upsert with non-null source filtering, sku matching, fixed insert title, price merge and Tuple2 returning. It explicitly conditions one-operation behavior on the native dialect plan and requests an eligible sku key. Expression.string().value is real (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:601-605)."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-187",
+          "reason": "Restates the task and defers implementation. No source query, executable mutation, branch assignments or returning mechanism is provided."
+        }
+      ]
+    },
+    "inventory-optimistic-save": {
+      "baseline": [
+        [
+          false,
+          true,
+          true,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-028",
+          "reason": "Correct ID/Int-version/composite-key mapping, UPDATE_ONLY and stated real DB constraint. But setOptimisticLock(StockItem::version) is not the Kotlin hook: it needs entity KClass/behavior/predicate (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/ast/mutation/KSaveCommandPartialDsl.kt:211-215). setKeyProps(id) is not needed to enforce an ID-loaded update and is not a legitimate natural-key configuration. It also returns modifiedEntity without rejecting normally unaccepted missing-row results; the narrow no-insert assertion still passes."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-076",
+          "reason": "Explicitly defers the mapping, save call, version-failure explanation and uniqueness handling. No concrete solution is supplied."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-077",
+          "reason": "Does not supply the requested concrete entity mapping, and claims @Key alone prevents duplicate logical rows without requiring a database unique constraint. Its explicit recommended saveCommand(...).setMode(UPDATE_ONLY).execute fragment chooses a real no-insert API, and it directs @Version plus exception-style optimistic-lock failure rather than overwrite. @Key is metadata, not database DDL (O/jimmer-core/src/main/java/org/babyfish/jimmer/sql/Key.java:45-59). Missing-ID error behavior is asserted too broadly and not handled."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-111",
+          "reason": "Valid entity mapping, real DB-constraint prerequisite and UPDATE_ONLY. setOptimisticLock(StockItem::version) is invented Kotlin usage; the real hook takes entity KClass/behavior/predicate (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/ast/mutation/KSaveCommandPartialDsl.kt:211-215). Returning modifiedEntity without checking an unaccepted result also does not implement its stated missing-row rejection policy; a loaded-version zero-row update may instead throw."
+        }
+      ]
+    },
+    "travel-fetch-shape": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          true,
+          true,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          false,
+          true,
+          true
+        ],
+        [
+          true,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-013",
+          "reason": "Only restates the requested filters/shape and defers implementation. No typed predicates, concrete fetch graph, exclusion implementation, or executable query is supplied."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-060",
+          "reason": "Actual recommended query has valid typed predicates, exclusion list and execute attachment despite the unfinished-work preface. Its TRIP_FETCHER.id() is unsupported: IDs are implicitly included and no ID method is generated (O/jimmer-apt/src/main/java/org/babyfish/jimmer/apt/immutable/generator/FetcherGenerator.java:76-81)."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-120",
+          "reason": "The final inline sketch supplies a valid explicit TripFetcher name/destination/stop-city-arrival graph excluding notes/hotel. However, where(published,destination.name/id,departureDate) is only placeholder prose, not typed predicates, and no client query/terminal execution is supplied. Recognizing the graph fragment does not credit the deferred filtering/execution work."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-160",
+          "reason": "The actual recommended implementation supplies valid SQL predicates and shaped execute query, and excludes notes/hotel. Its TripFetcher.$.id() is an invalid generated call (O/jimmer-apt/src/main/java/org/babyfish/jimmer/apt/immutable/generator/FetcherGenerator.java:76-81). The unfinished-work preface does not erase the valid independent fragments."
+        }
+      ]
+    },
+    "museum-kotlin-dto": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          false
+        ],
+        [
+          true,
+          true,
+          true,
+          false
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-032",
+          "reason": "Valid explicitly exported input/output shapes and generated input/save/view-lookup APIs. However, exhibitCount: Int declares a user DTO property, not selection of the entity's calculated exhibitCount; it is not populated by merely adding a transient entity property (O/jimmer-ksp/src/main/kotlin/org/babyfish/jimmer/ksp/dto/DtoGenerator.kt:1318-1407). No SQL formula/aggregate projection or assignment supplies its count. The bare suggestion to add a resolver or count separately does not implement database computation."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-065",
+          "reason": "Only restates the desired DTOs and defers their definitions, generated-API usage and count implementation. No concrete declaration or query/projection is supplied."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-145",
+          "reason": "Correct exported input/read DTO shapes and valid toEntity/save plus findById(View::class,id). A bare transient/calculated exhibitCount prerequisite does not establish SQL/database aggregation or guarantee it avoids loading exhibits; no SQL formula or aggregate projection is specified. Formula distinguishes SQL and JVM computation (O/jimmer-core/src/main/java/org/babyfish/jimmer/Formula.java:70-101)."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-191",
+          "reason": "The .dto snippet uses # as prose comments, but # introduces DTO macros, not comments; the input declaration is invalid. specification ExhibitionView defines a predicate type, not a read View, and exhibits { count } selects a collection property rather than computing an aggregate. Such a specification cannot be table.fetch(ViewClass). See O/jimmer-dto-compiler/src/main/antlr/org/babyfish/jimmer/dto/compiler/Dto.g4:52-86 and the View-based query contract in O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/KSqlClient.kt:257-261. Valid save(input) fragments do not repair the invalid generated DTO/query flow."
+        }
+      ]
+    },
+    "catalog-cache-invalidation": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          false,
+          false,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          false,
+          false,
+          true,
+          true
+        ],
+        [
+          false,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-015",
+          "reason": "Concrete cache chains do not compile: the actual local type is CaffeineValueBinder, whose builder requires build(), not CaffeineBinder; the shown four-argument RedisValueBinder constructors are not public supported constructors. See O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/caffeine/CaffeineValueBinder.java:129-175 and cache/redis/spring/RedisValueBinder.java:34-54. Correct object/to-one hook intentions cannot repair unusable chains. Centralized CDC/BinLog invalidation and both-tier/all-instance delivery are correctly described."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-016",
+          "reason": "Explicitly unfinished: lists configuration and invalidation explanation as remaining tasks, with no CacheFactory design, implemented entity/association handling, or invalidation mechanism."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-040",
+          "reason": "Gives a centralized placement recommendation, but leaves cache implementation and invalidation verification to future work. It does not specify a usable CacheFactory/binder design or complete Product/Category/to-one cache handling, and 'entries must be invalidated' does not establish a Jimmer trigger/CDC delivery mechanism. Central configuration rather than repository cache reads is explicitly recommended, without claiming out-of-band SQL visibility."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-171",
+          "reason": "The concrete bean instantiates an undefined CaffeineRedisCacheFactory, and ChainCacheBuilder.newBuilder() is not a supported entry point; its add methods take binders, not arbitrary local/remote caches (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/chain/ChainCacheBuilder.java:8-60). Correct hook sketches do not make those concrete calls usable. The centralized committed-event/BINLOG_ONLY invalidation and retry explanation is valid."
+        }
+      ]
+    },
+    "museum-near-miss": {
+      "baseline": [
+        [
+          false,
+          true,
+          false,
+          true
+        ],
+        [
+          false,
+          true,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          true,
+          false,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-021",
+          "reason": "Date filtering and fetchPage(0,20) are valid fragments. Java count(expression) is not the shown Jimmer aggregate API; use expression.count() (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:402-406). Projections.constructor is not a Jimmer Selection/TupleMapper overload (ast/query/selectable/RootSelectable.java:10-89). Thus aggregate-expression and projection criteria fail; explicit database-side/no-native recommendation passes."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-038",
+          "reason": "The date predicates and explicit (0,20) invocation satisfy pagination. count(v.id()) is not the Java Jimmer instance count API (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:402-406), and Projections.constructor is an unsupported projection convention (ast/query/selectable/RootSelectable.java:10-89). Correctly recommends avoiding Visit loading/native SQL/views."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-096",
+          "reason": "The actual sketch is valid despite its unfinished-work preface: typed SQL predicates/grouping, count-descending order, requested Tuple4 columns, fetchSlice(20,0), and explicit no-native/view recommendation. See O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/ConfigurableRootQuery.java:81-83."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-105",
+          "reason": "Expression.numeric(Long.class,\"count(*)\") is invented: numeric() takes no arguments and returns a factory (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:450-453). Consequently the aggregate and projected count are invalid; the alternative leaves visitCountExpr undefined rather than repairing it. Independent typed date predicates and limit(20)/fetchSlice(20,offset) are correct. Explicitly rejects loading Visit rows or adding views/native queries."
+        }
+      ]
+    },
+    "travel-migration": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-117",
+          "reason": "Valid nullable countryCode with varchar(2)/format check, partial uniqueness for active non-null rows, and explicit soft-delete-predicate adaptation. NULL rows are excluded from uniqueness and preserved. Concurrent-index execution outside a transaction is correctly stated."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-139",
+          "reason": "The added countryCode mapping and varchar(2)/CHECK are correct; active-only partial uniqueness allows repeated null-country names and preserves deleted history/existing nulls. Additional defect outside those narrow country/index assertions: the illustrative bare @LogicalDeleted boolean mapping needs value=\"true\" (O/jimmer-core/src/main/java/org/babyfish/jimmer/meta/LogicalDeletedInfo.java:444-454). Preserve an existing valid mapping as instructed."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-144",
+          "reason": "Correct nullable country property, varchar(2)/format check and active-only ordinary unique index allowing NULL duplicates. Migration is additive; CREATE INDEX CONCURRENTLY must run outside a transaction, although runner configuration is omitted. Additional mapping defect: bare @LogicalDeleted on boolean needs a deletion value (O/jimmer-core/src/main/java/org/babyfish/jimmer/meta/LogicalDeletedInfo.java:444-454). The country/index assertions independently pass."
+        },
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-153",
+          "reason": "Despite the unfinished-work framing, actual proposed snippets add the nullable scalar/varchar(2) and active-only partial unique index, with accurate NULL-distinct and deleted-history semantics. Ordinary schema-name/bootstrap adaptation is allowed. varchar(2) bounds length but alone does not reject one-character/non-letter values; exact alphabet validation is an additional task-level caveat, not demanded by the length-compatible assertion."
+        }
+      ]
+    },
+    "inventory-repository-fetcher": {
+      "baseline": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "repeat": 1,
+          "masked_id": "answer-005",
+          "reason": "The supplied recommendation is a valid Quarkus KRepository with derived nullable findByCode overloads and service-level optional fetcher dispatch. The public integration applies Fetcher parameters and fetchOneOrNull (Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/support/QueryExecutors.java:77-79,109-110). Its unfinished-work preface does not negate the actual implementation sketch."
+        },
+        {
+          "condition": "updated",
+          "repeat": 2,
+          "masked_id": "answer-044",
+          "reason": "Valid Quarkus KRepository derived overloads support both omitted and caller-selected fetch shapes and nullable not-found semantics. Integration supplies repository implementations as CDI beans; no handwritten SQL. See Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/KRepository.kt:1-31 and support/QueryExecutors.java:77-79,109-110."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 1,
+          "masked_id": "answer-056",
+          "reason": "Only proposes future inspection/implementation and says the repository method was not implemented. No concrete repository declaration, derived predicate, fetcher parameter/application, or CDI integration is supplied."
+        },
+        {
+          "condition": "baseline",
+          "repeat": 2,
+          "masked_id": "answer-086",
+          "reason": "The CDI repository abstraction uses valid KSqlClient typed equality, applies the supplied Fetcher and returns null on absence; the resource delegates and contains no SQL. This is a custom DSL body rather than the task's preferred derived method. singleOrNull also turns duplicate-code results into null. WAREHOUSE_FETCHER_BY is not an established generated helper (KSP generates FetcherCreator.by: O/jimmer-ksp/src/main/kotlin/org/babyfish/jimmer/ksp/immutable/generator/FetcherGenerator.kt:64-106), but the independently complete repository parameter/application satisfies assertion 3. KSqlClient DSL entry: O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/KSqlClient.kt:35-40."
+        }
+      ]
+    }
+  },
+  "rubric_notes": [
+    "Applied tests/skill-evals/grading-policy.md: assertions are independent and conjunctive, named code criteria require valid APIs, ordinary omitted imports/bootstrap are accepted, and one component's defect does not erase a correct independent component. Status-only answers fail; status-prefixed answers with actual content are evaluated on that content.",
+    "Retained task/rubric mismatch: inheritance assertion 1 additionally demands a MappedSuperclass/reuse distinction, not explicitly requested in the task. Correct inheritance snippets alone do not establish that distinction. The untagged root with derived types is abstract under Jimmer AUTO instantiability (public inheritance/mapping.mdx:124-126), so the two concrete exhaustive branches are valid.",
+    "Retained task/rubric mismatch: DTO assertion 3 additionally requires associated-save/dissociation semantics; correct loaded empty collection alone does not earn the whole assertion. Assertion 4 explicitly includes id; answers supplying target identity separately still fail that frozen allow-list criterion. One DTO means one top-level ShelfPatch declaration; nested bins ID shape is permitted.",
+    "Dynamic nullable note must not have redundant ?, while non-null bins needs optionality for omission. DtoPropBuilder.java:435-443 additionally requires an explicit alias for id(listAssociation); lines 549-554 reject redundant optionality. Independent valid note presence behavior remains credited when a separately evaluated bins declaration is defective.",
+    "Retained task/rubric mismatch: cache assertion 1 explicitly requires rejecting both deprecated transaction modes, even though the task does not expressly ask to discuss BOTH. TriggerType.java marks TRANSACTION_ONLY and BOTH deprecated; vague CDC-mode language does not identify BINLOG_ONLY. Valid BINLOG_ONLY/CDC options are credited independently of an additionally incorrect BOTH recommendation.",
+    "CDC dead-letter ambiguity: answer-087 allows routing to a retry/dead-letter mechanism as an alternative to leaving the failed record unacknowledged, without preserving the checkpoint barrier, so the full success-before-checkpoint criterion fails. Answer-115 explicitly prohibits acknowledgement and only says retain after exhaustion; that retention was not interpreted as permission to advance the checkpoint. Both still fail their unsupported-mode criteria.",
+    "Retained task/rubric mismatch: no-update assertion 3 requires the technical-self-assignment/update-trigger warning, beyond merely avoiding UPSERT. Also, an unconditional post-insert SKU lookup can be a valid alternative service flow, but assertions 1/2 explicitly demand the isAccepted rejection contract and acceptance check, so answer-070/088 do not earn those frozen criteria.",
+    "Rejected-root source verification: SaveMode.java documents isAccepted=false and separate lookup; SaveContext.isIdRetrievingRequired returns false for a root; Saver.finishSave materializes accepted roots only. SimpleSaveResult always exposes a non-null modifiedEntity, and toView invokes converter.apply(modifiedEntity) unconditionally. DtoGenerator.addConverterConstructor reads required simple properties directly. Thus null-testing modifiedEntity/View is not rejection detection, and eagerly executing a normal required-id View can throw before isAccepted on a skipped generated-ID root.",
+    "ItemView shape is unspecified in the no-update task. Answer-099/180 use an ID-bearing view before acceptance without declaring an optional-ID/rejection-safe view prerequisite; that does not establish a working rejected branch. A deliberately nullable/rejection-safe DTO could change that runtime outcome, but was not silently assumed. The execute-without-View then acceptance/lookup flow in answer-110 avoids the ambiguity.",
+    "Insert-select assertions require the typed base source and actual createInsert/returning APIs, not just equivalent raw SQL. JSqlClient.java, MutableBaseQuery.java and MutableInsert.java establish createBaseQuery(...).select(table).asBaseTable(), createInsert(target,source), set and onConflictDoNothing. onDuplicateKeyIgnore, executeAndReturnIds and executeAndGetGeneratedIds are not that API. A valid independent returning(target.id()) fragment and its complete semantics can still earn assertion 3 when an earlier chain component is wrong.",
+    "Insert-select execution qualification follows public insert-from-select.mdx:459-470: unsupported dialects/shapes can materialize source values and use the save pipeline. Unqualified database-only/no-application-loading claims fail assertion 4. Explicitly illustrative SQL with refusal to claim a verified Jimmer chain (answer-054/063) is not treated as a universal native guarantee. Merely naming insertedIds does not explain excluded skipped rows.",
+    "VersionMode.java contains OPTIMISTIC_LOCK and ASSIGNMENT, not EXTERNAL. SaveMode.NON_IDEMPOTENT_UPSERT exists but controls wild-object insertion rather than external revision ordering; setOptimisticLockMode/OptimisticLockMode are not the pinned mutation API. Independent correct root-only/non-propagation explanations remain credited despite broken configuration.",
+    "Public unified Quarkus README verifies com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.1 and jimmer-ksp:1.0.1 from JitPack, Kotlin/Jandex configuration, exactly one CacheReadiness provider and read/fill gating with continuing invalidations. JimmerDataSourceRuntimeConfig.java:145-155 verifies false/true translation defaults; tracker readiness is local subscription readiness, not CDC catch-up. No legacy extension or private application sources were used.",
+    "Read tests/skill-evals/grading-policy.md before grading. All 96 answers were evaluated against their own four assertions; within each frozen task the assertion lists were verified identical. No model/condition labels were inferred, and no key, other run directory, skill, prior answer/grade file or private application was inspected.",
+    "Source aliases: O=/tmp/opencode/jimmer-upstream-0.12.2/project; Q=/home/sleepkqq/IdeaProjects/jimmer/project/jimmer-quarkus. Evidence paths are relative to those public authoritative roots. Graph-first source checks were used for suspicious new APIs; established semantics were retained without re-researching every occurrence. Evaluation is static source-grounded, not compilation of incomplete application sketches.",
+    "Grade each assertion independently and conjunctively. Invalid code directly implementing a criterion cannot earn it via plausible prose; an error in a different component does not erase valid independent evidence. Actual snippets in an unfinished-work response are graded normally; a mere plan to implement the task is not an implementation.",
+    "Accept ordinary omitted imports/bootstrap, illustrative entity/property names and equivalent solutions. Explicitly wrong imports, nonexistent constructors/methods, incompatible table/client syntax and incorrect result types remain defects. Automatic entity IDs in fetchers are not penalized as unwanted fields; generated fetchers do not expose .id().",
+    "For upsert, accept explicitly conditional native-support solutions without requiring complete dialect/ID/key bootstrap. A blanket single-operation claim is unsafe because Jimmer may materialize internally (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/AbstractInsertFromSelectImpl.java:382-425). Native PostgreSQL alternatives can satisfy the independently phrased branch/returning semantics, but cannot satisfy the Jimmer-typed-command/source assertions. Deprecated Expression.string().value is still valid.",
+    "For aggregates, a literal top-20 limit/page/slice or explicit size-20 invocation is required; an unconstrained size parameter is insufficient. Assess valid date/group/order/pagination fragments separately from invalid projections. SQL count expressions must use real APIs; Java count(expression), Projections.constructor and Expression.numeric(Class,SQL) are not accepted as Jimmer calls.",
+    "For repositories, both recognized derived repositories and valid CDI repository abstractions are considered under the actual assertions. A valid custom typed DSL method can satisfy those assertions while falling short of the prompt's preference for a purely derived/declarative method; that distinction and significant duplicate/not-found defects are recorded. Optional omitted Quarkus KRepository imports are acceptable when explicitly identified; a concrete nonexistent package is not.",
+    "For caching, a correct abstract centralized factory/binder design can pass without constructors. An invented concrete factory/binder API or a to-many hook substituted for Product.category cannot. Abstract binder naming imprecision is distinguished from a purported compilable constructor/call. CDC/BinLog invalidation qualifies; deprecated transaction-trigger modes are not required, but a correct use of still-supported deprecated modes is not automatically failed. Shared Redis alone does not ensure every Caffeine tier is invalidated.",
+    "For Kotlin saving, permit Java JSqlClient fluent interop when the client type is omitted and usage is otherwise consistent. KSqlClient itself uses its DSL. A loaded-version zero-row update throws optimistic-lock failure, not normal isAccepted=false; preliminary lookup can instead reject a missing target. Preserve the narrower UPDATE_ONLY/no-insert assertion while recording stricter missing-ID handling gaps. Jimmer version properties are Int, not Long.",
+    "For DTO counts, accept a declared mapped SQL-formula prerequisite or explicit aggregate-projection alternative without demanding a full resolver. A bare transient/calculated/stored field or a user DTO field does not establish database computation. A legitimate user field can satisfy the response-shape assertion while failing actual count population. Redundant ? is invalid only when the base property is explicitly nullable. Explicit filename/entity-binding mistakes fail declarations. Current grammar supports per-type 'for Exhibition'.",
+    "For migrations, the soft-delete property is unspecified: clearly illustrative deleted=false or deleted_at IS NULL predicates are accepted. Nullable varchar(2) can supply the required length-compatible column definition. Ordinary PostgreSQL NULL-distinct uniqueness satisfies the frozen criterion. Where the primary migration explicitly chooses NULLS NOT DISTINCT, assertion 2 fails even if prose mentions an alternative; the stricter choice is recorded without changing the rubric. An additive migration that safely aborts on conflicts can still meet the independent safety assertion. Unsupported Column.length and incorrect Java nullability are concrete mapping defects.",
+    "No original-task rubric was imported into these transfer tasks: deprecated cache modes, DTO dissociation or inheritance distinctions not present in the transfer assertions were not additionally demanded. Final validation checks exact packet ID coverage, four actual booleans per answer, matching assertion order/length and absence of duplicate IDs."
+  ]
+}

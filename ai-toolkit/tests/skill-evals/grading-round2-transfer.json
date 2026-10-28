@@ -1,0 +1,498 @@
+{
+  "method": "Independent agent grading, hidden condition labels and shuffled answer order; source-verified whole assertions, including code validity. Ambiguity policy recorded before inspecting transfer answers. No post-unmask grade changes.",
+  "rubric_notes": [
+    "Source aliases: O means /tmp/opencode/jimmer-upstream-0.12.2/project; Q means /home/sleepkqq/IdeaProjects/jimmer/project/jimmer-quarkus. References are concrete paths relative to these roots. Only the packet and permitted public source/documentation were inspected; no key, toolkit skills, private application code, other trial/result directories, or additional model/agent calls were used.",
+    "Assertions are graded independently against their own code/semantic requirement. A defect in one separately graded component does not automatically erase evidence for another: e.g. a bad title literal fails upsert assignment semantics but a correctly typed returning Tuple2 form can still pass. Passing some checks is not a claim that the entire answer compiles. Invented APIs directly implementing a criterion do not earn that criterion through plausible prose.",
+    "The pre-established upsert ambiguity rule was retained: native-support-conditional solutions are accepted without demanding a full dialect/entity/ID bootstrap. A blanket one-database-operation claim is not accepted because the API can materialize internally. O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/AbstractInsertFromSelectImpl.java:382-425 shows ID-generation and renderer/trigger prerequisites; MutableUpsert.java:31-45 requires a complete ID or metadata-declared key group. Omitted ordinary setup is distinguished from an explicitly wrong method/signature.",
+    "The migration prompt names no existing logical-delete property. Illustrative deleted=false indexes are accepted, including a displayed boolean convention, rather than demanding an unknown private schema. Nullable varchar(2) plus a CHECK can supply length/format even when the entity annotation does not. The unsupported @Column(length=2) is still an entity-code defect.",
+    "CDC/BinLog invalidation qualifies as the cache/transaction mechanism. BINLOG_ONLY does not itself observe a mutation without event delivery; the accepted explanations explicitly connect committed changes to invalidation. TRANSACTION_ONLY and BOTH are deprecated in O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/event/TriggerType.java:3-51 and were not demanded. A correct abstract CacheFactory/binder setup is acceptable without full constructors, but invalid factory/binder code and the wrong to-one/to-many hook are not.",
+    "For count DTOs, a stated mapped formula prerequisite or explicit aggregate-projection alternative is accepted without a full resolver implementation; no invented collection-count macro is accepted. A bare computed/stored property without a database-computation mechanism does not meet the separate database-count assertion. Unqualified formula sketches are read as the supported SQL-formula option (O/jimmer-core/src/main/java/org/babyfish/jimmer/Formula.java:70-101), not as an instruction to load a collection and count it in memory.",
+    "Entity nullability is unspecified in the DTO prompt: openingDate? is accepted for a non-null base property made optional in the input; already-nullable base properties must omit the extra ?. The correct caveat is source-verified in DtoPropBuilder.java:549-554. Explicitly wrong DTO filename/entity binding is a related declaration defect, while ordinary omitted imports/framework bootstrap are not. The current grammar really supports per-type 'for Exhibition' (Dto.g4:52-60).",
+    "Kotlin can legitimately call JSqlClient's public Java fluent save API when the client type is omitted and no incompatible Kotlin client use appears. Answers using saveCommand(...).setMode(...) were assessed on that valid interpretation, not automatically rejected for failing to use KSqlClient. KSimpleEntitySaveCommand itself has only execute overloads (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/ast/mutation/KSimpleEntitySaveCommand.kt:8-21), so that fluent configuration must not be copied onto a KSqlClient command.",
+    "Missing-ID semantics were reviewed beyond the narrow UPDATE_ONLY assertion. UPDATE_ONLY prevents insertion, but does not imply that every missing/stale case returns isAccepted=false. With a loaded version, zero affected rows throw an optimistic-lock error (Operator.java:1435-1442). The evidence records inaccurate custom-not-found/rejection expectations even where the narrow no-insert assertion passes. Stale-version exception handling is separately graded.",
+    "The top-20 criterion requires a concrete 20 limit/page-size/slice or an explicit size=20 invocation; an unconstrained size parameter alone does not establish it. Projection errors are assessed separately from otherwise valid grouping/date/order/pagination fragments. Generic setup omissions are accepted, but select(Dto.class) or constructing an ordinary result DTO from SQL expressions does not replace a supported TupleMapper/Selection.",
+    "Source graph discovery and coverage checks were used for the cited code. Coverage reported matching metadata and no recorded gaps for cited tracked files; the grammar was not tracked and was read directly. This was static source-grounded evaluation, not compilation/execution of 32 incomplete application sketches. No blocker prevented grading."
+  ],
+  "cases": {
+    "catalog-query-derived-upsert": {
+      "baseline": [
+        [
+          false,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          true,
+          false,
+          false
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "catalog-query-derived-upsert",
+          "repeat": 2,
+          "masked_id": "answer-005",
+          "detail": "createBaseQuery/select(table)/asBaseTable and createUpsert are real typed APIs; the source price predicate and sku/price mapping are present (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/MutableBaseQuery.java:138-173). But sku is assigned twice by key and merge, which throws (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/AbstractInsertFromSelectImpl.java:197-203). Expressions.value is not the official literal API; Expression.value is (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:495-497). returning(id,sku) yields Tuple2, not the declared ProductIdSku DTO without a mapper (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/ReturningSelectable.java:12-15). The dialect condition is appropriately conditional, but it does not repair these defects."
+        },
+        {
+          "condition": "updated",
+          "case": "catalog-query-derived-upsert",
+          "repeat": 1,
+          "masked_id": "answer-008",
+          "detail": "The typed source/table projection, price-is-not-null predicate, key(sku), merge(price), and two-column returning form are real APIs. The title assignment is not: MutableUpsert.insert requires Expression<T>, not a raw String (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/MutableUpsert.java:46-57); use Expression.value('Imported') conceptually. returning yields the appropriate Tuple2 list (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/ReturningSelectable.java:12-15). The single-statement claim is explicitly conditioned on native dialect support, accepted under the stated ambiguity rule."
+        },
+        {
+          "condition": "updated",
+          "case": "catalog-query-derived-upsert",
+          "repeat": 2,
+          "masked_id": "answer-017",
+          "detail": "This uses valid scalar base-query selection and BaseTable2 accessors (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/MutableBaseQuery.java:155-173; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/table/base/BaseTable2.java:11-15). key(sku), merge(price), insert-only title, and returning Tuple2 have the right semantics (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/MutableUpsert.java:31-57,79-91; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/ReturningSelectable.java:12-15). Expression.string().value is deprecated but real, not invented (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/Expression.java:445-448,601-605). Accepts the explicit native-support condition and source-SKU uniqueness prerequisite; complete metadata/ID setup is outside this sketch."
+        },
+        {
+          "condition": "baseline",
+          "case": "catalog-query-derived-upsert",
+          "repeat": 1,
+          "masked_id": "answer-018",
+          "detail": "The base-table source and sku/price mappings are valid. However, the unqualified assertion that this is database-side does not establish the required one-operation behavior: Jimmer can materialize for ID generation, trigger mode, or unsupported rendering (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/AbstractInsertFromSelectImpl.java:382-425). No supported-dialect condition/prerequisite is given. insert(title,\"Imported\") also fails because insert requires an Expression (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/MutableUpsert.java:46-57). The independently shown returning(id,sku) with List<Tuple2<Long,String>> is the correct result API (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/ReturningSelectable.java:12-15)."
+        }
+      ]
+    },
+    "inventory-optimistic-save": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          false,
+          true,
+          false,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "inventory-optimistic-save",
+          "repeat": 2,
+          "masked_id": "answer-010",
+          "detail": "Correct Id/Version and composite @Key mapping plus an explicitly required database UNIQUE pair. The fluent saveCommand/setMode form is valid using JSqlClient from Kotlin (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/JSqlClient.java:226-229; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/SimpleEntitySaveCommand.java:21-23). Loaded-version zero-row updates throw optimistic-lock errors (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/Operator.java:1435-1442). Thus a nonexistent ID can throw before the isAccepted check, rather than necessarily producing the custom not-found message. The prompt's error requirement is still met; UPDATE_ONLY cannot insert. This fluent configuration is not KSqlClient's DSL form."
+        },
+        {
+          "condition": "updated",
+          "case": "inventory-optimistic-save",
+          "repeat": 2,
+          "masked_id": "answer-012",
+          "detail": "@KeyUniqueConstraint([\"warehouseId\",\"productId\"]) is invalid: the annotation has only boolean noMoreUniqueConstraints and isNullNotDistinct members (O/jimmer-core/src/main/java/org/babyfish/jimmer/sql/KeyUniqueConstraint.java:21-76). setOptimisticLock(OptimisticLockMode.VERSION) is also not a supported API; Kotlin's hook takes entity type/behavior/predicate, while VersionMode.OPTIMISTIC_LOCK is the real version mode (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/ast/mutation/KSaveCommandPartialDsl.kt:25,211-215; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/VersionMode.java:7-23). Independently it chooses UPDATE_ONLY and explicitly requires database pair uniqueness. Missing-ID rejection is not guaranteed to return normally: a loaded-version zero-row update throws (Operator.java:1435-1442 in the same mutation implementation directory)."
+        },
+        {
+          "condition": "baseline",
+          "case": "inventory-optimistic-save",
+          "repeat": 1,
+          "masked_id": "answer-025",
+          "detail": "Correct ID/version and grouped natural-key mapping with the explicit database UNIQUE pair. VersionMode.OPTIMISTIC_LOCK and SimpleEntitySaveCommand.setVersionMode are real current APIs, callable through JSqlClient from Kotlin (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/VersionMode.java:7-13; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/SimpleEntitySaveCommand.java:21-27). The answer includes the correct optimistic-lock exception outcome, although 'rejected or raises' is imprecise: loaded-version zero-row updates throw, including a direct missing-ID update, before the isAccepted check (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/Operator.java:1435-1442). The stricter missing-ID error requirement is met, but not necessarily via its custom NoSuchElementException."
+        },
+        {
+          "condition": "updated",
+          "case": "inventory-optimistic-save",
+          "repeat": 1,
+          "masked_id": "answer-028",
+          "detail": "Valid Kotlin save DSL with UPDATE_ONLY, ID/version mapping, grouped @Key properties, and explicit database composite uniqueness. However, the stated stale-version behavior is wrong: ordinary @Version optimistic-lock failure throws, rather than normally returning isAccepted=false (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/impl/mutation/Operator.java:1435-1442). isAccepted describes acceptance/rejection including preliminary-lookup exclusion, not a replacement for optimistic-lock exceptions (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/MutationResultItem.kt:19-31). A missing ID may likewise throw before the custom check; the narrow no-insert criterion passes, but the advertised rejection-handling path is inaccurate."
+        }
+      ]
+    },
+    "travel-fetch-shape": {
+      "baseline": [
+        [
+          true,
+          false,
+          true,
+          false
+        ],
+        [
+          true,
+          false,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          false,
+          false,
+          false,
+          false
+        ],
+        [
+          true,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "travel-fetch-shape",
+          "repeat": 2,
+          "masked_id": "answer-002",
+          "detail": "All three predicates are typed SQL predicates; the query correctly attaches its fetcher and calls execute. The fetcher has an invalid .id(): generated fetchers deliberately skip ID methods because IDs are implicit (O/jimmer-apt/src/main/java/org/babyfish/jimmer/apt/immutable/generator/FetcherGenerator.java:76-81). Therefore the explicit graph construction fails its API criterion. Requested association scalars are otherwise selected, with no notes or hotel inclusion. Execution/attachment syntax is independently correct."
+        },
+        {
+          "condition": "baseline",
+          "case": "travel-fetch-shape",
+          "repeat": 1,
+          "masked_id": "answer-009",
+          "detail": "Typed publication/destination/date predicates are valid for supplied filter values, and the listed fields omit notes and hotel. However, generated fetchers have no .id() method (O/jimmer-apt/src/main/java/org/babyfish/jimmer/apt/immutable/generator/FetcherGenerator.java:76-81), and the Java query has no parameterless .fetch() terminal: it uses execute, fetchOne, fetchOneOrNull, etc. (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/TypedRootQuery.java:17-166). Therefore graph construction and execution fail their respective API criteria."
+        },
+        {
+          "condition": "updated",
+          "case": "travel-fetch-shape",
+          "repeat": 1,
+          "masked_id": "answer-021",
+          "detail": "var trip = TripTable is not a Java table-instance expression; TripTable.$ (or a generated table constant) is needed before the predicates can be typed. allScalarFields neither selects only requested fields nor excludes scalar internal notes: it iterates every selectable scalar property (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/fetcher/impl/FetcherImpl.java:451-459). Calling notes an association does not establish that assumption for this prompt. The final .fetch() is not a Jimmer Java query terminal (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/TypedRootQuery.java:17-166). Consequently none of the executable code criteria is satisfied."
+        },
+        {
+          "condition": "baseline",
+          "case": "travel-fetch-shape",
+          "repeat": 2,
+          "masked_id": "answer-030",
+          "detail": "Valid typed SQL filters and executable select(trip.fetch(fetcher)).execute query. allScalarFields on Trip, Destination, Stop, and City is not an exact requested-field graph and can load internal scalar notes; the claim that notes are excluded is unsupported. The implementation explicitly adds every selectable scalar (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/fetcher/impl/FetcherImpl.java:451-459). Hotel association exclusion alone does not satisfy the combined notes/hotel criterion."
+        }
+      ]
+    },
+    "museum-kotlin-dto": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          false
+        ],
+        [
+          true,
+          true,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          false,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "museum-kotlin-dto",
+          "repeat": 2,
+          "masked_id": "answer-001",
+          "detail": "The property lists are appropriate, but the explicitly named ExhibitionCreateInput.dto and ExhibitionView.dto files have neither export Exhibition nor a per-type 'for Exhibition': their implicit source entities are inferred from those filenames, not Exhibition (O/jimmer-dto-compiler/src/main/java/org/babyfish/jimmer/dto/compiler/DtoCompiler.java:38-75). Thus the supplied DTO declarations do not generate against the requested entity. Independently, toEntity/saveCommand/execute and createQuery/select(table.fetch(View::class)) are legitimate Kotlin flow APIs. Accept the stated mapped formula count prerequisite without demanding its implementation (O/jimmer-core/src/main/java/org/babyfish/jimmer/Formula.java:70-101)."
+        },
+        {
+          "condition": "baseline",
+          "case": "museum-kotlin-dto",
+          "repeat": 1,
+          "masked_id": "answer-003",
+          "detail": "export binds both DTOs to Exhibition; the input excludes server fields and the view selects scalar exhibitCount instead of exhibits. save(input.toEntity()) with AssociatedSaveMode.REPLACE and the Kotlin view query are valid (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/ast/mutation/KSaveOperations.kt:9-14; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/AssociatedSaveMode.java:31). However, a merely 'computed/stored' exhibitCount property does not establish database-side count computation: no SQL formula, aggregate resolver, or aggregate query is specified. A stored count alone does not meet assertion 4."
+        },
+        {
+          "condition": "updated",
+          "case": "museum-kotlin-dto",
+          "repeat": 1,
+          "masked_id": "answer-023",
+          "detail": "The per-type 'for Exhibition' syntax is genuinely supported in this version (O/jimmer-dto-compiler/src/main/antlr/org/babyfish/jimmer/dto/compiler/Dto.g4:52-60), so both declarations have valid entity binding and the right separate input/output shapes. The flow contains a real API error: SaveMode.REPLACE does not exist; REPLACE belongs to AssociatedSaveMode (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/SaveMode.java:12-87; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/mutation/AssociatedSaveMode.java:31). Accept the explicitly proposed separate aggregate-query/custom-projection count alternative; it avoids loading the exhibits collection."
+        },
+        {
+          "condition": "baseline",
+          "case": "museum-kotlin-dto",
+          "repeat": 2,
+          "masked_id": "answer-031",
+          "detail": "Exhibition.dto supplies the proper implicit entity binding, the input excludes server fields, and the output uses a declared mapped formula count rather than exhibits. Its final nullable-property caveat is correct (O/jimmer-dto-compiler/src/main/java/org/babyfish/jimmer/dto/compiler/DtoPropBuilder.java:549-554). The create/read flow invents a findById(type,id){select(...)} overload: KSqlClient.findById accepts only type-or-fetcher and ID, with no query lambda (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/KSqlClient.kt:257-261). The separate list query is valid, but does not repair the shown create flow. Accept the declared formula prerequisite for database count computation."
+        }
+      ]
+    },
+    "catalog-cache-invalidation": {
+      "baseline": [
+        [
+          false,
+          false,
+          true,
+          true
+        ],
+        [
+          false,
+          false,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          false,
+          false,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "catalog-cache-invalidation",
+          "repeat": 2,
+          "masked_id": "answer-013",
+          "detail": "The factory code is invalid: ChainCacheBuilder.add accepts LoadingBinder/SimpleBinder, not CaffeineCacheFactory/RedisCacheFactory, and build returns Cache rather than CacheFactory (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/chain/ChainCacheBuilder.java:18-60,97-107). Merely listing object/association registrations does not implement a usable factory around that expression; the real hooks take ImmutableType/ImmutableProp (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/CacheFactory.java:22-53). The centralized design and explicit committed CDC-to-BinLog path satisfy the invalidation criteria. Read 'emits an event' in the context of that CDC path, not immediate transaction-trigger emission under BINLOG_ONLY; deprecated modes are confirmed in O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/event/TriggerType.java:3-51."
+        },
+        {
+          "condition": "updated",
+          "case": "catalog-cache-invalidation",
+          "repeat": 2,
+          "masked_id": "answer-019",
+          "detail": "Acceptable abstract centralized CacheFactory configuration: both Product and Category object caches, the Product.category ID cache, a Caffeine-first/Redis-second binder chain, and Spring Redis wiring are specified without inventing callable signatures. These match O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/CacheFactory.java:10-53 and O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/chain/ChainCacheBuilder.java:18-60. Explicit committed CDC delivery, affected-entry invalidation, all-instance propagation, and retry/ack ordering satisfy the cache mechanism requirement without pretending external writes are automatically visible. BINLOG_ONLY is consistent with O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/event/TriggerType.java:3-51."
+        },
+        {
+          "condition": "updated",
+          "case": "catalog-cache-invalidation",
+          "repeat": 1,
+          "masked_id": "answer-026",
+          "detail": "Factory code passes Cache objects into ChainCacheBuilder.add, which accepts binders, and invokes unverified CaffeineCacheFactory/RedisCacheFactory provider types (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/chain/ChainCacheBuilder.java:18-60). More importantly, createAssociatedIdListCache handles to-many properties, not Product.category; createAssociatedIdCache remains at its default null (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/CacheFactory.java:26-53). Prose suggesting the inverse association does not cache the requested forward path. Central wiring and the explicit CDC/BINLOG_ONLY invalidation/retry/multi-instance explanation satisfy the two conceptual invalidation criteria."
+        },
+        {
+          "condition": "baseline",
+          "case": "catalog-cache-invalidation",
+          "repeat": 1,
+          "masked_id": "answer-029",
+          "detail": "The proposed factory returns ChainCacheBuilder.build(), whose result is Cache, not CacheFactory, and adds factories instead of binders (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/chain/ChainCacheBuilder.java:18-60,97-107). createAssociatedIdCache(Product,Product.category) is not the real hook; it takes one ImmutableProp, while createObjectCache takes ImmutableType (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/cache/CacheFactory.java:22-39). Category object caching is also omitted. The centralized architectural intent and explicit CDC-to-BinLog invalidation of both tiers/all instances correctly satisfy the conceptual invalidation requirements."
+        }
+      ]
+    },
+    "museum-near-miss": {
+      "baseline": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          false,
+          false,
+          false,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          false,
+          true
+        ],
+        [
+          true,
+          false,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "museum-near-miss",
+          "repeat": 2,
+          "masked_id": "answer-006",
+          "detail": "Valid SQL date predicates, grouping, count-descending order, stable ID tiebreaker, and four-column tuple projection. Tuple4 selection and fetchPage are supported (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/RootSelectable.java:27-32; O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/ConfigurableRootQuery.java:70-83). The method and alternative both use an unconstrained size parameter, with no invocation or instruction setting size=20, so the explicit top-20 part of assertion 2 is missing. Clearly avoids entity loading, native SQL, and a database view."
+        },
+        {
+          "condition": "baseline",
+          "case": "museum-near-miss",
+          "repeat": 1,
+          "masked_id": "answer-014",
+          "detail": "The WHERE/GROUP BY/count-descending ORDER BY and fetchPage(page,20) express the correct database aggregation and pagination. The projection is invalid: Java non-abstract class methods cannot omit bodies, and select(ExhibitVisitCount.class) is not a Jimmer projection overload. RootSelectable accepts Selection objects or a TupleMapper, not Class (O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/RootSelectable.java:10-89). Official typed-tuple aggregation supplies a generated mapper with each expression (O/jimmer-sql/src/test/java/org/babyfish/jimmer/sql/tuple/TypedTupleTest.java:82-96). No Java sorting or unnecessary native/view solution is proposed."
+        },
+        {
+          "condition": "updated",
+          "case": "museum-near-miss",
+          "repeat": 1,
+          "masked_id": "answer-022",
+          "detail": "Correct SQL date predicates, grouping, aggregate order, and an explicit first-20 fetchSlice alternative. The projection/return contract is not valid as shown: constructing an ordinary ExhibitVisitRow from SQL expressions is not a Selection/TupleMapper, and fetchPage returns Page rather than the declared List<ExhibitVisitRow>. RootSelectable's supported overloads are in O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/selectable/RootSelectable.java:10-89; the page return type is in O/jimmer-sql/src/main/java/org/babyfish/jimmer/sql/ast/query/ConfigurableRootQuery.java:70-79. Saying 'appropriate typed tuple/DTO' does not supply the missing mapping. Avoidance of entity loading/native SQL/views is explicit."
+        },
+        {
+          "condition": "baseline",
+          "case": "museum-near-miss",
+          "repeat": 2,
+          "masked_id": "answer-032",
+          "detail": "The prose describes the right aggregate/top-20 design, but the Kotlin block mixes incompatible APIs: Java table constants/chained query calls and exhibit().id() methods with Kotlin property expressions/infix ge/lt. KSqlClient.createQuery requires an entity KClass (or base-table symbol) plus a DSL block (O/jimmer-sql-kotlin/src/main/kotlin/org/babyfish/jimmer/sql/kt/KSqlClient.kt:35-43); it has no createQuery(v).where(...) shape. Conversely, Java generated id()/visitedAt() methods are not Kotlin getId/getVisitedAt properties. Thus no valid typed aggregate, predicate-pagination chain, or projection is supplied. The explicit recommendation to avoid loading Visit rows/native SQL/views satisfies assertion 4."
+        }
+      ]
+    },
+    "travel-migration": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          false,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "baseline",
+          "case": "travel-migration",
+          "repeat": 1,
+          "masked_id": "answer-007",
+          "detail": "Nullable entity scalar plus nullable varchar(2) and a two-letter CHECK meet the mapping/length requirement. The partial unique index covers only explicitly assumed active rows, and PostgreSQL's ordinary distinct-NULL semantics permit repeated null-country names. Newly added nullable values keep existing rows valid. No unsupported Column.length or misleading key-constraint annotation is used; O/jimmer-core/src/main/java/org/babyfish/jimmer/sql/Column.java:17-64 confirms the actual column annotation surface."
+        },
+        {
+          "condition": "baseline",
+          "case": "travel-migration",
+          "repeat": 2,
+          "masked_id": "answer-011",
+          "detail": "The entity code invents @Column(length=2): official Column exposes name, sqlType, and sqlElementType only (O/jimmer-core/src/main/java/org/babyfish/jimmer/sql/Column.java:17-64). The main SQL migration itself correctly adds a nullable varchar(2), validates two-character length, and creates a partial unique index for the explicitly assumed deleted=false condition. Its default NULL-distinct explanation is correct; the NULLS NOT DISTINCT alternative is clearly labeled as a different desired policy rather than applied to this requirement."
+        },
+        {
+          "condition": "updated",
+          "case": "travel-migration",
+          "repeat": 1,
+          "masked_id": "answer-020",
+          "detail": "Valid nullable scalar mapping using the real Column.name member (O/jimmer-core/src/main/java/org/babyfish/jimmer/sql/Column.java:17-22), nullable varchar(2), and uppercase two-letter validation. The illustrative deleted=false/non-null-country partial index enforces active non-null pair uniqueness while allowing null-country duplicates and deleted history. The additive migration validates the CHECK and explicitly calls out the outside-transaction requirement for concurrent index creation. The prompt supplies no competing soft-delete property, so the displayed boolean flag is accepted as the illustrative convention."
+        },
+        {
+          "condition": "updated",
+          "case": "travel-migration",
+          "repeat": 2,
+          "masked_id": "answer-027",
+          "detail": "Correct nullable countryCode mapped by the normal naming strategy; varchar(2) plus a two-letter CHECK establishes the database length/format. The active-only partial unique index permits null-country duplicates and deleted-history reuse, and the new column is safely nullable for existing rows. It explicitly identifies deleted as illustrative and asks to verify the actual logical-delete/table names. Avoids unsupported annotation options; O/jimmer-core/src/main/java/org/babyfish/jimmer/sql/Column.java:17-64 and KeyUniqueConstraint.java:21-76 do not provide a partial-index predicate facility."
+        }
+      ]
+    },
+    "inventory-repository-fetcher": {
+      "baseline": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "updated": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "evidence": [
+        {
+          "condition": "updated",
+          "case": "inventory-repository-fetcher",
+          "repeat": 2,
+          "masked_id": "answer-004",
+          "detail": "The imported Quarkus KRepository is real (Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/KRepository.kt:1-31), and its implementations are discovered at build time (Q/deployment/src/main/java/io/quarkiverse/jimmer/deployment/JimmerProcessor.java:537-584). Derived Code predicates and the implicit Fetcher parameter are supported. QueryExecutors attaches the supplied fetcher at lines 77-79 and returns fetchOneOrNull at lines 109-110 (Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/support/QueryExecutors.java). The nullable entity return and absence of handwritten SQL satisfy the contract."
+        },
+        {
+          "condition": "baseline",
+          "case": "inventory-repository-fetcher",
+          "repeat": 2,
+          "masked_id": "answer-015",
+          "detail": "Real Quarkus KRepository/CDI placement with a service delegate and nullable Warehouse result. findNullableByCode is acceptable here: entity-returning methods disable projection parsing, so the descriptive 'Nullable' between find and By is not treated as a Warehouse property (Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/parser/QueryMethodParser.java:92-100; Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/parser/QueryParser.java:52-72,82-86). Fetcher application and fetchOneOrNull are implemented in Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/support/QueryExecutors.java:77-79,109-110."
+        },
+        {
+          "condition": "baseline",
+          "case": "inventory-repository-fetcher",
+          "repeat": 1,
+          "masked_id": "answer-016",
+          "detail": "Correct declarative Quarkus KRepository method and CDI service delegation. The generator recognizes repository interfaces (Q/deployment/src/main/java/io/quarkiverse/jimmer/deployment/JimmerProcessor.java:537-584); the derived Code predicate is evaluated in SQL, the supplied Fetcher is attached, and a singular missing row returns null (Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/support/QueryExecutors.java:57-59,77-79,109-110). No handwritten SQL or compulsory eager associations. Omitted model/CDI imports are ordinary sketch setup."
+        },
+        {
+          "condition": "updated",
+          "case": "inventory-repository-fetcher",
+          "repeat": 1,
+          "masked_id": "answer-024",
+          "detail": "Recognized Quarkus KRepository abstraction and ApplicationScoped service delegate, with derived code predicate and nullable result. Caller-provided fetchers are applied to the entity selection and singular queries use fetchOneOrNull (Q/runtime/src/main/java/io/quarkiverse/jimmer/runtime/repository/support/QueryExecutors.java:57-59,77-79,109-110). Repository discovery/code generation is present in Q/deployment/src/main/java/io/quarkiverse/jimmer/deployment/JimmerProcessor.java:537-584. No resource SQL or forced bins/stock loading."
+        }
+      ]
+    }
+  }
+}

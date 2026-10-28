@@ -1,0 +1,15 @@
+export example.Asset
+
+AssetView {
+    id
+    name
+    #types {
+        #exhaustive
+        BookAsset {
+            isbn
+        }
+        ToolAsset {
+            inspectionInterval
+        }
+    }
+}

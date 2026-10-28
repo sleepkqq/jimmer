@@ -1,0 +1,17 @@
+node_modules/
+*.js.map
+.idea/
+*.iml
+.DS_Store
+__pycache__/
+.claude/
+
+# MCP build artifacts (built at install time)
+mcp/jimmer-docs-mcp/dist/
+
+# Dependency source checkouts (metadata is tracked)
+.slim/clonedeps/
+
+# JVM example build artifacts
+**/.gradle/
+**/build/

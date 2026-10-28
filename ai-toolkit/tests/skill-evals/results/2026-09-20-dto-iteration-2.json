@@ -1,0 +1,97 @@
+{
+  "grading_method": "Targeted DTO rerun after compiler rejected redundant optional modifier; complete pair retained, not selected best answers.",
+  "baseline": {
+    "passed": 2,
+    "total": 8,
+    "pass_rate": 0.25,
+    "median_seconds": 8.403,
+    "mean_context_bytes": 7383,
+    "runs": [
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.381,
+        "exit_code": 0,
+        "context_bytes": 7383,
+        "prompt_sha256": "9259f7520be4ced20abd5345513f288a84d9bd86687cf0f5a9ae0441bb974f39",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "fac1c5fd70cb34bb700c177d3da295211911f7e079209765e512032cba4afb4b",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    note\n    bins\n}\n```\n\nJSON round-trip assertion: deserializing `{}` leaves both `note` and `bins` unloaded, while `{\"note\":null,\"bins\":[]}` preserves both properties as loaded, with `note == null` and an empty `bins` collection."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.425,
+        "exit_code": 0,
+        "context_bytes": 7383,
+        "prompt_sha256": "9259f7520be4ced20abd5345513f288a84d9bd86687cf0f5a9ae0441bb974f39",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "5e03ea0811e9fe4126e8611a311bc54f3184661e3eec6d8fc4467b3eff15d507",
+        "answer": "```dto\ndynamic input ShelfPatch for com.example.inventory.Shelf {\n    note\n    bins\n}\n```\n\nJSON round-trip assertion: after deserializing `{\"note\":null,\"bins\":[]}`, assert `note` is loaded with value `null` and `bins` is loaded as an empty list; after deserializing `{}`, assert both properties are unloaded, so persistence leaves them unchanged."
+      }
+    ]
+  },
+  "updated": {
+    "passed": 5,
+    "total": 8,
+    "pass_rate": 0.625,
+    "median_seconds": 12.631499999999999,
+    "mean_context_bytes": 9927,
+    "runs": [
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.12,
+        "exit_code": 0,
+        "context_bytes": 9927,
+        "prompt_sha256": "234b62f5d99ec78850f112bf4fa20bf5fd6624c30470ed1c2037c79507af5e63",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "03b84253bf4bee37e6d26de9cfb3bb28e09c11ee952f0653325ef9cff34b3a2b",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: deserialize `{\"id\":\"...\",\"note\":null,\"bins\":[]}` and assert `note` is loaded as `null` and `bins` is loaded as an empty collection; with either field omitted, it remains unloaded."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 16.143,
+        "exit_code": 0,
+        "context_bytes": 9927,
+        "prompt_sha256": "234b62f5d99ec78850f112bf4fa20bf5fd6624c30470ed1c2037c79507af5e63",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "5a1a3a00e7b5a0fff4be5728936930b5ab842fc8b0a99167d8ae6a3b10282a9c",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: deserialize `{\"id\":\"...\",\"note\":null,\"bins\":[]}`, convert with generated `toEntity()`, and assert `note` is loaded as `null` and `bins` is loaded as an empty collection; omitting either property must leave it unloaded."
+      }
+    ]
+  }
+}
