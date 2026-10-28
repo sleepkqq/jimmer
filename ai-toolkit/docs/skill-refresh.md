@@ -1,9 +1,26 @@
 # Skill refresh evidence
 
-Reviewed: 2026-09-20. This historical refresh now lives under `versions/0.12.2/`.
-The subsequent release-specific layout intentionally puts version boundaries in
-skill instructions and pins provenance in each release's `sources.json`.
-For the 0.9.111 audit and paired examples see [its evidence](../versions/0.9.111/README.md).
+## 2026-10-28 refresh (current)
+
+Release-specific sets were removed: `skills/` now tracks this repository's latest
+fork release. All 17 skills were re-verified claim by claim against:
+
+| Source | Snapshot |
+|---|---|
+| `babyfish-ct/jimmer` | `v0.12.4` (`37da4250d`); every code change of `v0.12.2..v0.12.4` is in the fork (only version-bump commits differ) |
+| `sleepkqq/jimmer` | `1.1.14` (`047055c84`): object-cache admission, `CacheAdmissionPolicy`, Quarkus config, SQLState translation |
+| `babyfish-ct/jimmer-doc` | `10b60594e` |
+
+Corrections: nonexistent `UnloadedPropertyException`, `fetchExists` and
+`insertEntities` names; DDL-compiler snapshot directory layout; the Quarkus
+database-validation key (`quarkus.jimmer.database-validation-mode`; the nested
+`database-validation.mode` group is declared but never read); `@JoinSql` and
+`setKeyProps` semantics. Additions cover #1076, #1095, #1168, #1203, #1246, #1274,
+#1319, #1352, #1359, #1383, #1482, #1499, #1516, #1519, Kotlin transactional
+client routing and fork cache admission. New Kotlin snippets were derived from
+signatures and tests and were not compiled.
+
+## 2026-09-20 refresh (historical)
 
 ## Sources inspected
 

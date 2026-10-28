@@ -6,6 +6,9 @@
 - `project/jimmer-quarkus/{runtime,deployment,integration-tests}` contains the extension.
 - Extension history was imported with `git subtree add` **without squashing**, from
   `sleepkqq/quarkus-jimmer-extension` after release `1.14.1`.
+- `ai-toolkit/` holds the agent skills, docs MCP server and skill evaluations, imported the
+  same way from the archived `sleepkqq/jimmer-ai-toolkit`. Skills track the latest fork
+  release; install them with `ai-toolkit/install.sh --tool claude --symlink`.
 - Release `1.0.1` starts from upstream `dev`, commit `7c1d302b0`, including belovaf's
   single-table inheritance binlog fix and preceding save/upsert changes.
 - Release `1.0.2` merges upstream `dev` through `4e49a9108`, including the save-returning

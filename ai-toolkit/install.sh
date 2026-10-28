@@ -3,7 +3,6 @@ set -euo pipefail
 
 TOOLKIT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOOL="opencode"
-JIMMER_VERSION="0.12.2"
 USE_SYMLINK=false
 INSTALL_MCP=false
 
@@ -32,8 +31,6 @@ print_usage() {
     echo ""
     echo "Options:"
     echo -e "  ${CYAN}--tool${NC} opencode|claude|qwen|gigacode|codex Target CLI tool (default: opencode)"
-    echo -e "  ${CYAN}--version${NC} VERSION                          Jimmer release (default: 0.12.2)"
-    echo -e "  ${CYAN}--list-versions${NC}                            List bundled Jimmer releases"
     echo -e "  ${CYAN}--symlink${NC}                                Use symlinks instead of copies"
     echo -e "  ${CYAN}--mcp${NC}                                    Install MCP server config"
     echo ""
@@ -51,17 +48,6 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { log_error "--tool requires a value"; exit 1; }
             TOOL="$2"
             shift 2
-            ;;
-        --version)
-            [[ $# -ge 2 ]] || { log_error "--version requires a value"; exit 1; }
-            JIMMER_VERSION="$2"
-            shift 2
-            ;;
-        --list-versions)
-            for dir in "$TOOLKIT_DIR"/versions/*/skills; do
-                basename "$(dirname "$dir")"
-            done
-            exit 0
             ;;
         --symlink)
             USE_SYMLINK=true
@@ -88,11 +74,7 @@ if [[ "$TOOL" != "opencode" && "$TOOL" != "claude" && "$TOOL" != "qwen" && "$TOO
     exit 1
 fi
 
-SKILLS_SOURCE="$TOOLKIT_DIR/versions/$JIMMER_VERSION/skills"
-if [[ ! "$JIMMER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ ! -d "$SKILLS_SOURCE" ]]; then
-    log_error "Unsupported Jimmer version: $JIMMER_VERSION. Use --list-versions."
-    exit 1
-fi
+SKILLS_SOURCE="$TOOLKIT_DIR/skills"
 
 case "$TOOL" in
     opencode)
@@ -161,7 +143,7 @@ install_path() {
 }
 
 log_header "Skills"
-log_info "Jimmer $JIMMER_VERSION"
+log_info "Jimmer (sleepkqq/jimmer, latest)"
 SKILL_COUNT=0
 for dir in "$SKILLS_SOURCE"/*; do
     [ -d "$dir" ] || continue

@@ -105,7 +105,7 @@ Common keys (per-datasource keys accept a datasource name segment, `<default>` f
 | `quarkus.jimmer.<ds>.dialect` | auto-detected | Jimmer SQL dialect |
 | `quarkus.jimmer.<ds>.default-schema` | — | Default schema |
 | `quarkus.jimmer.<ds>.trigger-type` | `BINLOG_ONLY` | Trigger strategy |
-| `quarkus.jimmer.database-validation.mode` | `NONE` | Validate schema against entities on start |
+| `quarkus.jimmer.database-validation-mode` | `NONE` | Validate schema against entities on start |
 
 When your entities live in a **library jar** (not the application module), point Quarkus' indexer
 at it so the build step can discover them:

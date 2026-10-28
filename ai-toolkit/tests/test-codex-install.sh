@@ -76,9 +76,9 @@ new_home
 copy_home="$NEW_HOME"
 first_output="$(HOME="$copy_home" bash "$REPO_DIR/install.sh" --tool codex)"
 assert_skill_tree "$copy_home/.agents/skills"
-cmp "$REPO_DIR/versions/0.12.2/skills/jimmer-caching/references/quarkus.md" \
+cmp "$REPO_DIR/skills/jimmer-caching/references/quarkus.md" \
   "$copy_home/.agents/skills/jimmer-caching/references/quarkus.md"
-cmp "$REPO_DIR/versions/0.12.2/skills/jimmer-dto/GUIDE.md" \
+cmp "$REPO_DIR/skills/jimmer-dto/GUIDE.md" \
   "$copy_home/.agents/skills/jimmer-dto/GUIDE.md"
 for name in "${EXPECTED[@]}"; do
   [[ ! -L "$copy_home/.agents/skills/$name" ]] || fail "copy mode created symlink for $name"
@@ -99,7 +99,7 @@ assert_skill_tree "$symlink_home/.agents/skills"
 for name in "${EXPECTED[@]}"; do
   link="$symlink_home/.agents/skills/$name"
   [[ -L "$link" ]] || fail "$link is not a symlink"
-  [[ "$(readlink "$link")" == "$REPO_DIR/versions/0.12.2/skills/$name" ]] || fail "wrong target for $link"
+  [[ "$(readlink "$link")" == "$REPO_DIR/skills/$name" ]] || fail "wrong target for $link"
 done
 
 new_home
