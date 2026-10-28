@@ -1,0 +1,7 @@
+export example.Item
+
+ItemView {
+    id
+    sku
+    name
+}

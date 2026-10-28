@@ -1,0 +1,25 @@
+export example.Book
+
+BookView {
+    id
+    name
+    price
+    version
+    store {
+        id
+        name
+    }
+}
+
+dynamic input BookPatch {
+    id
+    name?
+    store {
+        id
+    }
+}
+
+specification BookSpec {
+    like/i(name)
+    ge(price) as minPrice
+}

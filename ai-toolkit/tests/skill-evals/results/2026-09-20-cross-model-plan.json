@@ -1,0 +1,19 @@
+{
+  "models": [
+    "openai/gpt-5.6-luna#low",
+    "openai/gpt-5.5#low",
+    "openai/gpt-6-astra#low"
+  ],
+  "repeats": 2,
+  "cases_sha256": "c466fbcca2c01843ddf41867d332ec19fa02800aa15fae5744e8f9543f23280b",
+  "conditions": {
+    "baseline": "Empty supplied skill reference; shared OpenCode harness unchanged",
+    "updated": "Frozen round2 candidate, 37 skill files"
+  },
+  "new_answering_calls": 160,
+  "reused_answering_calls": 32,
+  "reused_luna_sources": [
+    "2026-09-20-round2-regression.json",
+    "2026-09-20-round2-transfer.json"
+  ]
+}

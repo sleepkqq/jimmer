@@ -1,0 +1,45 @@
+{
+  "method": "Manual, non-blind, strict whole-assertion grading against cases.json. Entries are ordered by assertion, then repeated run. Missing caveats fail even when the main recommendation is correct.",
+  "cases": {
+    "cache-cdc": {
+      "baseline": [[false, false, true, true], [false, false, true, true]],
+      "updated": [[false, true, true, true], [false, true, true, true]],
+      "evidence": "Baseline recommends BOTH (including as a transition). Updated selects BINLOG_ONLY and correctly covers delivery/retry/readiness, but neither updated answer explicitly explains that both alternatives are deprecated."
+    },
+    "insert-if-absent-result": {
+      "baseline": [[false, false, false, true], [false, false, false, true]],
+      "updated": [[true, true, false, true], [true, true, false, true]],
+      "evidence": "Baseline never checks isAccepted: run 1 always queries; run 2 inspects saved.getId(). Updated branches on acceptance and performs the conflict lookup with a concurrency policy. Neither condition discusses UPSERT technical self-assignment, required by assertion 3."
+    },
+    "external-version": {
+      "baseline": [[false, false, false, false], [false, false, false, false]],
+      "updated": [[true, true, true, true], [true, true, true, true]],
+      "evidence": "Baseline invents OptimisticLockMode.VERSION/IGNORE and isModified/nullable-result rejection. Its root-only statements describe the invented mode, not setVersionMode. Updated uses ASSIGNMENT, setUpdateWhere, isAccepted and explicitly states root-only scope."
+    },
+    "dissociation": {
+      "baseline": [[false, false, true], [false, false, true]],
+      "updated": [[true, true, true], [true, true, true]],
+      "evidence": "Both baseline runs put OnDissociate on Warehouse.bins, rejected by Jimmer metadata. Both updated runs put it on Bin.warehouse. All answers correctly distinguish the existing RESTRICT FK from ORM child deletion."
+    },
+    "dto-patch": {
+      "baseline": [[false, true, false, false], [false, true, false, false]],
+      "updated": [[false, true, false, false], [false, true, false, false]],
+      "evidence": "Baseline uses a bare bins association without a nested shape/ID projection and omits id. Updated iteration 1 includes note?, but a real APT compile rejects redundant ? on an already nullable base property, so its declaration fails assertions 1 and 4. Neither condition explains associated-mode/dissociation requirements for clearing (assertion 3). This failure prompted a documented correction and separate DTO rerun; iteration 1 evidence is retained."
+    },
+    "quarkus-current": {
+      "baseline": [[false, true, false, true, false], [false, true, false, true, false]],
+      "updated": [[true, true, true, true, true], [true, true, true, true, true]],
+      "evidence": "Baseline invents GitHub Packages coordinates, mixes artifact families, cannot name CacheReadiness and claims constraint investigation defaults true. Updated uses unified JitPack coordinates, Jandex, exactly one readiness provider with ready/namespace, read-and-fill bypass, tracker-vs-CDC distinction and both actual exception defaults."
+    },
+    "inheritance": {
+      "baseline": [[false, true, false, false], [false, true, false, false]],
+      "updated": [[true, true, true, true], [true, true, true, true]],
+      "evidence": "Baseline invents DiscriminatorColumn and @Dto hierarchies (run 1 also InheritanceStrategy), and misses explicit type-change API. Updated uses entity inheritance, Discriminator property, nullable subtype columns, #types/#exhaustive and an explicit exact-matched type transition."
+    },
+    "insert-from-select": {
+      "baseline": [[false, false, false, false], [false, false, true, false]],
+      "updated": [[true, true, true, false], [true, true, true, false]],
+      "evidence": "Baseline invents createInsert(...).columns(...).select(...) and conflict APIs; only run 2 explicitly excludes conflicts from returning. Updated uses the actual typed source and createInsert(target, source) mappings. Both conditions omit dialect/materialization fallback and describe no application materialization without a dialect qualification (assertion 4)."
+    }
+  }
+}

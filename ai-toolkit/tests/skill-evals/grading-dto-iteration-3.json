@@ -1,0 +1,10 @@
+{
+  "method": "Targeted DTO rerun after explicitly separating dynamic presence handling from optional non-null collections; both repetitions retained.",
+  "cases": {
+    "dto-patch": {
+      "baseline": [[false, true, false, false], [false, true, false, false]],
+      "updated": [[true, true, false, true], [true, true, false, true]],
+      "evidence": "Both runs now emit export, id, bare nullable note and optional bins? { id }, matching the compiler/runtime-verified fixture's shape. Both describe omission versus null/empty loaded state. Assertion 3 still fails because the concise answers omit the associated-save-mode/dissociation requirement, which remains in the skill."
+    }
+  }
+}

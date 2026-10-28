@@ -1,0 +1,235 @@
+{
+  "method": "Non-blind source-grounded self-review of frozen assertions. Java/Kotlin function assertions additionally checked by compiling the unedited generated code and executing it on H2; generated StorePatch compiled with both APT and KSP. A further closed-book round on opencode-go/deepseek-v4.1-flash with the simplified prompts added the flash vectors; its graded answers compiled and ran on H2, and its StorePatch DTO generated under both APT and KSP. A post-cleanup round (facade/version-agnostic skills) added the facades vectors, again compiling and running the graded Java/Kotlin answers and StorePatch.",
+  "cases": {
+    "java-create-and-query": {
+      "initial": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    },
+    "kotlin-conditional-and-query": {
+      "initial": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    },
+    "kotlin-patch-presence": {
+      "initial": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    },
+    "save-result-contract": {
+      "initial": [
+        [
+          true,
+          false,
+          true,
+          true
+        ]
+      ],
+      "corrected": [
+        [
+          true,
+          true,
+          true,
+          true
+        ],
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    },
+    "trigger-version-boundary": {
+      "initial": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    },
+    "kotlin-ksp-construction": {
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    },
+    "typed-tuple-aggregate": {
+      "flash": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ],
+      "facades": [
+        [
+          true,
+          true,
+          true,
+          true
+        ]
+      ]
+    }
+  },
+  "findings": [
+    {
+      "case": "save-result-contract",
+      "assertion": 2,
+      "evidence": "The initial answer says isRowAffected is unavailable. KSimpleSaveResult.kt lines 7-8 define it as affectedRowCountMap.isNotEmpty(). The answer also suggests a Java-style getAffectedRowCount with Item::class.java for Kotlin, but KMutationResult declares affectedRowCount(KClass) and affectedRowCount(KProperty1).",
+      "fix": "Added a Java/Kotlin result-contract table and exact count-call examples to jimmer-save-modes, with a short cross-reference in jimmer-performance. Neither isModified nor Kotlin isRowAffected is an acceptance flag."
+    },
+    {
+      "case": "java-create-and-query",
+      "assertion": 1,
+      "evidence": "Pre-final simplified rounds used a BookDraft-typed produce result and wrong call signatures; the Java Immutables facade was absent from guidance.",
+      "fix": "Documented Immutables.createBook / Book { } in jimmer-entity and jimmer-kotlin, stated the harness call interface in the prompt; graded answer compiled and passed H2."
+    },
+    {
+      "case": "kotlin-patch-presence",
+      "assertion": 3,
+      "evidence": "NONE dissociation is treated as CHECK on the save detach path (DetachOptions), not as automatic FK nulling.",
+      "fix": "jimmer-save-modes requires an explicit SET_NULL/DELETE policy on the owning reference for save-time dissociation; reruns comply."
+    },
+    {
+      "case": "typed-tuple-aggregate",
+      "assertion": 3,
+      "evidence": "Generated mapper has no no-arg constructor; the DSL entry is the static first-component method (TypedTupleTest: AggregateTupleMapper.storeId(...)).",
+      "fix": "jimmer-query states the static chain start; targeted rerun passes."
+    },
+    {
+      "case": "typed-tuple-aggregate",
+      "assertion": 2,
+      "evidence": "The simplified prompt no longer requests a specific tuple-class shape, and both constructor- and setter-based classes are valid for @TypedTuple.",
+      "fix": "Assertion accepts either style; graded answer used a constructor and is still fine."
+    },
+    {
+      "case": "kotlin-patch-presence",
+      "assertion": 4,
+      "evidence": "The simplified prompt requests the Jackson module only; Kotlin DTO construction style is not requested there.",
+      "fix": "Assertion scoped to the Jackson module; immutability guidance remains in jimmer-kotlin."
+    },
+    {
+      "case": "kotlin-ksp-construction",
+      "assertion": 4,
+      "evidence": "Answer named the Jackson artifact only; listed skills did not carry the module class.",
+      "fix": "jimmer-kotlin names ImmutableModule; rerun passes."
+    },
+    {
+      "case": "typed-tuple-aggregate",
+      "assertion": 3,
+      "evidence": "Mapper chain absorbed groupBy/orderBy and dropped createQuery.",
+      "fix": "Full query example added to the query GUIDE; rerun passes."
+    }
+  ]
+}

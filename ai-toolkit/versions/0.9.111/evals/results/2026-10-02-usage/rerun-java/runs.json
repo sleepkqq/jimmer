@@ -1,0 +1,12 @@
+[
+  {
+    "id": "java-create-and-query",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 61.675,
+    "exit_code": 0,
+    "context_bytes": 19227,
+    "task_sha256": "347a6877f9eac3aa9c707fb727bc82ee80ac33adaac485e34ebb786a3a4aa4a8",
+    "prompt_sha256": "5375489699f59c36460dfb52214f296a4cd03adc1e3c565e98f4f59f648d5058"
+  }
+]

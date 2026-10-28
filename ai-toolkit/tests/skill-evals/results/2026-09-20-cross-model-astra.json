@@ -1,0 +1,1303 @@
+{
+  "baseline": {
+    "passed": 77,
+    "total": 128,
+    "pass_rate": 0.6015625,
+    "median_seconds": 15.3895,
+    "mean_context_bytes": 0,
+    "runs": [
+      {
+        "id": "cache-cdc",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.478,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "ed574a757f8c88b41e5a8a856361a0b91cd40d1844e9a24e59388cf3ba2e9cf6",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "5a71928e79facf68c0cc6b204679ee2f2bfda029e29d0bb82b3314a080fa9997",
+        "answer": "**Use CDC-driven invalidation for all database writers.** `TRANSACTION_ONLY` sees Jimmer-managed changes, not the SQL importer’s writes.\n\n- Configure `BINLOG_ONLY` for CDC-based invalidation, or `BOTH` if you also want immediate invalidation from Jimmer transactions. With `BOTH`, expect duplicate invalidations; deletion must be idempotent.\n- Deploy a CDC pipeline that captures committed database changes and feeds them into Jimmer’s binlog processing. Changing `trigger-type` alone neither starts CDC nor connects it to Jimmer.\n- Invalidate affected entity and association caches, including derived caches where applicable. Shared Redis covers the shared cache layer; any per-instance local cache also needs cross-instance invalidation. Redis sharing alone does not provide that.\n- Treat CDC consistency as **eventual**, with staleness bounded by processing lag under normal operation—not strict read-after-write consistency.\n\n**If Redis deletion fails:** processing must fail without acknowledging the CDC record or advancing its committed checkpoint. Retry with backoff and alert on persistent failure. Do not swallow the exception, log-and-continue, or acknowledge merely because invalidation was queued. Ensure the CDC adapter and cache error handling actually preserve this failure contract; replayed deletions must be safe.\n\n**Rollout check:** warm affected caches on both instances, then update data through each application and through the SQL importer. Verify entity and association results converge on both nodes. Interrupt Redis during CDC processing: confirm the checkpoint does not advance past unsuccessful invalidation, then restore Redis and verify replay clears stale entries. Monitor CDC lag and invalidation failures."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.766,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "40e4521e6cf29d157ff344667b0529f897cc8f5c3328039fc204415bc21eef04",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "3e9eec207b6ebc7e7be223932f4e0720573025db4df83fa9acb90ca20b900535",
+        "answer": "No. **`INSERT_IF_ABSENT` prevents updating an existing row; it does not guarantee that a conflict returns the existing row’s generated ID.** `getModifiedView()` is not a contractual “load the winning row” operation. Converting a save result to `ItemView` does not establish that guarantee either. “Never query after save” is not a Jimmer rule.\n\nThe smallest reliable service flow is:\n\n```text\nWithin a transaction:\n    saveCommand(input)\n        .setMode(SaveMode.INSERT_IF_ABSENT)\n        .execute();\n\n    query Item by its unique SKU, selecting its ID;\n    return that ID;\n```\n\nRequirements:\n\n- Enforce SKU uniqueness **in the database**.\n- Configure SKU as Jimmer’s matching key, for example with `@Key`, and use create input without a supplied ID.\n- Keep the save graph limited to the item if “never update” must also exclude writes to associated objects.\n- Run the lookup against the primary database, not a potentially lagging replica.\n\n**Concurrency caveat:** the unique constraint arbitrates competing inserts, but the save and lookup are still separate statements. A concurrent delete can leave the lookup empty, and snapshot isolation can prevent it from seeing a concurrently inserted winner or cause a serialization failure. A transaction alone does not eliminate these cases. Use suitable isolation and retry the whole transaction when required; handle a missing lookup explicitly rather than assuming the ID must exist."
+      },
+      {
+        "id": "external-version",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.231,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "4525cb7238c1cca8d4ff833f3ac93a3ce22a9e0c2e0818ccc1b084033f33f9d0",
+        "passed": 0,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "answer_sha256": "e23a1408f91c96c56ec2d0448a2769d8f7079288d65fab08503e879d3549ba18",
+        "answer": "The required behavior is an **atomic revision-gated upsert**, not ordinary optimistic locking:\n\n- Missing ID → insert with the supplied version.\n- Existing ID and incoming version **greater** → update, preserving the incoming version.\n- Existing ID and incoming version **less than or equal** → reject normally, without modifying the row.\n\nHowever, the supplied reference material is empty, and I cannot reliably identify Jimmer **0.12.2’s exact version-mode API**, its rejection-result accessor, or its child-object scope from the available information. Giving a Kotlin save configuration would risk inventing APIs.\n\nOrdinary Jimmer `@Version` optimistic locking is **not a substitute**: it checks an expected version and can throw an optimistic-lock exception. Likewise, reading the current version before saving is insufficient because concurrent writers can race.\n\nFor comparison, PostgreSQL can enforce the required semantics atomically:\n\n```sql\nINSERT INTO catalog_revision (id, version, payload)\nVALUES (:id, :version, :payload)\nON CONFLICT (id) DO UPDATE\nSET version = EXCLUDED.version,\n    payload = EXCLUDED.payload\nWHERE EXCLUDED.version > catalog_revision.version\nRETURNING id;\n```\n\nA returned row means accepted; no returned row means rejected. This SQL affects only this table, not child objects.\n\nPlease supply the 0.12.2 version-mode reference or declarations to establish the exact Kotlin save configuration, rejection check, and whether that configuration propagates to children."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 10.982,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "91246cf43a29f03cf221415e01aa7e33546112c486d53b653c3430bedb432e2b",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "a6adaabf4e7b84b2f1085565100d447d299a124d763ab8f44e98a593afb4e700",
+        "answer": "`@OnDissociate(DissociateAction.DELETE)` belongs on **`Bin.warehouse()`**, the owning `@ManyToOne` property—not on `Warehouse.bins()`.\n\n```java\n@Entity\npublic interface Warehouse {\n    @Id\n    long id();\n\n    @OneToMany(mappedBy = \"warehouse\")\n    List<Bin> bins();\n}\n\n@Entity\npublic interface Bin {\n    @Id\n    long id();\n\n    @ManyToOne\n    @OnDissociate(DissociateAction.DELETE)\n    Warehouse warehouse();\n}\n```\n\n**No FK change is required:** the existing database FK can remain `RESTRICT`.\n\n- **Jimmer dissociation:** When saving `bins` with replacement semantics, Jimmer treats omitted existing bins as dissociated and deletes their rows. It does not attempt to set the non-null `warehouse` FK to `NULL`. Ensure the save uses replacement rather than append/merge semantics.\n- **SQL FK behavior:** `ON DELETE CASCADE` acts when the referenced **Warehouse row is deleted**. It does not detect bins removed from an in-memory collection while the warehouse remains.\n\nThe annotation controls ORM-issued operations; it neither requires nor changes the database FK’s delete rule. Direct SQL deletion of a warehouse still obeys `RESTRICT` if referencing bins remain."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 9.564,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "79602e6985b1b50e19908d1ebdaa3da2d89121493423775939c368802dd2febe",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "cc103deec0b00f25b4d92cee36df916b0aecb1ef66e8981ae37388acc20bdd06",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    note\n    id(bins)\n}\n```\n\n`dynamic input` preserves property presence: omitted `note` or `bins` leaves it unchanged; `\"note\": null` clears the nullable note; `\"bins\": []` clears the association. `bins` accepts Bin IDs. Shelf’s `id` and other properties are not writable through this DTO; supply the target Shelf ID separately.\n\n**JSON round-trip assertion:** Using the application’s configured Jackson mapper, deserialize and reserialize both `{}` and `{\"note\":null,\"bins\":[]}` as `ShelfPatch`, then assert their JSON trees equal their respective originals. This verifies that omitted properties stay absent while explicit null and an empty collection remain present."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.584,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "2f6a7bcb20ddd3f28ceb505d05b2eed9a9c61ba833f0f89c3cfbba3d4e33cc0c",
+        "passed": 1,
+        "total": 5,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true,
+          false
+        ],
+        "answer_sha256": "362585d91bac83186a1249ec2998a6a286dd774057be1ac033ceeda62243ec8d",
+        "answer": "The reference material is empty, so I can’t reliably name the **sleepkqq/jimmer 1.0.1 unified fork’s** runtime/KSP coordinates, artifact repository, guard CDI interface, or current constraint-translation defaults. Substituting upstream Jimmer coordinates or guessed class names would risk an incorrect setup.\n\nWhat can be established:\n\n- **Gradle:** Apply Kotlin/JVM and Kotlin KSP with compatible versions. Put the fork’s Quarkus runtime artifact in `implementation(...)` and its processor in `ksp(...)`, both at `1.0.1`, using the fork’s documented repository. Exact coordinates need confirmation.\n- **Separate model JAR:** Run Jimmer’s KSP processor in the **model module**, and publish its generated classes and entity-discovery metadata alongside the entities. Add that JAR as an application dependency. Quarkus also needs to discover dependency classes at build time, typically through a published Jandex index or `quarkus.index-dependency` configuration. The fork’s specific entity-registration mechanism still needs verification.\n- **Cache guard:** A CDI provider implementing the fork’s required guard/readiness contract must be supplied; its exact interface and gated cache operations cannot be inferred safely from `quarkus.jimmer.cache.guard.enabled` alone.\n- **Redis readiness versus CDC catch-up:** **No—`isReady` alone is not proof of catch-up.** Redis connectivity, tracker initialization, or heartbeat freshness does not establish that the CDC consumer has processed all relevant commits. That requires an explicit consumed-position/watermark comparison or equivalent documented guarantee.\n- **Constraint exceptions:** The current translation defaults are fork-specific and cannot be verified from the supplied material.\n\nPlease supply the fork’s Gradle setup, model-discovery, cache-guard, and exception-translation documentation—or the corresponding source snippets—for an exact, copy-ready answer."
+      },
+      {
+        "id": "inheritance",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 15.267,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "134f5a6acca6c6e7173d033c633d8d06732a9c9a8ba8dfd16baf02a4b3ad243d",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "888110855c0c4018a147535168c749e014eee1ac79bb4f138c19bd1325a1f32f",
+        "answer": "**SINGLE_TABLE** means `Asset`, `BookAsset`, and `ToolAsset` share one table, with a discriminator identifying the concrete branch.\n\nThe reference section is empty, so I cannot verify Jimmer **0.12.2’s exact discriminator annotations or polymorphic DTO syntax**. The snippets below are schematic—not compilable Jimmer declarations. JPA annotations should not be assumed to work in Jimmer.\n\n```text\nAsset      → asset table; discriminator column: asset_type\nBookAsset  → discriminator value: BOOK; property: isbn\nToolAsset  → discriminator value: TOOL; property: voltage\n```\n\nBranch-only columns must allow SQL `NULL`: a tool row has no `isbn`, and a book row has no `voltage`. That does **not** necessarily mean those properties must be nullable in their respective branch models. Database checks can enforce branch-specific requirements:\n\n```sql\nCHECK (asset_type <> 'BOOK' OR isbn IS NOT NULL),\nCHECK (asset_type <> 'TOOL' OR voltage IS NOT NULL)\n```\n\nThe desired root DTO is conceptually:\n\n```text\nAssetView:\n  id\n  branch BookAsset: isbn\n  branch ToolAsset: voltage\n  require exhaustive concrete-branch coverage\n```\n\nExposing branch properties and making omitted concrete branches a **compile-time error** requires Jimmer’s documented polymorphic DTO/exhaustiveness feature; ordinary nullable DTO fields do not provide that guarantee. I cannot supply its exact syntax from the available material.\n\n**Do not treat discriminator updates as supported subtype conversion.** Changing the stored tag alone can invalidate branch data and cached type identity. Jimmer-specific mutation guarantees need confirmation; model conversion explicitly rather than assuming an existing ID can change subtype through a discriminator assignment."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.53,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "8c35bd7a214e3a416d0c2fc09bb871cf467d91a59c3595460dfae69dbac1cf89",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "b340631d135f43067f36dd60838dbc6f5daa0aa7b082e9a6674ee99255a55ed3",
+        "answer": "The source can be a typed base query that **directly selects the table**, rather than a tuple or fetched entity:\n\n```java\nWarehouseTable w = WarehouseTable.$;\n\nvar source = sqlClient\n    .createQuery(w)\n    .where(w.name().like(\"North%\"))\n    .select(w);\n```\n\nKeep `source` as a query—do **not** call `execute()` and then save its results. The intended operation is a single database-side insert-select, mapping the physical `id` and `name` columns to `WarehouseArchive`, ignoring ID conflicts, and returning the IDs actually inserted. For PostgreSQL, its SQL shape is:\n\n```sql\nINSERT INTO warehouse_archive (id, name)\nSELECT id, name\nFROM warehouse\nWHERE name LIKE '%North%'\nON CONFLICT (id) DO NOTHING\nRETURNING id;\n```\n\nIDs skipped because of conflicts are not returned.\n\n- **Joined-inheritance target:** not supported by this single-table insert-select operation; a target requiring inserts into multiple physical tables is not acceptable.\n- **Ordering:** returned IDs have no guaranteed correspondence to source ordering, even if the source query specifies `ORDER BY`.\n\nThe supplied reference contains no API documentation, and I cannot reliably identify Jimmer **0.12.2’s exact insert-select/conflict/returning method signatures** from memory. The Java above sketches only the typed source query; I would not invent a fluent mutation chain and present it as compilable."
+      },
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 12.555,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "719dbc515be5802e383a7961e702b3d01190d89a5c33aa80b1f171a7bfe47bbe",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "e2d55d6315b033e03bad48ffeec73783b44b91a95fa454b685019d50903b75d8",
+        "answer": "Jimmer’s standard typed save API does not provide this combination of **`INSERT … SELECT`, conflict handling by `sku`, and `RETURNING`** as one database-side statement. Loading staging rows and calling `saveEntities` would not meet your one-operation requirement.\n\nFor **PostgreSQL**, the required operation is:\n\n```sql\nINSERT INTO product (sku, title, price)\nSELECT s.sku, 'Imported product', s.price\nFROM product_price_import AS s\nWHERE s.price IS NOT NULL\nON CONFLICT (sku) DO UPDATE\nSET price = EXCLUDED.price\nRETURNING id, sku;\n```\n\nThis:\n- Inserts missing products with the fixed title.\n- Updates only the price of existing products, preserving their titles.\n- Returns the affected products’ IDs and SKUs.\n\n**Prerequisites:** `product.sku` must have a unique constraint, `product.id` must have a database-generated default, and the selected staging rows must contain at most one row per SKU. Otherwise, define a deterministic duplicate-resolution rule first.\n\nExecute this as native SQL through your application’s JDBC/transaction integration. A Java record can represent the result, but that does not make the SQL a Jimmer-typed mutation. If the **typed Jimmer API** requirement is mandatory, provide the Jimmer version and its relevant mutation reference; no such API was included here, so a concrete fluent implementation would be speculative."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 20.547,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "d8da2e51b2d7c7ba7b3c1fa0b258621080dd9760b82d4c57d33d4f84e091ba0c",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9387484ecea476433ece46902d16f7fd5fb2b42f5ef06dfbe6081b6f51f9bfd9",
+        "answer": "Use **update-only saving**, a **version property**, and a **database unique constraint** on the warehouse/product pair.\n\n```kotlin\nimport org.babyfish.jimmer.sql.*\n\n@Entity\n@Table(name = \"stock_item\")\ninterface StockItem {\n    @Id\n    val id: Long\n\n    @Key\n    val warehouseId: Long\n\n    @Key\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\nThe two `@Key` properties form a composite business key. Enforce its uniqueness in the database as well—`@Key` alone is not a database constraint:\n\n```sql\nALTER TABLE stock_item\n    ADD CONSTRAINT uq_stock_item_warehouse_product\n    UNIQUE (warehouse_id, product_id);\n```\n\nSave the immutable entity with **all command fields, including `id` and the supplied `version`, loaded**:\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\n\nval result = sqlClient.save(command) {\n    setMode(SaveMode.UPDATE_ONLY)\n}\n\nval updatedItem = result.modifiedEntity\n```\n\nExpected behavior:\n\n- **Matching version:** Jimmer updates the row and increments its version. Use `modifiedEntity` to obtain the new version; the immutable command is unchanged.\n- **Stale version:** Jimmer throws `SaveException.OptimisticLockError`; it does not silently overwrite the row or fall back to insertion. Typically translate this into a concurrency conflict, such as HTTP **409**. Do not automatically retry with a newer version.\n- **Missing ID:** Reject an absent/unloaded command ID before saving. If the supplied ID identifies no row, the versioned update cannot succeed and produces an optimistic-lock failure; `UPDATE_ONLY` prevents insertion. A versioned update alone does not distinguish “deleted/missing” from “stale version.”\n- **Duplicate warehouse/product pair:** The database unique constraint rejects an update that would collide with another row. No second row is inserted."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.296,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "8c0bce45be621ba7c18a8663b3018be326538fe3fd347314c49b812267b0c820",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "c18b5b0f4ac3a27b28cba7502b601f3357d469c260c6cbcc2a8ce2f20eeefd94",
+        "answer": "Use a Jimmer **Fetcher** to define the returned graph and table expressions to keep filtering in SQL.\n\nAssuming `Trip.published` is boolean, `departureDate` is a `LocalDate`, and `destination`, `itineraryStops`, and each stop’s `city` are associations:\n\n```java\npublic List<Trip> findPublishedTrips(\n        JSqlClient sqlClient,\n        long destinationId,\n        LocalDate departureDate\n) {\n    TripTable trip = TripTable.$;\n\n    TripFetcher responseGraph = TripFetcher.$\n        .name()\n        .destination(DestinationFetcher.$.name())\n        .itineraryStops(\n            ItineraryStopFetcher.$\n                .city(CityFetcher.$.name())\n                .arrivalTime()\n        );\n\n    return sqlClient\n        .createQuery(trip)\n        .where(trip.published().eq(true))\n        .where(trip.destination().id().eq(destinationId))\n        .where(trip.departureDate().eq(departureDate))\n        .select(trip.fetch(responseGraph))\n        .execute();\n}\n```\n\n- Jimmer includes entity IDs automatically; the graph explicitly adds trip name, destination name, and stop city name/arrival time.\n- Neither `internalNotes` nor `hotel` is selected. Avoid `.allScalarFields()` here, since it could include internal notes.\n- All predicates execute in SQL. Jimmer may load the stop collection with a separate batched query; an explicit graph does not require one large join.\n\nThe generated table/fetcher names must match your entity model. If `city` is a scalar string rather than an association, use `.city()` instead."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 30.674,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "cbaf43fa7d4703c785decb024f9cb321a8154eb147090278ea5cf25b0ceff164",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          false
+        ],
+        "answer_sha256": "18d91847787b080b07149977fd493e06ce32373776f4d231b96e9399e2142d14",
+        "answer": "Ниже предполагается, что у `Exhibition` есть `title: String`, обязательная связь `museum`, nullable-поле `openingDate: LocalDate?` и связь `exhibits`. `id` генерируется автоматически, а `createdAt` заполняется на сервере.\n\n### DTO-описания\n\nФайл `src/main/dto/Exhibition.dto` (замените пакет на свой):\n\n```text\nexport com.example.museum.model.Exhibition\n    -> package com.example.museum.dto\n\ninput ExhibitionCreateInput {\n    title\n    id(museum) as museumId\n    openingDate\n}\n\nExhibitionRead {\n    id\n    title\n    flat(museum) {\n        name as museumName\n    }\n    exhibitCount\n}\n```\n\n- `title` и `museumId` обязательны благодаря non-null типам свойств модели.\n- `openingDate` допускает `null`; для обычного input отсутствие даты означает `null`.\n- `id` и `createdAt` отсутствуют во входном DTO. Не используйте здесь `#allScalars`, чтобы случайно не открыть серверные поля.\n- `id(museum)` преобразуется в ссылку на музей только по идентификатору.\n\n### Количество экспонатов\n\n`exhibitCount` должно быть свойством модели: произвольный `count(exhibits)` в DTO писать не нужно. Например, его можно определить SQL-формулой:\n\n```kotlin\n// В интерфейсе сущности Exhibition.\n// Имена таблицы и столбца должны соответствовать вашей схеме.\n@get:Formula(\n    sql = \"(select count(*) from EXHIBIT e where e.EXHIBITION_ID = %alias.ID)\"\n)\nval exhibitCount: Long\n```\n\nТакой вариант предполагает внешний ключ `EXHIBIT.EXHIBITION_ID`. Для связи через промежуточную таблицу формула будет другой. Коллекция `exhibits` при этом не загружается.\n\n### Сохранение и запрос\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\n\nfun create(input: ExhibitionCreateInput) {\n    sqlClient.save(input.toEntity()) {\n        setMode(SaveMode.INSERT_ONLY)\n    }\n}\n\nfun findAll(): List<ExhibitionRead> =\n    sqlClient.createQuery(Exhibition::class) {\n        select(table.fetch(ExhibitionRead::class))\n    }.execute()\n```\n\n`toEntity()` создаёт объект для сохранения без клиентских `id` и `createdAt`; их генерацию нужно настроить отдельно в модели/БД либо серверном interceptor. `INSERT_ONLY` явно задаёт создание, а не upsert.\n\nЗапрос выбирает проекцию DTO: `id`, `title`, имя музея и вычисленное количество, **без загрузки самих экспонатов**. Если лишние поля JSON нужно не просто игнорировать, а отклонять, включите в JSON-десериализаторе ошибку на неизвестные свойства."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 36.957,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "10c5e870b2afc46bedb4028927d92bc741ddde35002229e010c46eac07a32e5f",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "7827a9d3b92876286572a3d39e92cacc8e9788e2a69c58b9e41f37a919f8453f",
+        "answer": "Use **Jimmer’s cache SPI**, not repository-level `@Cacheable` or explicit Redis lookups. Register a Spring `CacheFactory` that creates a Caffeine → Redis cache chain.\n\n### Configuration\n\nAdd Jimmer’s Spring Redis cache integration (`jimmer-spring-boot-starter-redis`, aligned with your Jimmer version), Caffeine, and configure Spring’s Redis connection.\n\nA typical Java configuration using the constructor-based binder API is:\n\n```java\nimport com.fasterxml.jackson.databind.ObjectMapper;\nimport org.babyfish.jimmer.meta.ImmutableProp;\nimport org.babyfish.jimmer.meta.ImmutableType;\nimport org.babyfish.jimmer.sql.cache.Cache;\nimport org.babyfish.jimmer.sql.cache.CacheFactory;\nimport org.babyfish.jimmer.sql.cache.chain.ChainCacheBuilder;\nimport org.babyfish.jimmer.sql.cache.caffeine.CaffeineBinder;\nimport org.babyfish.jimmer.spring.cache.RedisValueBinder;\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Configuration;\nimport org.springframework.data.redis.core.RedisTemplate;\n\nimport java.time.Duration;\n\n@Configuration\npublic class CatalogCacheConfiguration {\n\n    @Bean\n    CacheFactory cacheFactory(\n            RedisTemplate<String, byte[]> redisTemplate,\n            ObjectMapper objectMapper\n    ) {\n        return new CacheFactory() {\n\n            @Override\n            public Cache<?, ?> createObjectCache(ImmutableType type) {\n                return new ChainCacheBuilder<>()\n                        .add(new CaffeineBinder<>(\n                                10_000, Duration.ofMinutes(1)\n                        ))\n                        .add(new RedisValueBinder<>(\n                                redisTemplate,\n                                objectMapper,\n                                type,\n                                Duration.ofMinutes(10)\n                        ))\n                        .build();\n            }\n\n            @Override\n            public Cache<?, ?> createAssociatedIdCache(ImmutableProp prop) {\n                return new ChainCacheBuilder<>()\n                        .add(new CaffeineBinder<>(\n                                20_000, Duration.ofMinutes(1)\n                        ))\n                        .add(new RedisValueBinder<>(\n                                redisTemplate,\n                                objectMapper,\n                                prop,\n                                Duration.ofMinutes(10)\n                        ))\n                        .build();\n            }\n        };\n    }\n}\n```\n\nBinder constructors/builders vary by Jimmer version; use the corresponding API from your installed release. The required configuration is an **object-cache chain** and a **to-one associated-ID-cache chain**, in that order of storage tiers.\n\nThis factory enables caching for entity objects and to-one associations generally. For this catalog, the important entries are:\n\n| Cache | Logical mapping |\n|---|---|\n| Product object cache | Product ID → Product’s cached entity data |\n| Category object cache | Category ID → Category’s cached entity data |\n| `Product.category` association cache | Product ID → Category ID, or null |\n\nJimmer uses these transparently for cache-eligible entity and association loads. A miss falls through Caffeine → Redis → database, then populates the caches. **This is not arbitrary query-result caching:** a filtered product-list query can still execute SQL to determine matching IDs.\n\n### What must happen after an update\n\nConfigure Jimmer’s change triggers so cache invalidation actually runs. For synchronous changes made through Jimmer, transaction triggers are the usual choice:\n\n```yaml\njimmer:\n  trigger-type: TRANSACTION_ONLY\n```\n\nAfter a successful mutation:\n\n- **Product scalar change:** invalidate the Product object entry.\n- **Product moved to another Category:** invalidate the Product object entry and its `Product.category` associated-ID entry. If inverse category-to-products lists are cached, invalidate the affected old and new Category lists too.\n- **Category change:** invalidate the Category object entry. The Product → Category ID mapping need not change when the Category’s ID is unchanged.\n\nThese entries must be invalidated in **both tiers**; subsequent reads reload current data. Use Jimmer’s mutation/trigger integration rather than manually evicting from each repository method.\n\n**Multi-instance deployment needs one additional guarantee:** invalidation must reach every JVM’s Caffeine cache. Deleting Redis entries alone leaves other instances’ local entries stale. Wire Jimmer’s version-appropriate distributed invalidation support, or a reliable cross-instance invalidation mechanism, with transaction-safe delivery. TTL is a fallback bound on staleness, not a replacement for invalidation.\n\nIf anything writes outside Jimmer, transaction triggers cannot observe it; use binlog/CDC-based change events or another explicit invalidation path for those writes."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.868,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "06445bc7accbbaf65927a94d92e934d6a6c649572ab1359cebf54e1edcd6fb2e",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "4948ef32ac843dab9c8d4db2c3b2773407146502b492d54a82687fdf63b209c0",
+        "answer": "Use **Jimmer’s query DSL to aggregate and rank in the database**, rather than loading individual visits. No database view or native SQL is needed.\n\nAssuming `Visit` has `visitedAt` and an `exhibit` association, and each exhibit has a `museum` association:\n\n```java\nVisitTable v = VisitTable.$;\nvar e = v.exhibit();\nvar m = e.museum();\nvar visitCount = v.id().count();\n\n// startInclusive / endExclusive match the visitedAt property's Java type.\nvar query = sqlClient\n    .createQuery(v)\n    .where(\n        v.visitedAt().ge(startInclusive),\n        v.visitedAt().lt(endExclusive)\n    )\n    .groupBy(e.id(), e.name(), m.id(), m.name())\n    .orderBy(\n        visitCount.desc(),\n        e.id().asc()\n    )\n    .select(\n        e.id(),\n        e.name(),\n        m.name(),\n        visitCount\n    );\n\n// Zero-based page index: first page contains the top 20 exhibits.\nvar page = query.fetchPage(0, 20);\n```\n\nThe projection contains **exhibit ID, exhibit name, museum name, and visit count**. Map these tuples to the dashboard’s response DTO.\n\n- **Aggregate ordering:** order by `COUNT(visit.id) DESC`, not by individual visit rows. The exhibit ID tie-breaker makes pagination deterministic when counts match.\n- **Pagination:** use `fetchPage(pageIndex, 20)` when the dashboard needs totals. If it only needs the top 20, use `query.limit(20).execute()` instead, avoiding the pagination count query.\n- **Date range:** use a half-open interval `[start, end)`; convert an inclusive final calendar date to the next day’s start in the intended time zone.\n\nThis query returns exhibits with visits in the range. Including zero-visit exhibits would require an exhibit-rooted query with a left join and carefully placed date restrictions."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 33.019,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "efe8d19709f21a8f81e43be6d0d2bbf696fdfda004ca4f12d57832feba81280b",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "c56544ac57e0f60f6348bce6313487ea6b07ae0f31225535bca3157635020a47",
+        "answer": "Assuming Java/Jimmer, table `travel_destination`, and an existing non-null Boolean logical-delete column `deleted` (`false` means active):\n\n### Entity mapping\n\n```java\nimport org.babyfish.jimmer.sql.*;\nimport org.jetbrains.annotations.Nullable;\n\n@Entity\npublic interface TravelDestination {\n\n    @Id\n    long id();\n\n    String name();\n\n    @Nullable\n    @Column(name = \"country_code\")\n    String countryCode();\n\n    @LogicalDeleted(\"true\")\n    boolean deleted();\n}\n```\n\nKeep the existing ID and logical-delete mapping if they differ. Database uniqueness below is authoritative; Jimmer’s `@Key` is for save-time identity resolution, not a replacement for a database unique index.\n\n### PostgreSQL migration\n\nThis version requires **PostgreSQL 15+** and treats `NULL` country codes as one “unknown country” bucket: two active destinations cannot share a name when both country codes are null.\n\n**1. Add the nullable column and format check.**\n\n```sql\nBEGIN;\n\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\nALTER TABLE travel_destination\n    ADD CONSTRAINT travel_destination_country_code_format_ck\n    CHECK (country_code ~ '^[A-Za-z]{2}$')\n    NOT VALID;\n\nCOMMIT;\n\nALTER TABLE travel_destination\n    VALIDATE CONSTRAINT travel_destination_country_code_format_ck;\n```\n\nExisting rows remain null—no backfill or invented country is needed. A PostgreSQL `CHECK` allows null because its result is unknown, not false. Non-null values must contain exactly two ASCII letters; this does not validate membership in an ISO country-code list.\n\n**2. Identify existing conflicts before building the index.**\n\n```sql\nSELECT country_code, name, count(*)\nFROM travel_destination\nWHERE deleted = false\nGROUP BY country_code, name\nHAVING count(*) > 1;\n```\n\nResolve any returned groups according to business rules before proceeding. Do not automatically delete or rename records. Since existing country codes are null, duplicate active names will initially conflict.\n\n**3. Create the unique index outside a transaction.**\n\n```sql\nCREATE UNIQUE INDEX CONCURRENTLY\n    travel_destination_active_country_name_uq\nON travel_destination (country_code, name)\nNULLS NOT DISTINCT\nWHERE deleted = false;\n```\n\nConfigure this migration step as non-transactional. Concurrent construction permits ordinary writes, but conflicting writes during the build can cause it to fail. On failure, inspect and remove any invalid index left behind before retrying; do not mask it with `IF NOT EXISTS`.\n\n### Why an index, and what is unique?\n\nA **partial unique index** enforces uniqueness only for active rows. PostgreSQL cannot represent this predicate with a normal `UNIQUE` constraint, nor attach this partial index as one.\n\n| Active rows with the same name | Allowed? |\n|---|---|\n| Same non-null country code | No |\n| Different country codes | Yes |\n| Both country codes null | No |\n| One null, one non-null | Yes |\n| One or both rows deleted | Not restricted by this index |\n\nRestoring a deleted row is also checked and fails if it conflicts with an active row. No case normalization is introduced; normalize country codes consistently if `us` and `US` must identify the same country.\n\n**If null means “exclude from uniqueness”:** omit `NULLS NOT DISTINCT`. PostgreSQL’s default permits multiple active `(NULL, same_name)` rows.\n\n**For PostgreSQL 14 or earlier**, reproduce the stricter null behavior with two partial indexes instead:\n\n```sql\n-- Execute each statement outside a transaction.\nCREATE UNIQUE INDEX CONCURRENTLY\n    travel_destination_active_country_name_uq\nON travel_destination (country_code, name)\nWHERE deleted = false AND country_code IS NOT NULL;\n\nCREATE UNIQUE INDEX CONCURRENTLY\n    travel_destination_active_unknown_country_name_uq\nON travel_destination (name)\nWHERE deleted = false AND country_code IS NULL;\n```\n\nIf an existing constraint uniquely restricts `name` alone, remove that obsolete restriction **only after** the replacement indexes are valid. These are proposed mappings and migration SQL; they have not been run against your schema."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 17.998,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "0391a9cc2fc3c1437b37884def2a0b8685a55415ac13b16518fa8270cf3cda10",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "08dbb02cf3da65fdd0c3817652b87eb7b14579975689dd96d7339583168f8bd8",
+        "answer": "Declare the lookup on the **Quarkus Jimmer repository**, with a nullable return type and an optional `Fetcher` parameter:\n\n```kotlin\n// src/main/kotlin/com/example/inventory/repository/WarehouseRepository.kt\npackage com.example.inventory.repository\n\nimport com.example.inventory.model.Warehouse\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\n\n// Assumes Warehouse's ID type is Long.\ninterface WarehouseRepository : KRepository<Warehouse, Long> {\n\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\nInject the repository into an application service; the caller can supply a shape that includes bins and their mapped current-stock summaries:\n\n```kotlin\npackage com.example.inventory.service\n\nimport com.example.inventory.model.Warehouse\nimport com.example.inventory.repository.WarehouseRepository\nimport jakarta.enterprise.context.ApplicationScoped\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\n\n@ApplicationScoped\nclass WarehouseService(\n    private val warehouses: WarehouseRepository\n) {\n    fun findByCode(\n        code: String,\n        shape: Fetcher<Warehouse>? = null\n    ): Warehouse? =\n        warehouses.findByCode(code, shape)\n}\n```\n\n- `findByCode` is a derived query; the fetcher controls the loaded graph, not the lookup predicate. Omitting it uses the default fetch shape.\n- `Warehouse?` preserves not-found semantics. A REST resource can translate `null` into HTTP 404 without owning query logic.\n- Enforce warehouse-code uniqueness in the database. Stock summaries must already be mapped properties/associations; a fetcher does not itself define an aggregation."
+      },
+      {
+        "id": "cache-cdc",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.712,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "ed574a757f8c88b41e5a8a856361a0b91cd40d1844e9a24e59388cf3ba2e9cf6",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "f6849e76220a9da5aa5c18a962633b149d4e0c3de5bce6188e33dcd94a64c90a",
+        "answer": "**Changing the enum is not enough.** `TRANSACTION_ONLY` observes Jimmer-managed writes, not the scheduled SQL importer, and does not by itself synchronize two instances.\n\n### Consistency setup\n- Use `BINLOG_ONLY` for CDC-driven invalidation of all database writes. Use `BOTH` only if you also need transaction-trigger listeners; CDC must still cover external writes.\n- Enable database change capture and run a durable CDC consumer that feeds changes into Jimmer’s binlog processing API. Configure table/schema mapping and sufficient before/after row data, especially for changed foreign keys and association tables.\n- Configure the Redis-backed caches and invalidation path consistently across instances. If either instance has a local cache layer, invalidate that layer on **both** instances too; shared Redis deletion alone is insufficient.\n- Treat this as **eventual consistency**, bounded by CDC lag—not guaranteed immediate read-after-write consistency.\n\n### Redis deletion failure\n**Do not acknowledge the CDC record or advance its committed offset while required invalidation has failed.** Propagate failure to the consumer, retry with backoff, and alert on sustained failures. Replayed invalidations should be idempotent. Verify that the actual Jimmer 0.12.2 cache implementation/error handler does not swallow deletion failures; changing the trigger type cannot ensure this.\n\n### Rollout check\nWarm caches on both instances; update, delete, and change associations through both Jimmer and the SQL importer. Verify both instances converge. Then interrupt Redis during CDC processing: confirm offsets do not pass failed invalidation, restore Redis, and verify replay removes stale entries. Monitor CDC lag and invalidation failures."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.748,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "40e4521e6cf29d157ff344667b0529f897cc8f5c3328039fc204415bc21eef04",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "33de7d5d78caefc9709767fafb64562dcb491586b14ff1fdc27cd4658638b24e",
+        "answer": "No. **`INSERT_IF_ABSENT` specifies mutation behavior, not a guarantee that a conflicting row’s generated ID or full view will be returned.** In Jimmer 0.12.2, do not treat `getModifiedView()` as a reread of the existing database row. Converting the save result to `ItemView` does not establish that contract. “Never query after save” is not a correctness rule.\n\nSmallest service flow:\n\n```java\n// Within a transaction; input has no ID and contains only item fields.\nsqlClient.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute();\n\nItemTable item = ItemTable.$;\nreturn sqlClient.createQuery(item)\n    .where(item.sku().eq(input.sku()))\n    .select(item.id())\n    .fetchOne();\n```\n\nConfigure SKU as Jimmer’s business key (`@Key`) and enforce it with a **database UNIQUE constraint**. Use a scalar-only input: root save mode should not be mistaken for a prohibition on mutations to an arbitrary association graph.\n\nThe lookup intentionally returns the database ID whether this request inserted the item or another request already did. If the service needs a view, query that view by SKU instead.\n\n**Concurrency caveat:** this is two statements, not an atomic “insert-or-return-existing” operation. A concurrent delete can remove the row before the lookup; transaction isolation can also affect visibility of a competing insert. A transaction alone does not eliminate every race. Define retry/failure handling for those cases, and verify conflict handling for the actual database dialect. Never use an updating upsert merely to obtain the ID."
+      },
+      {
+        "id": "external-version",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 11.702,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "4525cb7238c1cca8d4ff833f3ac93a3ce22a9e0c2e0818ccc1b084033f33f9d0",
+        "passed": 0,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          false
+        ],
+        "answer_sha256": "08e8996f9543dfc093bf80a9812d84b829784eb0171cd64cde514bbb71a04854",
+        "answer": "The required behavior is an **upsert with an externally supplied, strictly increasing version**:\n\n- Missing ID → insert with the supplied revision.\n- Existing ID → update only if `incoming.version > stored.version`, preserving the incoming version rather than incrementing it.\n- Equal or older revision → return a normal rejected result, without throwing an optimistic-lock exception.\n\nHowever, no reference material was included, and I cannot reliably identify Jimmer **0.12.2’s exact version-mode configuration or rejection-result API** from my available knowledge. I also cannot confirm whether that configuration affects only the root object or cascades to children. Providing Kotlin method names or an enum here would risk inventing APIs.\n\nPlease supply the 0.12.2 documentation or declarations for the save command’s version configuration and save result. With those, I can give the exact Kotlin save configuration, caller rejection check, and child-object scope.\n\nDo **not** substitute a read-before-save comparison: it races with concurrent ingestion. Ordinary `@Version` optimistic locking also does not implement the requested external-revision semantics."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 11.209,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "91246cf43a29f03cf221415e01aa7e33546112c486d53b653c3430bedb432e2b",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "61ea584825c29c58b8d8f2ade7165a986b8229f82bb662bbacc6b916cdb6f188",
+        "answer": "```java\n@Entity\npublic interface Warehouse {\n    @OneToMany(mappedBy = \"warehouse\")\n    List<Bin> bins();\n}\n\n@Entity\npublic interface Bin {\n    @ManyToOne\n    @OnDissociate(DissociateAction.DELETE)\n    Warehouse warehouse();\n}\n```\n\n**`@OnDissociate` belongs on `Bin.warehouse()`**, the owning `@ManyToOne` property—not on `Warehouse.bins()`.\n\nWhen a Jimmer save **replaces** the warehouse’s bins association, Jimmer identifies existing bins omitted from the replacement and deletes those rows. `DELETE` avoids attempting to set the non-null `warehouse` reference to `null`. The association must actually be supplied and saved with replacement semantics; an unloaded association or append-only operation does not remove bins.\n\n**No database FK change is required.** You can retain `RESTRICT`:\n\n- **Jimmer dissociation:** Jimmer issues child-row deletions when a relationship is removed.\n- **SQL `ON DELETE CASCADE`:** The database deletes referencing bins when the **warehouse row itself is deleted**. It does not react to replacing an in-memory collection.\n\nThe annotation does not turn the database FK into a cascading constraint. Direct SQL deletion of a warehouse with remaining bins will still be rejected by `RESTRICT`."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 9.58,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "79602e6985b1b50e19908d1ebdaa3da2d89121493423775939c368802dd2febe",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "4fadb360fbbec6a6561b5cf43f232cd26030fcf8a8516daf0053a27e93e589bb",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    note\n    id(bins) as bins\n}\n```\n\n`bins` accepts Bin IDs. Only `note` and `bins` are exposed; `dynamic input` preserves whether each property was supplied.\n\n**JSON round-trip assertion:** Using the application’s configured Jimmer/Jackson mapper, assert that deserializing and reserializing `{}` produces `{}`, while `{\"note\":null,\"bins\":[]}` retains both properties. After `toEntity()`, the former must leave `note` and `bins` unloaded; the latter must load `note` as `null` and `bins` as an empty list."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.055,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "2f6a7bcb20ddd3f28ceb505d05b2eed9a9c61ba833f0f89c3cfbba3d4e33cc0c",
+        "passed": 1,
+        "total": 5,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true,
+          false
+        ],
+        "answer_sha256": "d1a00aeadf5ecb58f358d70dcf87428cd7146b7101c13f94c9a52be0f30795f7",
+        "answer": "The reference material is empty, so I can’t reliably name the **sleepkqq/jimmer 1.0.1** runtime/KSP coordinates, repository, guard-provider SPI, or exception-translation defaults. Those are fork-specific; substituting upstream Jimmer details would risk a broken setup.\n\n### Gradle\nThe configuration belongs in these scopes, but the exact artifact names and repository need the fork’s published documentation:\n\n```kotlin\nrepositories {\n    // Repository publishing sleepkqq/jimmer 1.0.1\n}\n\ndependencies {\n    implementation(\"<fork Quarkus runtime coordinates>:1.0.1\")\n    ksp(\"<fork KSP processor coordinates>:1.0.1\")\n}\n```\n\nThese are **placeholders, not usable dependency declarations**. Apply the KSP plugin with a version compatible with your Kotlin compiler.\n\n### Separate model JAR\nRun Jimmer’s KSP processor in the **model module** and package its generated classes and resources in the model JAR. Add that JAR as an application dependency. For Quarkus build-time discovery, include a Jandex index in the JAR or explicitly index it:\n\n```properties\nquarkus.index-dependency.model.group-id=com.example\nquarkus.index-dependency.model.artifact-id=exhibit-model\n```\n\nAny additional fork-specific entity-discovery mechanism requires confirmation.\n\n### Cache guard and CDC\nDo **not** treat Redis tracker `isReady` as proof that the CDC consumer has caught up. Readiness alone does not establish consumption through a source offset or watermark; that requires an explicit catch-up guarantee.\n\nI cannot identify the required CDI provider or precisely which cache operations `quarkus.jimmer.cache.guard.enabled` gates without the fork’s configuration/SPI reference.\n\nLikewise, the current constraint-exception translation defaults cannot safely be inferred. Please supply the 1.0.1 README or relevant configuration classes to pin down these remaining details."
+      },
+      {
+        "id": "inheritance",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.976,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "134f5a6acca6c6e7173d033c633d8d06732a9c9a8ba8dfd16baf02a4b3ad243d",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          false,
+          false
+        ],
+        "answer_sha256": "e67eb4105a27c405adb1c32163b1eb1c085fd7efc397a57a01f63c3ad51b4250",
+        "answer": "**I can explain the mapping, but cannot reliably name Jimmer 0.12.2’s polymorphism annotations or DTO syntax from the supplied material, which contains no reference text.** Using JPA annotations as if they were Jimmer APIs would be misleading.\n\nA `SINGLE_TABLE` layout conceptually looks like this:\n\n```sql\ncreate table asset (\n    id bigint primary key,\n    asset_type varchar(16) not null,\n    name varchar(200) not null,\n    isbn varchar(32),          -- BookAsset only\n    rated_power integer       -- ToolAsset only\n);\n```\n\nThe mapping needs a **root inheritance/discriminator declaration** on `Asset`, with distinct discriminator values for concrete `BookAsset` and `ToolAsset` branches. Branch-only columns must allow SQL `NULL` for sibling rows—even when the property is required within its own subtype. Conditional database checks can enforce those subtype-specific requirements.\n\nThe desired root DTO structure is conceptually:\n\n```text\nAssetView {                 // schematic, not Jimmer syntax\n    id\n    name\n    exhaustive branches {\n        BookAsset { isbn }\n        ToolAsset { ratedPower }\n    }\n}\n```\n\nExposing branch-specific properties requires subtype-aware DTO projections. **Compilation failure for a missing concrete branch requires an explicit exhaustive-branch feature**; ordinary property selection does not imply it. I cannot confirm its spelling or availability here.\n\n**Do not treat writing the discriminator as a supported subtype conversion.** It changes entity identity’s concrete type, potentially invalidating branch fields, relationships and caches. Use only a documented conversion mechanism or an explicitly designed transactional migration.\n\nThe 0.12.2 inheritance and DTO reference is needed for executable snippets and a definitive conversion contract."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 15.441,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "8c35bd7a214e3a416d0c2fc09bb871cf467d91a59c3595460dfae69dbac1cf89",
+        "passed": 1,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "35d243f96fbd90e2b953fbfdd379a6542c2376dff406512e8306af8b38bc1b40",
+        "answer": "The operation is **`INSERT … SELECT`**, not entity loading followed by `saveEntities`.\n\nThe typed source query can directly select the source table:\n\n```java\nWarehouseTable w = WarehouseTable.$;\n\nvar source = sqlClient\n    .createQuery(w)\n    .where(w.name().like(\"A%\")) // Replace with your filter\n    .select(w);\n```\n\nDo **not** call `source.execute()`: pass that query to the insert-from-query operation, targeting `WarehouseArchive`, preserving the physical `id` and `name` columns, ignoring ID conflicts, and requesting the target ID as the returning projection.\n\nThe intended SQL semantics are:\n\n```sql\nINSERT INTO warehouse_archive (id, name)\nSELECT id, name\nFROM warehouse\nWHERE name LIKE 'A%'\nON CONFLICT (id) DO NOTHING\nRETURNING id;\n```\n\nThis returns IDs of **actually inserted rows**, not IDs skipped because they already exist. Returning order is **not guaranteed to match source order**, even if the source has an `ORDER BY`; correlate by ID instead.\n\nA **joined-inheritance target is not supported** by this single-target-table operation: it would require coordinated insertion into multiple physical tables.\n\n**API caveat:** the supplied reference is empty, and I cannot reliably identify the exact Jimmer **0.12.2** insert-from-query, conflict-ignore, and returning method signatures from it. The Java above sketches only the source query; I would need those signatures to provide the complete typed invocation without inventing APIs."
+      },
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 11.409,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "719dbc515be5802e383a7961e702b3d01190d89a5c33aa80b1f171a7bfe47bbe",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "dcf279ebf6f2ad8badb7b34017d2a2a51c509f8283834ec13619020c1cd92418",
+        "answer": "Jimmer’s standard Java save API does not provide a typed `INSERT … SELECT … ON CONFLICT … RETURNING` mutation. Loading staging rows and calling `saveEntities` would not satisfy your **one database-side operation** requirement. No reference or version-specific API was supplied that establishes support for this operation.\n\nFor **PostgreSQL**, the required operation is:\n\n```sql\nINSERT INTO product AS p (sku, title, price)\nSELECT i.sku, 'Imported product', i.price\nFROM product_price_import AS i\nWHERE i.price IS NOT NULL\nON CONFLICT (sku) DO UPDATE\nSET price = EXCLUDED.price\nRETURNING p.id, p.sku;\n```\n\nThis sets the fixed title only for new products, preserves existing titles, and returns IDs and SKUs for both inserted and updated products.\n\nRequirements:\n- `product.sku` must have a unique constraint.\n- `product.id` must have a database-side default/generator; an application-side Jimmer ID generator will not run here.\n- Eligible staging rows must have unique SKUs, or you must define a deterministic deduplication rule before the upsert.\n\n**To supply an actual typed Java mutation, I need your Jimmer version and database dialect.** Without a supported extension, this requires native SQL with a typed Java result mapping—not an invented Jimmer DSL."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 18.888,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "d8da2e51b2d7c7ba7b3c1fa0b258621080dd9760b82d4c57d33d4f84e091ba0c",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "249068e7d4ca3cc34ef419adabdab78fa6666701ba8b3e1a02706034f321ee20",
+        "answer": "```kotlin\nimport org.babyfish.jimmer.sql.*\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\nimport org.babyfish.jimmer.sql.kt.KSqlClient\n\n@Entity\ninterface StockItem {\n    @Id\n    val id: Long\n\n    // Together these properties form one composite business key.\n    @Key\n    val warehouseId: Long\n\n    @Key\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n\nfun updateStock(sql: KSqlClient, command: StockItem): StockItem =\n    sql.save(command) {\n        setMode(SaveMode.UPDATE_ONLY)\n    }.modifiedEntity\n```\n\nEnforce the business key **in the database as well**; `@Key` is mapping metadata, not a replacement for a uniqueness constraint:\n\n```sql\nALTER TABLE stock_item\n    ADD CONSTRAINT uq_stock_item_warehouse_product\n    UNIQUE (warehouse_id, product_id);\n```\n\nThe command must have its **ID and version loaded**. Reject an absent ID at the service boundary rather than allowing identification by the business key.\n\nWith both supplied, the update is conceptually:\n\n```sql\nUPDATE stock_item\nSET warehouse_id = ?,\n    product_id = ?,\n    quantity = ?,\n    version = version + 1\nWHERE id = ?\n  AND version = ?;\n```\n\n- **Matching version:** the update succeeds; `modifiedEntity` contains the incremented version. The immutable command remains unchanged.\n- **Stale version or nonexistent ID:** the version-checked update affects no row, and Jimmer throws `SaveException.OptimisticLockError`. It does not insert a replacement row. Treat this as a failed write, not a successful no-op; this error alone does not distinguish stale data from a missing row.\n- **Duplicate warehouse/product pair:** the database uniqueness constraint rejects the update. `UPDATE_ONLY` prevents insertion entirely.\n\nDo not catch the optimistic-lock error and retry with a freshly fetched version automatically—that would discard the caller’s concurrency check."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.39,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "8c0bce45be621ba7c18a8663b3018be326538fe3fd347314c49b812267b0c820",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "feea97bc13c28efe5b94932d74cf917b503f061a1dce23847c2455c8876d2076",
+        "answer": "Use a **Fetcher** to define the returned graph and the query DSL to keep predicates in SQL. Assuming `departureDate` is a `LocalDate`, `published` is a boolean, and destination/city are associations:\n\n```java\npublic List<Trip> findPublishedTrips(\n        JSqlClient sqlClient,\n        long destinationId,\n        LocalDate departureDate\n) {\n    TripTable trip = TripTable.$;\n\n    return sqlClient\n            .createQuery(trip)\n            .where(trip.published().eq(true))\n            .where(trip.destination().id().eq(destinationId))\n            .where(trip.departureDate().eq(departureDate))\n            .select(trip.fetch(\n                    TripFetcher.$\n                            .name()\n                            .destination(\n                                    DestinationFetcher.$.name()\n                            )\n                            .itineraryStops(\n                                    ItineraryStopFetcher.$\n                                            .city(CityFetcher.$.name())\n                                            .arrivalTime()\n                            )\n            ))\n            .execute();\n}\n```\n\n- Fetchers include entity IDs automatically. This graph contains trip id/name, destination id/name, and stop id, city id/name, and arrival time.\n- Internal notes and hotel are omitted and remain **unloaded**; avoid `allScalarFields()` here.\n- Filtering runs in SQL. Jimmer loads the stop collection through its association-fetching mechanism rather than requiring one large join. Association/property names above should match your generated model."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 30.965,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "cbaf43fa7d4703c785decb024f9cb321a8154eb147090278ea5cf25b0ceff164",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          false
+        ],
+        "answer_sha256": "cba47cc2bb9167ee24307c4f64bfcc26a33645dc77f0538211adc4c312d8623f",
+        "answer": "Предположим, у `Exhibition` есть `title: String`, обязательная связь `museum`, `openingDate: LocalDate?` и коллекция `exhibits`. `id` генерируется сервером, а `createdAt` заполняется сервером или БД.\n\n### DTO-описания\n\nФайл `src/main/dto/Exhibition.dto`:\n\n```text\nexport com.example.museum.model.Exhibition\n    -> package com.example.museum.dto\n\ninput ExhibitionCreateInput {\n    title\n    id(museum) as museumId\n    openingDate\n}\n\nExhibitionRead {\n    id\n    title\n    flat(museum) {\n        name as museumName\n    }\n    exhibitCount\n}\n```\n\n- `title` и `museumId` обязательны благодаря non-null свойствам модели.\n- `openingDate` nullable: для создания отсутствие даты означает `null`.\n- `id` и `createdAt` отсутствуют во входном DTO. Не используйте здесь `#allScalars`, чтобы случайно не расширить клиентский контракт.\n\n### Количество экспонатов — вычисляемое свойство\n\nDTO DSL не превращает коллекцию в SQL `COUNT` самостоятельно. Простой вариант — добавить в `Exhibition` SQL-формулу:\n\n```kotlin\nimport org.babyfish.jimmer.sql.Formula\n\n// Фрагмент entity Exhibition.\n// Названия таблицы и колонок замените на фактические.\n@Formula(\n    sql = \"\"\"\n        (select count(*)\n         from EXHIBIT e\n         where e.EXHIBITION_ID = %alias.ID)\n    \"\"\"\n)\nval exhibitCount: Long\n```\n\nЭтот вариант предполагает связь one-to-many через `EXHIBIT.EXHIBITION_ID`. Формула вычисляется в БД, коллекция `exhibits` не загружается. Если экспонаты логически удаляются или ограничены видимостью, соответствующие условия нужно включить в формулу: фильтры Jimmer внутрь SQL-фрагмента автоматически не добавляются.\n\n### Сохранение и запрос\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\nimport org.babyfish.jimmer.sql.kt.KSqlClient\n\nclass ExhibitionService(\n    private val sql: KSqlClient\n) {\n    fun create(input: ExhibitionCreateInput): Exhibition {\n        // До сохранения: валидация title и проверка права создавать\n        // выставку в указанном музее.\n        return sql.save(input.toEntity()) {\n            setMode(SaveMode.INSERT_ONLY)\n        }.modifiedEntity\n    }\n\n    fun findAll(): List<ExhibitionRead> =\n        sql.createQuery(Exhibition::class) {\n            select(table.fetch(ExhibitionRead::class))\n        }.execute()\n}\n```\n\n`toEntity()` создаёт ссылку на музей только с ID; загружать музей ради связывания не требуется. Генерация `id` и заполнение `createdAt` должны быть настроены отдельно — DTO их не создаёт. Read DTO выбирает только нужные данные, включая формулу, без загрузки экспонатов."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 28.007,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "10c5e870b2afc46bedb4028927d92bc741ddde35002229e010c46eac07a32e5f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "b791df0e8fbdf3bfdc92c5f7b3432af15df5a46fd7b8afe8cea9b87f8d04d4ad",
+        "answer": "Configure caching **on Jimmer’s SQL client through a Spring `CacheFactory` bean**, not through `@Cacheable` repository methods or manual Redis lookups.\n\n### Cache configuration\n\nUse Jimmer’s cache-chain support with these registrations:\n\n| CacheFactory hook | Register for | Cache chain | Cached value |\n|---|---|---|---|\n| `createObjectCache` | `Product`, `Category` | Caffeine → Redis | Entity data, keyed by entity ID |\n| `createAssociatedIdCache` | `Product.category` | Caffeine → Redis | Product ID → category ID |\n| `createAssociatedIdListCache` | `Category.products`, only if read | Caffeine → Redis | Category ID → product IDs |\n\nBuild the chains using `ChainCacheBuilder`, `CaffeineBinder`, and `RedisValueBinder`. For example, bound Caffeine to 10,000 entries with a short TTL such as one minute, and use a longer Redis TTL such as ten minutes. Redis serialization must support Jimmer immutable objects.\n\nThe intended configuration is:\n\n```text\nJimmer SQL client\n  └─ CacheFactory\n       ├─ Product object cache:      Caffeine → Redis\n       ├─ Category object cache:     Caffeine → Redis\n       └─ Product.category ID cache: Caffeine → Redis\n```\n\nExact binder constructors and Redis wiring depend on the installed Jimmer version; no version was supplied.\n\nRepository queries remain ordinary Jimmer queries with fetchers. Jimmer consults these caches transparently when loading entity data and associations. **This is not an arbitrary query-result cache**: a filtered product query can still execute SQL to determine matching IDs.\n\n### After a Jimmer update\n\nFor writes made through Jimmer, enable transaction-trigger-based invalidation, for example in the Spring Boot starter:\n\n```yaml\njimmer:\n  trigger-type: TRANSACTION_ONLY\n```\n\nUse `BOTH` instead if the deployment also consumes database binlog/CDC events.\n\nJimmer’s mutation events must cause affected entries to be **invalidated, not left until TTL expiry**:\n\n- Updating a product’s scalar fields invalidates that product’s object entry.\n- Changing its category invalidates the affected product data and `Product.category` association entry. If the inverse collection is cached, invalidate the old and new categories’ `products` entries too.\n- Updating a category’s fields invalidates that category’s object entry; unchanged product-to-category mappings need not be discarded.\n\n**Shared Redis does not automatically invalidate other instances’ Caffeine caches.** Configure Jimmer’s distributed cache-invalidation mechanism supported by your version, or deliver the relevant change events to every instance. Deleting only Redis and the writer’s local entry leaves other instances serving stale data.\n\nCoordinate invalidation with successful transaction completion so an entry evicted before commit cannot be repopulated with old data and survive the commit. Writes that bypass Jimmer require binlog/CDC-driven invalidation or an explicit invalidation integration.\n\nVerify with two service instances: warm both caches, update through one instance, commit, and read through the other. Repeat for a category reassignment and a category-name update."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 15.338,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "06445bc7accbbaf65927a94d92e934d6a6c649572ab1359cebf54e1edcd6fb2e",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "b9b220d6bd0ed3c3ae1a4437677a732697a4029f6329570e7fb035df2da808ca",
+        "answer": "Use a **grouped Jimmer query**: filter visits in SQL, group by exhibit, order by visit count descending, and paginate in the database—not in Java.\n\nAssuming generated properties `Visit.visitedAt`, `Visit.exhibit`, and `Exhibit.museum`:\n\n```java\n// fromInclusive/toExclusive have the same temporal type as Visit.visitedAt.\n// pageIndex is zero-based; validate it is nonnegative at the API boundary.\nint pageSize = 20;\nint offset = Math.multiplyExact(pageIndex, pageSize);\n\nVisitTable v = VisitTable.$;\nvar exhibit = v.exhibit();\nvar museum = exhibit.museum();\nvar visitCount = v.id().count();\n\nvar rows = sqlClient\n    .createQuery(v)\n    .where(\n        v.visitedAt().ge(fromInclusive),\n        v.visitedAt().lt(toExclusive)\n    )\n    .groupBy(\n        exhibit.id(),\n        exhibit.name(),\n        museum.id(),\n        museum.name()\n    )\n    .orderBy(\n        visitCount.desc(),\n        exhibit.id().asc() // Stable pagination when counts tie\n    )\n    .select(\n        exhibit.id(),\n        exhibit.name(),\n        museum.name(),\n        visitCount\n    )\n    .limit(pageSize, offset)\n    .execute();\n```\n\n- **Top 20:** use `pageIndex = 0`. Subsequent pages use the same aggregate ordering; pagination applies to grouped exhibits, not individual visits.\n- Each tuple contains exhibit ID, exhibit name, museum name, and visit count. Map these directly to dashboard DTOs; no entity graph or fetcher is needed.\n- The half-open date range avoids end-of-day precision issues. This returns exhibits with at least one matching visit. No database view or native SQL is necessary."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 27.691,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "efe8d19709f21a8f81e43be6d0d2bbf696fdfda004ca4f12d57832feba81280b",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "570dbf8029bc2139f0351b735456a3c608c731eef9b57ae274d8bcd32eb3bca0",
+        "answer": "Assuming `travel_destination` uses a non-null boolean `deleted` flag (`false` = active), the mapping and migration below preserve existing rows. Adapt the table/soft-delete column names to your schema.\n\n### Entity mapping — Java\n\nAdd this property to the existing Jimmer `TravelDestination` entity:\n\n```java\nimport org.jetbrains.annotations.Nullable;\nimport org.babyfish.jimmer.sql.Column;\n\n// Inside TravelDestination:\n@Nullable\n@Column(name = \"country_code\")\nString countryCode();\n```\n\nKeep the existing `name` and `@LogicalDeleted` mappings unchanged. `@Nullable` permits existing rows without a country code; the database check below enforces the two-letter format.\n\nDo not add `@Key` just to enforce uniqueness: Jimmer keys concern save/upsert identity; the database index enforces this rule.\n\n### PostgreSQL migration\n\nThis version treats `null` as **unknown**, allowing multiple active destinations with the same name when their country codes are null.\n\n```sql\n-- Transactional migration.\nBEGIN;\n\n-- Nullable, no default: existing rows remain NULL; no backfill required.\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\n-- Policy: exactly two uppercase ASCII letters, or NULL.\n-- This checks format, not membership in the ISO country list.\nALTER TABLE travel_destination\n    ADD CONSTRAINT travel_destination_country_code_format_ck\n    CHECK (\n        country_code IS NULL\n        OR country_code ~ '^[A-Z]{2}$'\n    ) NOT VALID;\n\nCOMMIT;\n\nALTER TABLE travel_destination\n    VALIDATE CONSTRAINT travel_destination_country_code_format_ck;\n```\n\nBefore building the index, check for conflicting active rows:\n\n```sql\nSELECT country_code, name, count(*)\nFROM travel_destination\nWHERE deleted = false\n  AND country_code IS NOT NULL\nGROUP BY country_code, name\nHAVING count(*) > 1;\n```\n\nResolve any returned conflicts deliberately; do not automatically delete or merge destinations.\n\nThen run this as a **non-transactional migration**:\n\n```sql\nCREATE UNIQUE INDEX CONCURRENTLY\n    travel_destination_active_country_name_uidx\nON travel_destination (country_code, name)\nWHERE deleted = false;\n```\n\n### Index choice and null behavior\n\nUse a **partial unique index**, not a `UNIQUE` table constraint: PostgreSQL table-level unique constraints cannot express “only non-deleted rows.” A partial index also cannot be attached as a unique constraint using `USING INDEX`.\n\nAssuming `name` is non-null:\n\n| Active rows | Allowed? |\n|---|---|\n| Two `('US', 'Springfield')` | No |\n| `('US', 'Springfield')` and `('CA', 'Springfield')` | Yes |\n| Two `(NULL, 'Springfield')` | Yes |\n| Duplicate values where one row is deleted | Yes |\n\nRestoring a deleted row or assigning its country code can fail if it would introduce an active duplicate.\n\n**If null country codes must also be unique per name**, use PostgreSQL **15+** and replace the index statement with:\n\n```sql\nCREATE UNIQUE INDEX CONCURRENTLY\n    travel_destination_active_country_name_uidx\nON travel_destination (country_code, name) NULLS NOT DISTINCT\nWHERE deleted = false;\n```\n\nFor that variant, remove `country_code IS NOT NULL` from the duplicate check. Existing null-code duplicates must be resolved before index creation.\n\n**Operational safety:** concurrent index creation avoids blocking normal writes for the duration of the build, but concurrent duplicates can still make it fail. A failed build can leave an invalid index; inspect it, drop the failed index with `DROP INDEX CONCURRENTLY`, resolve conflicts, and retry outside a transaction. Do not silently skip an existing invalid index with `IF NOT EXISTS`.\n\nThese are proposed mappings and migrations; they have not been executed against your schema."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 18.825,
+        "exit_code": 0,
+        "context_bytes": 0,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "0391a9cc2fc3c1437b37884def2a0b8685a55415ac13b16518fa8270cf3cda10",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "83f188daf69b9b725e8a457f0822e8ae67cf426a6f6cc354685ce4abeb01027f",
+        "answer": "```kotlin\n// src/main/kotlin/com/example/inventory/repository/WarehouseRepository.kt\npackage com.example.inventory.repository\n\nimport com.example.inventory.model.Warehouse\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\n\n// KRepository is the repository base supplied by your Quarkus/Jimmer\n// integration, not Jimmer's Spring Data repository base.\ninterface WarehouseRepository : KRepository<Warehouse, Long> {\n\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\nUse your installed Quarkus/Jimmer extension’s `KRepository` import and repository discovery/generation setup; those are extension-version-specific and were not supplied here. Replace `Long` with the warehouse’s actual ID type.\n\n- **Declarative lookup:** `findByCode` derives the predicate from `Warehouse.code`; the fetcher is a special fetch-shape parameter, not another predicate. Callers can pass a generated warehouse fetcher selecting nested bins and mapped current-stock summaries, or omit it for the default shape.\n- **Not found:** `Warehouse?` preserves a missing warehouse as `null`. Enforce uniqueness of warehouse codes in the database; this method represents a single-result lookup.\n- **Placement:** inject this repository into the application service; the resource handles HTTP concerns, including translating `null` to 404. No SQL or query construction belongs in the resource.\n\nCurrent-stock summaries must already be modeled as fetchable Jimmer properties; a fetcher selects mapped data—it does not define an arbitrary aggregation."
+      }
+    ],
+    "complete_answers": 12
+  },
+  "updated": {
+    "passed": 123,
+    "total": 128,
+    "pass_rate": 0.9609375,
+    "median_seconds": 14.769,
+    "mean_context_bytes": 15329.75,
+    "runs": [
+      {
+        "id": "cache-cdc",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.613,
+        "exit_code": 0,
+        "context_bytes": 9471,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "e295a9bb5b49a70d2bffe36a070f247df37ba997f20c915373221440dd4d1d41",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "448946d71a8bed8453a6f057c88b20aa055e0544c0567f102c5ae88e5ce11b3b",
+        "answer": "**Use `BINLOG_ONLY` with committed-change delivery—not just an enum change.** `TRANSACTION_ONLY` and `BOTH` are deprecated; no removal release is specified. Verify the cache provider’s capabilities against your resolved Jimmer 0.12.2 dependencies.\n\nThe required path is:\n\n`all DB writers → committed CDC events → Jimmer BinLog → successful invalidations → acknowledgement/checkpoint`\n\nCDC must include both application instances **and the scheduled SQL importer**, with sufficient old/new row images and FK/middle-table changes to invalidate object caches and every affected association direction. Calculated resolver caches require explicit event-driven invalidation. Migrate existing transaction listeners too.\n\n**If Redis deletion fails:** propagate the failure, **do not acknowledge or advance the checkpoint past that record**, and retry/redeliver. Duplicate processing must be safe. A timeout can mean an unknown outcome, not rollback. TTL is only a fallback.\n\n**Rollout check:**\n- Bypass affected cache reads **and fills** until source catch-up is established; continue invalidations.\n- Isolate warm stale entries using a fresh namespace or coordinated reset before enabling cached traffic.\n- Warm caches on both instances; update through each instance and the importer; verify object and association freshness on both.\n- Test consumer restart/replay, CDC gaps, Redis deletion failures, and subscription disconnect/recovery.\n- Hold a DB load across invalidation and verify it cannot refill stale L1/L2 entries.\n\nRedis PING or Pub/Sub recovery does **not** establish CDC freshness. Use provider-supported readiness gates and fill fencing; a readiness gate alone does not fence already-started loads."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 57.768,
+        "exit_code": 0,
+        "context_bytes": 19363,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "0129cf8377178c17774d784643ff024ac4767f26a734c8418a3919f1522b9cb0",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "0b581e566a2e1fdf871fcfdd6aaca38af5eb797b0c865b1a95fe590dce2fe462",
+        "answer": "No. **`INSERT_IF_ABSENT` preserves the no-update contract, but a conflicting root is rejected (`isAccepted() == false`) and does not return the existing row’s generated ID—even with `execute(ItemView.class)`.** Calling `getModifiedView()` unconditionally does not satisfy the requirement.\n\nSmallest service flow (Java; `findIdBySku` is your application’s ordinary SKU query):\n\n```java\nvar result = repository.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute(ItemView.class); // ItemView includes id\n\nif (result.isAccepted()) {\n    return result.getModifiedView().getId();\n}\n\nvar existingId = findIdBySku(input.sku());\nif (existingId == null) {\n    // Conflict row disappeared or is not visible: apply retry policy.\n    throw new RetryableCatalogConflictException(input.sku());\n}\nreturn existingId;\n```\n\nThe exception above is application-defined. Configure SKU as Jimmer’s matching key and enforce its uniqueness with a database constraint. `@KeyUniqueConstraint` describes the matching constraint for native key-write optimization; it is not a universal single-statement guarantee.\n\n**Concurrency caveat:** insertion and conflict lookup are separate statements. Concurrent deletion/SKU changes, transaction snapshots, or visibility filters can make the lookup return nothing. Define the transaction/isolation and bounded retry policy explicitly; retry the whole transaction when a stale snapshot requires it. A transaction alone does not eliminate this race.\n\nThe “never query after save” rule is an optimization guideline with this explicit exception. Do not substitute `UPSERT`: even a technical self-assignment is an UPDATE and may fire database triggers."
+      },
+      {
+        "id": "external-version",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 12.378,
+        "exit_code": 0,
+        "context_bytes": 15069,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "70ed007672dafed6f4f1ca4bd23711d032a8a84658fadcf5b20b101dadc21e59",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "881f45b90c2fa7d9888c37c3cb43ad7f37ec9f893b0d5db332e74770143f2c81",
+        "answer": "```kotlin\nval result = sqlClient.save(incoming) {\n    setMode(SaveMode.UPSERT)\n    setVersionMode(VersionMode.ASSIGNMENT)\n    setUpdateWhere(CatalogRevision::class) {\n        newNonNull(CatalogRevision::version) gt table.version\n    }\n}\n\nif (result.isAccepted) {\n    consume(result.modifiedEntity)\n} else {\n    // Normal rejection: an existing row has an equal or newer revision.\n    handleRejectedRevision(incoming)\n}\n```\n\nHere `incoming` is the supplied `CatalogRevision`, with its ID and non-null external `@Version` value loaded.\n\n- **`UPSERT`** inserts a missing ID. The update predicate applies only to existing rows; it does not prevent insertion.\n- **`VersionMode.ASSIGNMENT`** writes the supplied revision directly, without Jimmer’s implicit optimistic-lock check or version increment.\n- **`setUpdateWhere`** permits updates only when the incoming revision is strictly greater. Equal or older revisions produce a normal rejected result, rather than an optimistic-lock exception. Check **`isAccepted`**, not affected-row counts or the apparent contents of `modifiedEntity`.\n- **Version mode is root-only:** this configuration does **not** propagate to child objects.\n\nConcurrency guarantees depend on the dialect: native conditional upsert is dialect-dependent; a select-then-write fallback requires appropriate transaction isolation or locking. With this update condition, use id-only/null owning-side references rather than mutable referenced objects."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 10.261,
+        "exit_code": 0,
+        "context_bytes": 16106,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "d7fbdfc9141697b27cd15e619153716b44ca4bdfe9ccdad022132ec97752c024",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "61e7c76f60397c3dbaec43632364715a60ebcbdbd191405c1eeec09aa975b3a1",
+        "answer": "Put `@OnDissociate(DissociateAction.DELETE)` on **`Bin.warehouse()`**, the owning to-one reference—not on `Warehouse.bins()`.\n\n```java\n// Warehouse\n@OneToMany(mappedBy = \"warehouse\")\nList<Bin> bins();\n```\n\n```java\n// Bin\n@ManyToOne\n@OnDissociate(DissociateAction.DELETE)\nWarehouse warehouse();\n```\n\n**No FK change is required.** Keep the existing database `ON DELETE RESTRICT`.\n\nWhen saving a **loaded** `bins` collection with replacement semantics (`AssociatedSaveMode.REPLACE`), Jimmer identifies existing bins omitted from the replacement and deletes those **Bin rows**. It does not null their non-null warehouse FK or delete the warehouse. Deleting referencing child rows does not violate `RESTRICT`.\n\nDatabase `ON DELETE CASCADE` governs a different operation: deleting the **Warehouse row** causes the database to delete referencing bins. `RESTRICT` instead blocks that parent deletion while referencing bins remain.\n\nThus, ORM dissociation and database parent-deletion behavior are independent policies; `@OnDissociate(DELETE)` neither requires nor installs a cascading FK."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 10.172,
+        "exit_code": 0,
+        "context_bytes": 11053,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "3097723e167279076b98d09a9ccf56d1aa6ef5c0ab6d1ec157e14dadd47af2d1",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "56321aa88bd0c16f0d75126eb9848bd051e7025ce78261774e7b514d87c290bd",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\n`note` is already nullable, so it must not have `?`. `bins?` allows omission without authorizing null for the non-null collection. Only `note` and bin references are writable; `id` identifies the shelf.\n\n**JSON round-trip assertion:** Through the application’s JSON stack, deserialize and reserialize `{\"id\":\"<valid UUID>\",\"note\":null,\"bins\":[]}`, then deserialize again and call `toEntity()`. Assert that `note` is loaded null and `bins` is loaded empty; as the omission control, `{\"id\":\"<same UUID>\"}` must leave both properties unloaded.\n\nFor `bins:[]` to clear persisted membership, save with associated mode `REPLACE`, not `MERGE`. If bins are owned children, their owning reference’s `@OnDissociate` policy must also permit removal."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 17.144,
+        "exit_code": 0,
+        "context_bytes": 24971,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "5fdff6874df23639841044c2411393f011186f7355339a747e6086cbbd7234fb",
+        "passed": 5,
+        "total": 5,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "abe3d67f6c4e3688ed1bb1cc5374860147435468348ca22d8904a24dccd8b3bd",
+        "answer": "```kotlin\n// build.gradle.kts\nval jimmerVersion = \"1.0.1\"\n\nrepositories {\n    mavenCentral()\n    maven(\"https://jitpack.io\")\n}\n\ndependencies {\n    implementation(\"com.github.sleepkqq.jimmer:quarkus-jimmer:$jimmerVersion\")\n    ksp(\"com.github.sleepkqq.jimmer:jimmer-ksp:$jimmerVersion\")\n}\n```\n\nApply the Kotlin JVM and KSP plugins, aligning Kotlin, KSP, and the Quarkus platform with the fork’s compatibility metadata. Keep all direct Jimmer dependencies and any Jimmer BOM on `1.0.1`; do not mix upstream `org.babyfish.jimmer` artifacts with the fork. Java package names remain unchanged.\n\n```yaml\nquarkus:\n  jimmer:\n    language: kotlin\n    trigger-type: BINLOG_ONLY\n    cache:\n      guard:\n        enabled: true\n  index-dependency:\n    model:\n      group-id: com.example\n      artifact-id: example-model\n```\n\n**Separate model JAR:** Add it as an application dependency, run Jimmer KSP in the module declaring the entities, and expose that JAR to Quarkus’s Jandex indexing using `index-dependency` above—or ship a Jandex index in the JAR.\n\n**Cache guard:** Supply exactly one CDI bean implementing `io.quarkiverse.jimmer.runtime.cache.CacheReadiness`, typically `@ApplicationScoped`. It must provide:\n\n- `ready()`: application-owned readiness/freshness decision.\n- `namespace()`: nonblank cache namespace, stable throughout the process lifetime.\n\nWhen not ready, guarded caches bypass **reads and fills**, using the database loader instead. Invalidations remain active, and their failures must propagate. The gate alone does not fence already-started loads.\n\n**Redis readiness is not CDC freshness:** `QuarkusRedisCacheTracker.isReady()` establishes local Redis invalidation-subscription readiness only. Your application must establish CDC catch-up; `BINLOG_ONLY` does not install a CDC consumer.\n\n**Current Quarkus defaults:**\n\n- `constraint-violation-translatable=false`\n- `sql-state-exception-translator=true`\n\nThus SQLState translation to `JimmerDataAccessException` subtypes is enabled by default, rather than typed constraint investigation."
+      },
+      {
+        "id": "inheritance",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.281,
+        "exit_code": 0,
+        "context_bytes": 19017,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "89b715c282e23fb76e552282227b18e86df3e9629cb0c2656eff33365596add1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "5c14ff4e2abd0378f96f08a4525f117028dac164e29d1af17479344bfbfa2516",
+        "answer": "### SINGLE_TABLE mapping\n\nAll branches share the `asset` table; declare inheritance once at the root and inherit its ID.\n\n```java\n@Entity\n@Inheritance(strategy = InheritanceType.SINGLE_TABLE)\npublic interface Asset {\n    @Id long id();\n    @Discriminator String kind();\n    String name();\n}\n\n@Entity\n@DiscriminatorValue(\"BOOK\")\npublic interface BookAsset extends Asset {\n    String isbn();\n}\n\n@Entity\n@DiscriminatorValue(\"TOOL\")\npublic interface ToolAsset extends Asset {\n    int inspectionInterval();\n}\n```\n\n`kind` is a physical discriminator column; String or enum is supported. Explicit discriminator values provide stable branch identifiers. Because `Asset` has derived types but no discriminator value, it is abstract in Jimmer.\n\n**Database nullability:** `isbn` and `inspection_interval` must both allow SQL `NULL`: tool rows have no ISBN, and book rows have no inspection interval. Their Java subtype properties can nevertheless remain non-null. Common columns can retain appropriate `NOT NULL` constraints.\n\n### Polymorphic root DTO\n\n```dto\nexport com.example.catalog.Asset\n\nAssetView {\n    id\n    name\n    #types {\n        #exhaustive\n        BookAsset {\n            isbn\n        }\n        ToolAsset {\n            inspectionInterval\n        }\n    }\n}\n```\n\nRoot queries materialize actual subtypes. `#types` exposes their branch-specific properties; `#exhaustive` makes a missing concrete branch a DTO compilation error, including when another concrete subtype is added.\n\n### Changing subtype\n\n**No—writing the discriminator does not switch subtype.** It is read-only; saves derive it from the runtime entity type. Type changes are disabled by default. An intentional transition requires saving the target subtype with `setTypeChangeAllowed(true)` and **exact** type matching; polymorphic matching cannot be combined with this option."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.24,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "4a754c40a6328949ae76b91e3df4dbdce0f05a25f8356ceff2a342357dcffb4a",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "4579bc926c515c9cbc3e9765d850d0e5f4961490fe551732b262f800e35c5ad8",
+        "answer": "```java\nWarehouseTable warehouse = WarehouseTable.$;\nWarehouseArchiveTable archive = WarehouseArchiveTable.$;\n\nWarehouseTable source = sqlClient.createBaseQuery(warehouse)\n    .where(warehouse.active().eq(true)) // Example filter\n    .select(warehouse)\n    .asBaseTable();\n\nList<Long> insertedIds = sqlClient.createInsert(archive, source)\n    .set(archive.id(), source.id())\n    .set(archive.name(), source.name())\n    .onConflictDoNothing(archive.id())\n    .returning(archive.id())\n    .execute();\n```\n\n- Direct `.select(warehouse).asBaseTable()` preserves the entity table type, so use `source.id()` and `source.name()`, not positional `get_1()` accessors. The base table is a typed SQL source, not loaded entities; `archive` remains the separate physical mutation target.\n- **ID conflicts are skipped:** existing rows remain untouched, and skipped rows are absent from `insertedIds`. Other constraint violations are not universally ignored.\n- **No application-side source loading requires a verified native insert-select plan on the actual dialect.** The API alone does not guarantee it: an unsupported dialect or shape can materialize the source and use the save pipeline. Inspect emitted SQL before relying on this requirement. Returned IDs themselves are materialized in the list.\n- **Joined-inheritance targets are not supported.** The target must map to one physical table; single-table subtypes are supported.\n- **Returning order is not guaranteed**, even if the source is ordered. Do not correlate returned IDs with source rows by position.\n\nAssumes `Long` IDs and that any other archive columns are nullable or have suitable defaults."
+      },
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 14.925,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "b8be9baa9b4ff4488fdf336921f91a707e09402bbdb763bf8fd4701370bcb100",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "b0513f069b692aab6288668d6b696eb9127a08c48990c7347e0b27a2a9779ae9",
+        "answer": "```java\nimport org.babyfish.jimmer.sql.ast.Expression;\nimport org.babyfish.jimmer.sql.ast.tuple.Tuple2;\n\nProductTable product = ProductTable.$;\nProductPriceImportTable staging = ProductPriceImportTable.$;\n\nvar source = sqlClient.createBaseQuery(staging)\n    .where(staging.price().isNotNull())\n    .addSelect(staging.sku())\n    .addSelect(staging.price())\n    .asBaseTable();\n\nList<Tuple2<Long, String>> affected = sqlClient.createUpsert(product, source)\n    .key(product.sku(), source.get_1())\n    .insert(product.title(), Expression.constant(\"Imported product\"))\n    .merge(product.price(), source.get_2())\n    .returning(product.id(), product.sku())\n    .execute();\n```\n\nThis assumes `Product.id` is a generated `Long`, `sku` is a complete metadata-declared key backed by a database unique constraint, and the selected staging rows are unique by `sku`.\n\n- **New SKU:** inserts the SKU, imported price, and fixed title.\n- **Existing SKU:** updates price while preserving title.\n- **Return value:** affected `(id, sku)` pairs, with no guaranteed order or inserted-versus-updated marker.\n\n**The one-database-operation requirement is conditional on dialect support.** Use this only after verifying that the installed Jimmer version and database dialect execute this shape as a native insert-select upsert with returning. Jimmer can otherwise materialize the source and use its save pipeline, which does **not** satisfy your requirement. If the native shape is unsupported, this API alone cannot provide that guarantee."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 24.443,
+        "exit_code": 0,
+        "context_bytes": 14940,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "83a5754339a54bcd204a9f453558830a34a7be3adc1c094bdfd1081c34f3ed8e",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "81a3cc8bf82a85dd6ccfaa367af0bbcd221676949232ebc2711ffc914c2b3b47",
+        "answer": "```kotlin\nimport org.babyfish.jimmer.sql.*\n\ndata class StockItem(\n    val id: Long,\n    val warehouseId: Long,\n    val productId: Long,\n    val quantity: Int,\n    val version: Int\n)\n\n@Entity\n@Table(name = \"stock_item\")\ninterface StockItemEntity {\n    @Id\n    val id: Long\n\n    // Together these properties form one composite business key.\n    @Key\n    val warehouseId: Long\n\n    @Key\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\nThe database must enforce the pair’s uniqueness; `@Key` alone does **not** create a constraint:\n\n```sql\nALTER TABLE stock_item\n    ADD CONSTRAINT uq_stock_item_warehouse_product\n    UNIQUE (warehouse_id, product_id);\n```\n\nSave using the supplied ID and version:\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\nimport org.babyfish.jimmer.sql.kt.KSqlClient\n\nfun updateStock(\n    sqlClient: KSqlClient,\n    command: StockItem\n): StockItemEntity {\n    val input = StockItemEntity {\n        id = command.id\n        warehouseId = command.warehouseId\n        productId = command.productId\n        quantity = command.quantity\n        version = command.version\n    }\n\n    val result = sqlClient.save(input) {\n        setMode(SaveMode.UPDATE_ONLY)\n        // Default VersionMode.OPTIMISTIC_LOCK is intentional.\n    }\n\n    if (!result.isAccepted) {\n        error(\"Stock item ${command.id} was not updated\")\n    }\n    return result.modifiedEntity\n}\n```\n\n**Expected behavior**\n\n- **Matching ID and version:** the update succeeds and Jimmer increments the stored version. Use `modifiedEntity` for the resulting version.\n- **Stale version:** Jimmer raises an optimistic-lock failure, rather than treating it as a normal conditional rejection. Translate it to the service’s conflict error; do not retry with a newer version automatically.\n- **Missing ID:** `UPDATE_ONLY` never inserts. A missing row can surface as an optimistic-lock failure because no row matches the update; any normally rejected result is also converted to an error above. If the API must distinguish “not found” from “stale,” that requires additional lookup and a defined concurrency policy.\n- **Duplicate warehouse/product pair:** the database unique constraint rejects the update. No second row is created, and the supplied ID remains the update identity.\n\nDo not use `UPSERT`, `VersionMode.ASSIGNMENT`, or `setUpdateWhere` here: this contract requires update-only behavior and an optimistic-lock error on a version mismatch."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.828,
+        "exit_code": 0,
+        "context_bytes": 10658,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "b75564185391288a8bd993a1446032c7cc499d95095aba17f11c0815f0e391f9",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "8d09b2930667aed7dcef28863b5037fe8ff048745abc64b9556c16707e59a8c4",
+        "answer": "Use an explicit Fetcher for the response graph and SQL predicates for filtering. Assuming `published` is a boolean, `departureDate` is a `LocalDate`, and each stop’s `city` is an association:\n\n```java\nprivate static final Fetcher<Trip> TRIP_RESPONSE =\n    TripFetcher.$\n        .name()\n        .destination(DestinationFetcher.$.name())\n        .itineraryStops(\n            ItineraryStopFetcher.$\n                .city(CityFetcher.$.name())\n                .arrivalTime()\n        );\n\npublic List<Trip> findPublishedTrips(\n        long destinationId,\n        LocalDate departureDate\n) {\n    Objects.requireNonNull(departureDate, \"departureDate\");\n\n    var t = TripTable.$;\n    return sqlClient.createQuery(t)\n        .where(t.published().eq(true))\n        .where(t.destination().id().eq(destinationId))\n        .where(t.departureDate().eq(departureDate))\n        .orderBy(t.id().asc())\n        .select(t.fetch(TRIP_RESPONSE))\n        .execute();\n}\n```\n\n- Fetchers include entity IDs automatically. This graph explicitly loads trip name, destination name, and stops with city name and arrival time—not internal notes or hotel objects. Adjust generated property/type names to your model; if `city` is scalar, use `.city()` instead.\n- All filtering happens in SQL. Jimmer batch-loads the selected associations rather than requiring per-trip queries; use `execute()` because this collection graph can require secondary queries.\n- Unselected properties remain **unloaded**, not lazily fetched. Use Jimmer-aware serialization and verify the returned fields and SQL across multiple trips."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 29.827,
+        "exit_code": 0,
+        "context_bytes": 16388,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "0f19e98e99f1dc6d7338948a9c7d8fdc1cc99c521edf3d89db145de513c53db6",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "e59682004d25bd4c78d7200813adfa1bb35e1bb93d919ac091c2ca442a51ee2a",
+        "answer": "```dto\n// src/main/dto/com/example/museum/model/Exhibition.dto\nexport com.example.museum.model.Exhibition -> package com.example.museum.dto\n\nfixed input ExhibitionCreateInput {\n    title\n    id(museum) as museumId\n    static openingDate\n}\n\nExhibitionView {\n    id\n    title\n    flat(museum) {\n        name as museumName\n    }\n    exhibitCount\n}\n```\n\nЗдесь предполагаются свойства сущности `Exhibition`: `title: String`, обязательная связь `museum: Museum`, `openingDate: LocalDate?` и вычисляемое `exhibitCount: Long`.\n\n- `title` и `museumId` обязательны; `museumId` преобразуется в ссылку на `Museum` по ID.\n- `static openingDate` переопределяет режим `fixed`: дату можно опустить, тогда при создании она будет `null`. Уже nullable-свойству нельзя добавлять `?`.\n- `id` и `createdAt` отсутствуют во входном DTO: их значения формирует сервер. Если неизвестные JSON-поля должны именно **отклоняться**, а не игнорироваться, настройте это в используемом JSON-десериализаторе.\n\n### Количество экспонатов\n\nDTO не вычисляет агрегат самостоятельно. Для `exhibitCount` нужно вычисляемое свойство сущности — например, SQL-формула. При таблице `exhibit` с внешним ключом `exhibition_id`:\n\n```kotlin\n// Внутри интерфейса Exhibition.\n// Имена таблицы и столбцов адаптируйте к фактической схеме.\n@Formula(\n    sql = \"(select count(*) from exhibit e where e.exhibition_id = %alias.ID)\"\n)\nval exhibitCount: Long\n```\n\nФормула возвращает число, включая `0`, без загрузки объектов экспонатов. Если проект уже использует вычисляемое свойство с resolver, переиспользуйте его вместо новой формулы.\n\n### Сохранение\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\n\n// sql — KSqlClient; input получен через JSON-десериализацию.\nval result = sql.save(input.toEntity()) {\n    setMode(SaveMode.INSERT_ONLY)\n}\n\ncheck(result.isAccepted) { \"Создание выставки не принято\" }\nval created = result.modifiedEntity\n```\n\n`toEntity()` сохраняет структуру входных данных, включая ID-only ссылку на музей; вручную собирать сущность не нужно. `INSERT_ONLY` задаёт создание, а не upsert. Генерация `id` и заполнение `createdAt` должны быть настроены на стороне сущности/БД или серверного обработчика. Перед сохранением также проверяйте право клиента создавать выставку в указанном музее.\n\n### Запрос read DTO\n\n```kotlin\nimport com.example.museum.dto.ExhibitionView\n\nval exhibitions: List<ExhibitionView> =\n    sql.createQuery(Exhibition::class) {\n        orderBy(table.id.asc())\n        select(table.fetch(ExhibitionView::class))\n    }.execute()\n```\n\nРезультат содержит только `id`, `title`, `museumName`, `exhibitCount`; коллекция экспонатов не запрашивается. Код предполагает обычные импорты сгенерированного Kotlin DSL проекта. После добавления `.dto` нужно запустить фактическую KSP-задачу модуля; здесь компиляция не выполнялась."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 30.919,
+        "exit_code": 0,
+        "context_bytes": 18891,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "61f1cc1324ade667c6411c451960b12bfc8b149cc5cc3868dcecc7e3b9cff08a",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "98a16fa0039f32396163327f4d7bf64d9f5872fadc2abe2a0633717737ddc9e4",
+        "answer": "Use a **Spring `CacheFactory` bean** to install Caffeine → Redis cache chains. Jimmer then uses them automatically when loading entities and assembling fetcher graphs—no repository-level cache reads or `@Cacheable` annotations are needed.\n\n### 1. Configure event handling\n\n```yaml\n# application.yml — Spring Boot\njimmer:\n  trigger-type: BINLOG_ONLY\n```\n\nUse this **together with working committed-change delivery to Jimmer’s BinLog**. The setting alone neither installs CDC nor invalidates caches after writes. Do not use the deprecated `TRANSACTION_ONLY` or `BOTH` modes for new configuration.\n\n### 2. Register object and association caches\n\nThe Spring configuration should expose a `CacheFactory` bean with these decisions:\n\n| Factory method | Cache | Chain |\n|---|---|---|\n| `createObjectCache(type)` | `Product`, `Category` | Caffeine → Redis |\n| `createAssociatedIdCache(prop)` | `Product.category` | Caffeine → Redis |\n| `createAssociatedIdListCache(prop)` | `Category.products`, if mapped and needed | Caffeine → Redis |\n| Other types/properties | Not cached | Return `null` |\n\nBuild each chain with the installed provider’s `ChainCacheBuilder`, adding the Caffeine binder first and the Spring Redis binder second. A reasonable starting policy is:\n\n```text\nCaffeine: maximum size 10,000; TTL 30 seconds\nRedis:    TTL 30 minutes; expiration jitter where supported\n```\n\nUse the Spring Redis binder’s `RedisConnectionFactory` integration and the provided `ObjectMapper` for serialization. **Exact binder constructors depend on the installed Jimmer/cache-provider version**, so this is the wiring specification rather than a purported drop-in Java configuration. Quarkus’s declarative `quarkus.jimmer.cache.entities` settings do not apply to this Spring service.\n\nThe caches store different things:\n\n- **Product object cache:** product ID → product row.\n- **Category object cache:** category ID → category row.\n- **Product.category association cache:** product ID → category ID, not a complete nested category object.\n\nConsequently, a normal Product fetcher requesting Category benefits transparently from all three. Arbitrary predicate queries can still execute SQL; these are not whole-query-result caches.\n\n### 3. What happens after a Jimmer update?\n\nThe required flow is:\n\n```text\nJimmer update → database commit → committed CDC event → Jimmer BinLog\n              → invalidate affected Redis and Caffeine entries\n              → acknowledge/checkpoint the event\n```\n\nFor example:\n\n- **Product price changes:** evict the Product object entry.\n- **Product moves from category A to B:** evict the Product object entry and its `Product.category` association entry. If `Category.products` is cached, invalidate the collections for both A and B.\n- **Category name changes:** evict the Category object entry. Associations whose target IDs did not change generally need not change.\n\nThe next ordinary load obtains fresh data from the database and repopulates the tiers. Ensure invalidation reaches **every application instance’s Caffeine cache**, not just shared Redis or the instance that performed the update.\n\nInvalidation failures must propagate: **do not acknowledge a CDC event until the required invalidations succeed**; retry safely. TTL is a fallback, not the consistency mechanism. During an unknown CDC gap, bypass affected cache reads **and fills**, then establish catch-up and reset stale entries before resuming.\n\nFinally, verify with two service instances, an external database writer, CDC restart/replay, and a database load held across invalidation to ensure a late fill cannot restore stale data. CDC-based invalidation is asynchronous; it does not by itself promise immediate read-your-writes."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 18.691,
+        "exit_code": 0,
+        "context_bytes": 16515,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "58d05ad11ffa36f49ac08433a7cc8111f0dd1ec9aa05b6f6f1e9bd390ebc73d0",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "e99ac19e33f970e885063158f13cdd224bc405468cd941fcb381b5ef12b861c1",
+        "answer": "```java\n// Assumed model: Visit -> Exhibit -> Museum.\n// Use a half-open interval [fromInclusive, toExclusive).\nvar v = VisitTable.$;\nvar e = v.exhibit();\nvar m = e.museum();\nvar visitCount = v.id().count();\n\nvar slice = sqlClient.createQuery(v)\n    .where(v.visitedAt().ge(fromInclusive))\n    .where(v.visitedAt().lt(toExclusive))\n    .groupBy(e.id(), e.name(), m.id(), m.name())\n    .orderBy(visitCount.desc(), e.id().asc())\n    .select(e.id(), e.name(), m.name(), visitCount)\n    .fetchSlice(20, offset); // offset = 0 for the top 20\n```\n\n**Aggregate in the database, not in Java.** This filters visits first, groups them by exhibit and museum, then orders by **visit count descending** before pagination. Exhibit ID is the unique tie-breaker, making ordering deterministic when counts match. Only the requested aggregate rows—not all visits—are returned.\n\n- **Result shape:** the selection returns tuples containing exhibit ID, exhibit name, museum name, and visit count. Use these directly for a local projection, or an `@TypedTuple` result if a named, reusable dashboard contract is useful.\n- **Pagination:** `fetchSlice(20, offset)` avoids an exact-count query and exposes `isTail` for “has more.” If the dashboard only ever needs the top 20, use `.limit(20).execute()` instead. If it needs an exact total of matching exhibit groups, use `.fetchPage(pageIndex, 20)` and verify the generated grouped-count SQL.\n- **Semantics:** this counts Visit rows and includes only exhibits with visits in the range. Distinct visitors or inclusion of zero-visit exhibits would require different counting/query semantics.\n\nNo database view, native SQL, window function, or base table is necessary. Inspect the emitted SQL and the database execution plan with representative date ranges; choose indexes based on the date filter and exhibit join. The sketch assumes generated property names and has not been compiled against your model."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 30.361,
+        "exit_code": 0,
+        "context_bytes": 10770,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "4a58f312f523ba8fd447bc2374a4f5c304d3fd80bb26af830355412b3d224a35",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "06d8aafb654be4c4c7ca88bd51ebe3b80f461549d9b79d428735a26867b320ce",
+        "answer": "Assuming the existing table is `travel_destination`, its logical-delete column is `deleted boolean NOT NULL DEFAULT false`, and `name` is non-null. Preserve the project’s existing ID, audit, and logical-delete mappings.\n\n### Entity mapping — Kotlin\n\n```kotlin\n@Entity\ninterface TravelDestination {\n    // Existing ID and other properties remain unchanged.\n\n    @Key\n    val countryCode: String?\n\n    @Key\n    val name: String\n\n    @LogicalDeleted\n    val deleted: Boolean\n}\n```\n\nThe two ungrouped `@Key` properties form **one composite natural key**. Remove any obsolete standalone name key/group if it no longer represents business identity.\n\nDo **not** add `@KeyUniqueConstraint` merely because the migration creates a unique index: nullable keys, logical deletion, and partial-index conflict inference must match the installed Jimmer version’s generated upsert SQL.\n\n### PostgreSQL 15+ migration\n\nThis policy treats `NULL` as **“country unknown”**, allowing only one active destination with a given name and unknown country.\n\nRun this through the existing migration runner **in one transaction**:\n\n```sql\n-- Prevent concurrent writes between validation and index creation.\n-- Reads remain possible; schedule for a suitable maintenance window.\nLOCK TABLE travel_destination IN SHARE ROW EXCLUSIVE MODE;\n\n-- No default or backfill: existing rows retain NULL.\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\nALTER TABLE travel_destination\n    ADD CONSTRAINT ck_travel_destination_country_code\n    CHECK (\n        country_code IS NULL\n        OR country_code ~ '^[A-Z]{2}$'\n    );\n\n-- Fail without deleting or rewriting any existing destination.\nDO $$\nBEGIN\n    IF EXISTS (\n        SELECT 1\n        FROM travel_destination\n        WHERE deleted = false\n        GROUP BY country_code, name\n        HAVING count(*) > 1\n    ) THEN\n        RAISE EXCEPTION\n            'Duplicate active destinations exist; resolve them before retrying';\n    END IF;\nEND\n$$;\n\nCREATE UNIQUE INDEX ux_travel_destination_active_country_name\n    ON travel_destination (country_code, name)\n    NULLS NOT DISTINCT\n    WHERE deleted = false;\n```\n\nThe check enforces uppercase ASCII two-letter codes, **not membership in the ISO country list**. Validate that convention at the application boundary too.\n\n### Why this index?\n\nA **partial unique index** enforces uniqueness only for active rows. A normal `UNIQUE(country_code, name, deleted)` constraint would also constrain deleted history, preventing unlimited tombstones for the same key.\n\n| Rows | Result |\n|---|---|\n| Two active `('US', 'Springfield')` | Rejected |\n| Active `('US', 'Springfield')` and `('CA', 'Springfield')` | Allowed |\n| Two active `(NULL, 'Springfield')` | Rejected |\n| Active `(NULL, 'Springfield')` and `('US', 'Springfield')` | Allowed |\n| Multiple deleted rows with the same country/name | Allowed |\n| Restore a deleted row conflicting with an active row | Rejected |\n\nIf unknown-country duplicates should instead be allowed, **omit `NULLS NOT DISTINCT`** and exclude null countries from the duplicate precheck. Ordinary PostgreSQL uniqueness treats nulls as distinct.\n\nFor PostgreSQL before 15, implement the stricter policy with two partial indexes instead:\n\n```sql\nCREATE UNIQUE INDEX ux_travel_destination_active_country_name\n    ON travel_destination (country_code, name)\n    WHERE deleted = false AND country_code IS NOT NULL;\n\nCREATE UNIQUE INDEX ux_travel_destination_active_unknown_country_name\n    ON travel_destination (name)\n    WHERE deleted = false AND country_code IS NULL;\n```\n\n**Before deployment:** inspect existing constraints. An existing unique constraint on `name` would still prohibit equal names across countries; explicitly replace that obsolete constraint using its actual name in the reviewed migration. No existing constraints are guessed or dropped above.\n\nThese are proposed snippets, not applied or tested changes. Compile the mapping, apply the migration to a disposable PostgreSQL database, exercise the cases above, and inspect Jimmer’s save/upsert SQL—especially for null-country saves. For a large production table, use a separately planned concurrent-index rollout rather than this write-blocking transactional migration."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 15.725,
+        "exit_code": 0,
+        "context_bytes": 13898,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "b1ae618008b3f330de2710e85f542c5192433f6ed8d4c152f09c99d6fa6f140f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "4565a91141dd67fe508861daacd5aacb28683db975b636f8a8473e732c1d2f36",
+        "answer": "```kotlin\n// repository/WarehouseRepository.kt\npackage com.example.inventory.repository\n\nimport com.example.inventory.model.Warehouse\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\nimport java.util.UUID\n\ninterface WarehouseRepository : KRepository<Warehouse, UUID> {\n\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\n```kotlin\n// service/WarehouseService.kt\npackage com.example.inventory.service\n\nimport com.example.inventory.model.Warehouse\nimport com.example.inventory.repository.WarehouseRepository\nimport jakarta.enterprise.context.ApplicationScoped\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\n\n@ApplicationScoped\nclass WarehouseService(\n    private val warehouses: WarehouseRepository\n) {\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse? = warehouses.findByCode(code, fetcher)\n}\n```\n\n- Quarkus generates the derived repository implementation and supplies it through CDI; no method body or resource-level SQL is needed. Use the entity’s actual ID type instead of `UUID` if different.\n- Callers may omit the fetcher or supply a `Fetcher<Warehouse>` selecting bins and mapped stock-summary properties. Omitted associations are not implicitly loaded.\n- `Warehouse?` preserves not-found as `null`; enforce uniqueness of warehouse codes in the database. A REST resource delegates to the service and maps absence to HTTP 404."
+      },
+      {
+        "id": "cache-cdc",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.236,
+        "exit_code": 0,
+        "context_bytes": 9471,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "e295a9bb5b49a70d2bffe36a070f247df37ba997f20c915373221440dd4d1d41",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "6ca6f70eddc846c7a0f03a1eb268177d07c91d1da8257d921c6b3307b71ad061",
+        "answer": "**Use `BINLOG_ONLY` with committed-change delivery—not just an enum change.** `TRANSACTION_ONLY` and `BOTH` are deprecated; do not migrate to `BOTH`.\n\nConfigure this pipeline:\n\n```text\nAll DB writers, including the SQL importer\n→ committed row/middle-table CDC events\n→ Jimmer BinLog\n→ all required cache invalidations succeed\n→ acknowledge/checkpoint\n```\n\nCDC must supply sufficient old/new row information to invalidate object entries and associations in every affected direction. Ensure invalidations cover Redis and both instances’ local caches. Migrate existing transaction listeners too; changing the enum neither installs CDC nor makes warm entries trustworthy.\n\n**If Redis deletion fails:** propagate the failure, **do not acknowledge/checkpoint the CDC record**, and retry/redeliver. Duplicate processing must be tolerated. A timeout has an unknown outcome—not a guaranteed rollback. TTL is only a fallback, not recovery.\n\n**Rollout check:**\n\n- Verify the resolved 0.12.2 build and cache provider’s capabilities.\n- Establish durable CDC coverage for every writer before enabling cached traffic.\n- During disconnection or unknown catch-up, bypass affected cache **reads and fills**, while continuing invalidations.\n- Before resuming, prove source catch-up and use a fresh namespace or coordinated cache reset to eliminate stale warm entries.\n- Test both instances with application writes, importer writes, FK/middle-table changes, consumer restart/replay, Redis deletion failure, and subscription disconnect/recovery.\n- Hold a DB load across invalidation and verify it cannot refill stale L1/L2 entries.\n\nRedis PING or subscription readiness alone does **not** establish CDC freshness; a readiness gate alone does not fence in-flight fills."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.324,
+        "exit_code": 0,
+        "context_bytes": 19363,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "0129cf8377178c17774d784643ff024ac4767f26a734c8418a3919f1522b9cb0",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "c8944632d36d518a01d8d4be1ebce31f5843397c793a8066c2a43814ecb9da2e",
+        "answer": "No. `INSERT_IF_ABSENT` preserves the **never-update** requirement, but a conflict is a normal rejected result (`isAccepted() == false`). Requesting `ItemView` does **not** return the conflicting row or its database-generated ID. “Never query after save” is not an absolute rule.\n\nSmallest service flow (Java-style pseudocode; `findIdBySku` is your ordinary Jimmer query):\n\n```java\nvar result = sqlClient.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute();\n\nif (result.isAccepted()) {\n    return result.getModifiedEntity().id();\n}\n\nvar existingId = findIdBySku(input.sku());\nif (existingId != null) {\n    return existingId;\n}\n\nthrow new RetryableCatalogRaceException(); // Application-defined\n```\n\nMatch by SKU using `@Key` and enforce its uniqueness in the database. Configure `@KeyUniqueConstraint` only when it accurately describes that constraint; native conflict handling depends on dialect and configuration.\n\n**Concurrency caveat:** the insert attempt and conflict lookup are separate statements, not an atomic “insert-or-return-existing.” A concurrent deletion or SKU change can remove the conflicting row before lookup; snapshot isolation can also affect visibility. Use an explicit transaction/isolation policy and bounded retries—retry the whole transaction when a fresh snapshot is required. Do not assume the lookup must succeed.\n\nDo **not** substitute `UPSERT` merely to retrieve the ID: even `SET column = column` is a real update and can fire database triggers, violating this contract."
+      },
+      {
+        "id": "external-version",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 12.065,
+        "exit_code": 0,
+        "context_bytes": 15069,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "70ed007672dafed6f4f1ca4bd23711d032a8a84658fadcf5b20b101dadc21e59",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9baa49d4ceae6ee5b5e2d0fc49ae232ccdc614cc3703a571fed35ccc28e068f6",
+        "answer": "```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\nimport org.babyfish.jimmer.sql.ast.mutation.VersionMode\n\n// incoming has its ID and external @Version value loaded.\nval result = sqlClient.save(incoming) {\n    setMode(SaveMode.UPSERT)\n    setVersionMode(VersionMode.ASSIGNMENT)\n    setUpdateWhere(CatalogRevision::class) {\n        newNonNull(CatalogRevision::version) gt table.version\n    }\n}\n\nif (result.isAccepted) {\n    // Missing ID inserted, or existing row updated to a newer revision.\n    consume(result.modifiedEntity)\n} else {\n    // Equal/older revision: normal rejection; do not consume as a write.\n    handleRejectedRevision(incoming)\n}\n```\n\n- **`UPSERT`** inserts missing IDs. The update condition applies only to existing rows, so it does not prevent insertion.\n- **`ASSIGNMENT`** writes the supplied external revision directly, without implicit version checking or incrementing. **`setUpdateWhere`** rejects equal/older revisions normally rather than raising an optimistic-lock exception. Check `isAccepted`, not affected-row counts.\n- **Version mode is root-only:** it does **not** propagate to child objects.\n\nFor concurrent ingestion, verify the dialect uses native conditional upsert; a select-then-write fallback needs explicit isolation/locking to preserve the newer-revision-only guarantee. With this update condition, use id-only or null owning-side references rather than mutable associated objects."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 11.963,
+        "exit_code": 0,
+        "context_bytes": 16106,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "d7fbdfc9141697b27cd15e619153716b44ca4bdfe9ccdad022132ec97752c024",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "20b28155e78c0110350234bc8ea471be1aa872ca899e49bbe29c902d513b38de",
+        "answer": "Put `@OnDissociate(DissociateAction.DELETE)` on **`Bin.warehouse()`**, the owning to-one reference—not on the inverse `Warehouse.bins()` collection.\n\n```java\n@Entity\npublic interface Warehouse {\n    // Other properties omitted\n    @OneToMany(mappedBy = \"warehouse\")\n    List<Bin> bins();\n}\n\n@Entity\npublic interface Bin {\n    // Other properties omitted\n    @ManyToOne\n    @OnDissociate(DissociateAction.DELETE)\n    Warehouse warehouse();\n}\n```\n\n**No FK change is required.** Keep the existing database `RESTRICT` policy unless deleting a warehouse itself should have different behavior.\n\n- **ORM dissociation:** When saving a loaded `bins` collection with replacement semantics (`AssociatedSaveMode.REPLACE`), Jimmer deletes existing `Bin` rows omitted from that collection. It does not delete the warehouse or set the non-null FK to null. An unloaded collection does not request replacement.\n- **Database FK behavior:** `ON DELETE CASCADE` deletes referencing bins when the **warehouse row itself is deleted**. `RESTRICT` prevents that parent deletion while referencing bins remain. Neither policy implements collection replacement.\n\nThe annotation controls Jimmer’s dissociation operation; it neither requires nor installs a cascading database FK."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 9.472,
+        "exit_code": 0,
+        "context_bytes": 11053,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "3097723e167279076b98d09a9ccf56d1aa6ef5c0ab6d1ec157e14dadd47af2d1",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "62c91d8d0748549cf010a94d966aecc99bf745d07b2af4050a44ae6955279271",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\n`note` is already nullable, so it must not have `?`. `bins?` permits omission of the non-null collection. Only `id`, `note`, and bin references are exposed.\n\n**JSON round-trip assertion:** Using the application's JSON mapper, deserialize and reserialize `{\"id\":\"<valid-UUID>\"}`, then deserialize again and call `toEntity()`: assert that both `note` and `bins` remain **unloaded**, not loaded null or loaded empty.\n\nExplicit `\"note\": null` produces loaded null; `\"bins\": []` produces a loaded empty collection. To actually clear bins when saving, use association **`REPLACE`**, not `MERGE`; for owned bins, the owning reference’s `@OnDissociate` policy must also permit removal."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.707,
+        "exit_code": 0,
+        "context_bytes": 24971,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "5fdff6874df23639841044c2411393f011186f7355339a747e6086cbbd7234fb",
+        "passed": 5,
+        "total": 5,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9be25d1a946dd099c24906766342042eca6a8c456c83998da65d5bf6f2cc1671",
+        "answer": "### Gradle Kotlin DSL\n\n```kotlin\nrepositories {\n    mavenCentral()\n    maven(\"https://jitpack.io\")\n}\n\nval jimmerVersion = \"1.0.1\"\n\ndependencies {\n    implementation(\"com.github.sleepkqq.jimmer:quarkus-jimmer:$jimmerVersion\")\n    ksp(\"com.github.sleepkqq.jimmer:jimmer-ksp:$jimmerVersion\")\n}\n```\n\nApply the KSP plugin using a version compatible with the Kotlin compiler and the fork’s build metadata. Keep all direct Jimmer dependencies and processors aligned; do not mix upstream `org.babyfish.jimmer` artifacts with this fork. Java/Kotlin package names remain unchanged.\n\n### Configuration and separate model JAR\n\n```yaml\nquarkus:\n  jimmer:\n    language: kotlin\n    trigger-type: BINLOG_ONLY\n    cache:\n      guard:\n        enabled: true\n  index-dependency:\n    model:\n      group-id: com.example\n      artifact-id: example-model\n```\n\nAdd the model JAR as an application dependency and make its entities visible to Jandex through `index-dependency` above, or a packaged Jandex index. Wire Jimmer KSP in the module compiling the entities so their generated types are available.\n\n### Cache readiness\n\nEnabling the guard requires **exactly one CDI bean implementing**\n`io.quarkiverse.jimmer.runtime.cache.CacheReadiness`, providing:\n\n- `ready()`: application-owned readiness/freshness decision.\n- `namespace()`: nonblank namespace, stable throughout the process lifetime.\n\nWhen not ready, guarded caches bypass **both reads and fills**, loading from the database instead. Invalidations still execute, and their failures must propagate. The gate alone does not fence already-started loads.\n\n**No:** `QuarkusRedisCacheTracker.isReady()` proves only local Redis invalidation-subscription readiness—not CDC catch-up. Establish committed-change delivery and source catch-up independently; acknowledge CDC events only after required invalidations succeed.\n\n### Constraint exception defaults\n\n- `constraint-violation-translatable=false`\n- `sql-state-exception-translator=true`\n\nBy default, SQLState translates to `JimmerDataAccessException` subtypes rather than enabling typed constraint investigation."
+      },
+      {
+        "id": "inheritance",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.926,
+        "exit_code": 0,
+        "context_bytes": 19017,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "89b715c282e23fb76e552282227b18e86df3e9629cb0c2656eff33365596add1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "739e233147f80a79582d00c44b0ec5a88e9e9192b436b02cf308869582097886",
+        "answer": "```java\n@Entity\n@Inheritance(strategy = InheritanceType.SINGLE_TABLE)\npublic interface Asset {\n    @Id long id();\n    @Discriminator String kind();\n    String name();\n}\n\n@Entity\n@DiscriminatorValue(\"BOOK\")\npublic interface BookAsset extends Asset {\n    String isbn();\n}\n\n@Entity\n@DiscriminatorValue(\"TOOL\")\npublic interface ToolAsset extends Asset {\n    int inspectionInterval();\n}\n```\n\nDeclare `@Inheritance` only at the root; all branches inherit the same ID. `@Discriminator` identifies a physical String or enum column. Explicit, stable `@DiscriminatorValue` values identify concrete types. Here, `Asset` has derived types but no discriminator value, so it is abstract in Jimmer.\n\nAll types share the `asset` table. Common required columns can be `NOT NULL`, but **branch-only database columns must be nullable**: a tool row has no ISBN, and a book row has no inspection interval. The corresponding subtype properties can still be non-null in Java.\n\nA root DTO exposes common fields and subtype-specific branches:\n\n```dto\nexport com.example.catalog.Asset\n\nAssetView {\n    id\n    name\n    #types {\n        #exhaustive\n        BookAsset {\n            isbn\n        }\n        ToolAsset {\n            inspectionInterval\n        }\n    }\n}\n```\n\n`#exhaustive` makes DTO compilation fail if a concrete branch is missing, including a newly added subtype. Without it, omitted types receive an implicit common-fields branch.\n\n**No, writing the discriminator cannot switch an existing ID’s subtype.** The discriminator is read-only; saves derive it from the runtime entity type. Intentional transitions require explicitly enabling `setTypeChangeAllowed(true)` with **exact save matching** and supplying the intended subtype. Type changes are disabled by default and cannot use polymorphic matching."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.897,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "4a754c40a6328949ae76b91e3df4dbdce0f05a25f8356ceff2a342357dcffb4a",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "2287f17147d6c227126827a0c45158e51edc3d1dc802feabdc87949ef54ca5e1",
+        "answer": "```java\nWarehouseTable warehouse = WarehouseTable.$;\nWarehouseArchiveTable archive = WarehouseArchiveTable.$;\n\n// Example filter; direct select preserves the entity-table type.\nWarehouseTable source = sqlClient.createBaseQuery(warehouse)\n    .where(warehouse.active().eq(true))\n    .select(warehouse)\n    .asBaseTable();\n\nList<Long> insertedIds = sqlClient.createInsert(archive, source)\n    .set(archive.id(), source.id())\n    .set(archive.name(), source.name())\n    .onConflictDoNothing(archive.id())\n    .returning(archive.id())\n    .execute();\n```\n\n- **Source versus target:** The exported base table is the read source; `archive` is a separate ordinary physical target. Direct `.select(warehouse)` exposes `source.id()` and `source.name()`, not positional `get_1()` accessors.\n- **Conflicts:** Existing ID conflicts remain untouched and are excluded from `insertedIds`. This does not ignore unrelated unique constraints.\n- **Memory requirement:** This avoids loading source entities into application memory **only when the dialect and query shape execute as native insert-select**. Jimmer can otherwise materialize the source and use its save pipeline. Verify emitted SQL on the actual database before claiming the requirement is satisfied; the API alone does not guarantee it.\n- **Inheritance:** A joined-inheritance target is **not supported**. The target must map to one physical table; single-table subtypes are supported.\n- **Returning order:** Returned IDs have **no ordering guarantee**, even if the source is ordered. Only successfully inserted rows are returned."
+      },
+      {
+        "id": "catalog-query-derived-upsert",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 12.623,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "7fe7e16f434899c64149e7aecf4b827e8ddd88249c8bb44e53d1546d050b34ea",
+        "prompt_sha256": "b8be9baa9b4ff4488fdf336921f91a707e09402bbdb763bf8fd4701370bcb100",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "df1b4b5034eefee47fdc6a43136a04c7830d386af1916359fea4edb239e40f45",
+        "answer": "```java\nProductTable product = ProductTable.$;\nProductPriceImportTable staging = ProductPriceImportTable.$;\n\nvar source = sqlClient.createBaseQuery(staging)\n    .where(staging.price().isNotNull())\n    .addSelect(staging.sku())\n    .addSelect(staging.price())\n    .asBaseTable();\n\nList<Tuple2<Long, String>> affected = sqlClient\n    .createUpsert(product, source)\n    .key(product.sku(), source.get_1())\n    .insert(product.title(), Expression.string().value(\"Imported product\"))\n    .merge(product.price(), source.get_2())\n    .returning(product.id(), product.sku())\n    .execute();\n```\n\nThis inserts missing SKUs with title `\"Imported product\"` and updates only the price of existing products, preserving their titles. Returned tuples contain IDs and SKUs for inserted and updated rows, with no ordering guarantee.\n\n**Required prerequisites:**\n- `sku` is a complete Jimmer metadata-declared key backed by a database unique constraint; eligible staging rows must be unique by SKU.\n- Product IDs must be generated without application-side source materialization—for example, by a database identity/default. The example assumes `Long` IDs.\n- **The one-database-side-operation requirement is conditional on the installed Jimmer version and database dialect supporting this exact native upsert-from-select with returning.** Verify the emitted SQL is one native statement before using this solution. Jimmer can otherwise materialize the source and fall back to the save pipeline, which does **not** satisfy your requirement. Without the dialect/version, that guarantee cannot be made."
+      },
+      {
+        "id": "inventory-optimistic-save",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 20.801,
+        "exit_code": 0,
+        "context_bytes": 14940,
+        "task_sha256": "8482f2c1e1ba069124d0c1335acfea84504c7377e8986d0306e64e89a552a69c",
+        "prompt_sha256": "83a5754339a54bcd204a9f453558830a34a7be3adc1c094bdfd1081c34f3ed8e",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "69ef3ad268b5cabe60b552c16c6a45d13c2fbf733ddd3b2f0e2918b28fa15856",
+        "answer": "Use **`UPDATE_ONLY` with `@Version` optimistic locking**. Do not use `UPSERT` (which could insert a missing row) or `setUpdateWhere` (whose failed condition is normally a rejected business no-op).\n\n### Entity mapping\n\n```kotlin\nimport org.babyfish.jimmer.sql.*\n\n@Entity\ninterface StockItem {\n    @Id\n    val id: Long\n\n    @Key\n    val warehouseId: Long\n\n    @Key\n    val productId: Long\n\n    val quantity: Int\n\n    @Version\n    val version: Int\n}\n```\n\nThe two ungrouped `@Key` properties form one composite business key. **Enforce it in the database too**; `@Key` does not create a uniqueness constraint:\n\n```sql\nALTER TABLE stock_item\n    ADD CONSTRAINT uq_stock_item_warehouse_product\n    UNIQUE (warehouse_id, product_id);\n```\n\nBoth key columns should be `NOT NULL`.\n\n### Save call\n\nAssuming `incoming` is a Jimmer `StockItem` with all five command properties loaded:\n\n```kotlin\nfun updateStock(incoming: StockItem): StockItem {\n    val result = sqlClient.save(incoming) {\n        setMode(SaveMode.UPDATE_ONLY)\n        // Default version mode is OPTIMISTIC_LOCK.\n    }\n\n    check(result.isAccepted) {\n        \"Stock item ${incoming.id} was not updated\"\n    }\n    return result.modifiedEntity\n}\n```\n\nRun this within the service’s transaction boundary. Conceptually, the write is:\n\n```sql\nUPDATE stock_item\nSET warehouse_id = ?,\n    product_id = ?,\n    quantity = ?,\n    version = version + 1\nWHERE id = ?\n  AND version = ?;\n```\n\n### Expected behavior\n\n- **Matching ID and version:** update succeeds; Jimmer increments the version. Return `modifiedEntity`, which carries the resulting version.\n- **Stale version:** Jimmer raises an optimistic-lock save exception (`SaveException.OptimisticLockError`), rather than returning an ordinary conditional rejection. Treat it as a conflict, typically HTTP `409`; do not retry blindly.\n- **Missing row for the supplied ID:** no insertion occurs. A version-guarded update can report this as an optimistic-lock failure too; do not assume it distinguishes “missing” from “stale.” Both satisfy the error requirement.\n- **Warehouse/product pair already owned by another row:** the database unique constraint rejects the update. It also prevents duplicate creation through other write paths, including concurrent requests.\n\nIf “missing id” means the command omitted the ID entirely, reject that during input validation; the command contract should require both `id` and `version`."
+      },
+      {
+        "id": "travel-fetch-shape",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 13.135,
+        "exit_code": 0,
+        "context_bytes": 10658,
+        "task_sha256": "ea480758243ca0c3075c445e46e3216c962f835cd0b3c63af62071a1493f3e79",
+        "prompt_sha256": "b75564185391288a8bd993a1446032c7cc499d95095aba17f11c0815f0e391f9",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "433abe78dab7435131e1112b94c987f21077abd15a80a58ea53cb7ea5131c243",
+        "answer": "Use an explicit Fetcher to whitelist the response fields, and SQL predicates to filter trips. Assuming `published` is a boolean, `departureDate` is a `LocalDate`, and `city` is an association:\n\n```java\npublic List<Trip> findPublishedTrips(\n        long destinationId,\n        LocalDate departureDate\n) {\n    Objects.requireNonNull(departureDate, \"departureDate\");\n\n    var t = TripTable.$;\n    var responseShape = TripFetcher.$\n        .name() // Trip ID is included automatically\n        .destination(\n            DestinationFetcher.$.name()\n        )\n        .itineraryStops(\n            ItineraryStopFetcher.$\n                .city(CityFetcher.$.name())\n                .arrivalTime()\n        );\n\n    return sqlClient.createQuery(t)\n        .where(t.published().eq(true))\n        .where(t.destination().id().eq(destinationId))\n        .where(t.departureDate().eq(departureDate))\n        .orderBy(t.id().asc())\n        .select(t.fetch(responseShape))\n        .execute();\n}\n```\n\n- All filtering happens in SQL. Itinerary stops are batch-loaded rather than fetched through per-trip repository calls.\n- Internal notes and hotel associations are excluded. Accessing excluded properties throws; it does not trigger lazy loading.\n- Adapt generated names/types to your model. Fetchers include associated entity IDs automatically; use a DTO View if the public JSON contract must expose **only** the listed fields."
+      },
+      {
+        "id": "museum-kotlin-dto",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 26.811,
+        "exit_code": 0,
+        "context_bytes": 16388,
+        "task_sha256": "d5f056ffb30fad4ef453f7adb8a657d0b000899815563df4b30e0976b09c569f",
+        "prompt_sha256": "0f19e98e99f1dc6d7338948a9c7d8fdc1cc99c521edf3d89db145de513c53db6",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9c8fc721878694e91651fe1000d63c67f145eed411406178e3ba1be97a1feab5",
+        "answer": "Предположим, у `Exhibition` есть `title: String`, обязательная связь `museum: Museum`, nullable-поле `openingDate: LocalDate?` и коллекция `exhibits`. `id` генерируется сервером, `createdAt` устанавливается сервером или БД.\n\n### DTO\n\n`src/main/dto/com/example/museum/model/Exhibition.dto`:\n\n```dto\nexport com.example.museum.model.Exhibition -> package com.example.museum.dto\n\ninput ExhibitionCreateInput {\n    title\n    id(museum) as museumId\n    openingDate\n}\n\nExhibitionView {\n    id\n    title\n    flat(museum) {\n        name as museumName\n    }\n    exhibitCount\n}\n```\n\n- `title` и `museumId` обязательны благодаря non-null свойствам модели.\n- `openingDate` можно опустить: для обычного `input` это будет `null`. Добавлять `?` к уже nullable свойству нельзя.\n- `id` и `createdAt` отсутствуют во входном DTO и не попадут в создаваемую entity.\n- `exhibitCount` должен быть **вычисляемым свойством entity**: DTO сам не превращает коллекцию в `count`.\n\n### Количество экспонатов\n\nНапример, если экспонаты хранятся в таблице `exhibit` с FK `exhibition_id`, в `Exhibition` можно определить SQL formula:\n\n```kotlin\n@Formula(\n    sql = \"(select count(*) from exhibit e where e.exhibition_id = %alias.ID)\"\n)\nval exhibitCount: Long\n```\n\nНазвания таблицы и колонок нужно согласовать с реальной схемой. Формула считает строки в БД, не загружая коллекцию `exhibits`. Если количество должно учитывать soft-delete или ограничения видимости, эти условия необходимо учесть отдельно.\n\n### Сохранение\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\n\nfun create(input: ExhibitionCreateInput) {\n    // Здесь проверяется право пользователя создавать выставку в input.museumId.\n    sql.save(input.toEntity()) {\n        setMode(SaveMode.INSERT_ONLY)\n    }\n}\n```\n\nGenerated `toEntity()` создаёт ссылку на музей только с его ID; вручную собирать entity не нужно. `INSERT_ONLY` задаёт именно создание, а не upsert. Генерация ID и установка `createdAt` должны быть настроены независимо от DTO.\n\n### Запрос\n\n```kotlin\nfun findExhibitions(): List<ExhibitionView> =\n    sql.createQuery(Exhibition::class) {\n        orderBy(table.title.asc(), table.id.asc())\n        select(table.fetch(ExhibitionView::class))\n    }.execute()\n```\n\nПроекция возвращает `id`, `title`, `museumName` и `exhibitCount`; сами экспонаты не запрашиваются.\n\nЕсли присутствие неизвестных JSON-полей `id`/`createdAt` должно приводить к ошибке, а не игнорированию, дополнительно включите отклонение неизвестных полей в JSON-слое. Пример не компилировался: для проверки нужны реальные entity и конфигурация KSP проекта."
+      },
+      {
+        "id": "catalog-cache-invalidation",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 30.394,
+        "exit_code": 0,
+        "context_bytes": 18891,
+        "task_sha256": "6fb64159ee5c02c4682240e03e229ca0fb0ef7b180b98a1a0d45846c6f20b858",
+        "prompt_sha256": "61f1cc1324ade667c6411c451960b12bfc8b149cc5cc3868dcecc7e3b9cff08a",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "55a8485b3985d9ef34fb22c30beb7e7dda641e99476d0043d4c6927385385861",
+        "answer": "Use **Jimmer’s `CacheFactory`**, not Spring `@Cacheable` or manual Redis calls. Cache product/category rows and the association’s target ID separately.\n\n```yaml\n# application.yml — Spring Boot\njimmer:\n  trigger-type: BINLOG_ONLY\n```\n\n`BINLOG_ONLY` requires a working committed-change delivery pipeline; setting the property does not install CDC.\n\n### Cache wiring\n\nRegister a Spring `CacheFactory` bean using your installed Jimmer cache provider’s `ChainCacheBuilder`, Caffeine binder, and Spring Redis binder. Configure these chains:\n\n| Factory method | Cache | Chain, in lookup order |\n|---|---|---|\n| `createObjectCache(type)` | `Product` rows, keyed by product ID | Caffeine → Redis |\n| `createObjectCache(type)` | `Category` rows, keyed by category ID | Caffeine → Redis |\n| `createAssociatedIdCache(prop)` | `Product.category`: product ID → category ID | Caffeine → Redis |\n| `createAssociatedIdListCache(prop)` | Optional `Category.products`: category ID → product IDs | Caffeine → Redis |\n\nReturn `null` for types/properties you do not want cached. A reasonable starting policy is **10,000 local entries, 30-second local TTL, and 30-minute Redis TTL**, with remote expiry jitter if supported.\n\nThe provider-level wiring is:\n\n```text\nSpring CacheFactory bean\n  ├─ Product object chain:        Caffeine → Redis → Jimmer DB loader\n  ├─ Category object chain:       Caffeine → Redis → Jimmer DB loader\n  └─ Product.category ID chain:   Caffeine → Redis → Jimmer DB loader\n```\n\nUse the installed provider’s actual binder constructors/builders and its Jackson `ObjectMapper`; those signatures are version-dependent. The supplied reference does not establish a specific Spring provider version, so a concrete constructor example would be speculative. **Do not use `quarkus.jimmer.cache.entities` in Spring.**\n\nRepository code remains ordinary Jimmer code, including its existing fetcher for `Product` with `Category`. Jimmer consults these caches automatically while assembling the graph. Queries by arbitrary predicates still query the database; this is not a query-result cache.\n\n### What happens after an update?\n\nThe required path is:\n\n```text\nJimmer write commits\n  → CDC delivers committed row changes to Jimmer BinLog\n  → affected Redis and local cache entries are invalidated\n  → event is acknowledged/checkpointed only after invalidation succeeds\n```\n\nFor example:\n\n- **Product name/price changed:** evict the product’s object entry.\n- **Product category changed:** evict the product object and its `Product.category` association entry. If `Category.products` is cached, invalidate the collection entries for **both the old and new categories**.\n- **Category name changed:** evict the category object entry. Unchanged product-to-category ID mappings do not need eviction merely because the category’s name changed.\n\nInvalidations must reach **every service instance’s Caffeine tier**, not just Redis or the instance that performed the write. Subsequent loads obtain fresh data and refill the tiers; invalidation and refill must be coordinated so a load started before invalidation cannot repopulate stale data.\n\nDo not use deprecated `TRANSACTION_ONLY` or `BOTH` for new configuration. With CDC, propagation is asynchronous, so immediate read-after-write freshness is not guaranteed. Bypass affected caches **including fills** when CDC freshness is unknown; retry failed invalidations without acknowledging their events. TTL is a fallback, not the correctness mechanism.\n\nBefore enabling cached traffic, verify two instances, an external writer, category reassignment, CDC restart/replay, and a DB load held across invalidation."
+      },
+      {
+        "id": "museum-near-miss",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.892,
+        "exit_code": 0,
+        "context_bytes": 16515,
+        "task_sha256": "a8dc00dac3e38972e0989209a2a03e4a8b726699a2a8268037252e948e7e0edb",
+        "prompt_sha256": "58d05ad11ffa36f49ac08433a7cc8111f0dd1ec9aa05b6f6f1e9bd390ebc73d0",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "e13c42f04052892b1728baeee84e67b1fea98743126ddd722b04f7711c8fe686",
+        "answer": "Aggregate and sort **in the database**, returning only the top 20—not all `Visit` entities. Jimmer’s typed query DSL handles this without a database view or native SQL.\n\nAssuming `Visit → Exhibit → Museum` are to-one associations, the Java query looks like this (generated table/property names are illustrative):\n\n```java\nvar v = VisitTable.$;\nvar e = v.exhibit();\nvar m = e.museum();\nvar visitCount = v.id().count();\n\nvar query = sqlClient.createQuery(v)\n    .where(v.visitedAt().ge(fromInclusive))\n    .where(v.visitedAt().lt(toExclusive))\n    .groupBy(\n        e.id(), e.name(),\n        m.id(), m.name()\n    )\n    .orderBy(\n        visitCount.desc(), // Most visited first\n        e.id().asc()       // Stable tie-breaker for pagination\n    )\n    .select(\n        e.id(),\n        e.name(),\n        m.name(),\n        visitCount\n    );\n\n// First 20, plus has-more information; no exact-count query:\nvar slice = query.fetchSlice(20, 0);\n// slice.isTail() indicates that there are no further results.\n```\n\nThe projection returns tuples containing exhibit ID, exhibit name, museum name, and visit count. Use `@TypedTuple` if this needs a named, reusable dashboard result contract.\n\n- **Pagination:** use `fetchSlice(20, offset)` for next-page navigation; use `fetchPage(pageIndex, 20)` only when the UI needs the exact total number of matching exhibit groups.\n- **Semantics:** this ranks exhibits with visits in the half-open range `[fromInclusive, toExclusive)`. Including zero-visit exhibits would require starting from exhibits and preserving them with a left join.\n- **Verification:** inspect generated SQL for database-side `COUNT`, `GROUP BY`, `ORDER BY COUNT(...) DESC, exhibit_id ASC`, and pagination. Check the execution plan against representative visit volumes; do not add indexes blindly."
+      },
+      {
+        "id": "travel-migration",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 30.075,
+        "exit_code": 0,
+        "context_bytes": 10770,
+        "task_sha256": "0bb661b9b90bb9483bcfcde9a0cd97a76ec80cce21f5fc78844bb76243e67cd5",
+        "prompt_sha256": "4a58f312f523ba8fd447bc2374a4f5c304d3fd80bb26af830355412b3d224a35",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "b402ac8be1c05adeca1f8deec0453e10ca2a6f7cdf32824629ccc899bf06a2fd",
+        "answer": "Assuming the table is `travel_destination`, logical deletion uses `deleted boolean NOT NULL DEFAULT false`, and `name` is non-null. Preserve the existing ID, audit fields, and logical-delete mapping if their names or types differ.\n\n### Entity mapping\n\nJava/Jimmer—relevant properties of `TravelDestination`:\n\n```java\n@Nullable // org.jetbrains.annotations.Nullable\n@Key(group = \"byCountryAndName\")\nString countryCode();\n\n@Key(group = \"byCountryAndName\")\nString name();\n\n@LogicalDeleted(\"true\")\nboolean deleted();\n```\n\nBoth properties belong to **one composite key group**. Replace an existing name-only `@Key` if name alone is no longer a business key; retain any genuinely independent keys.\n\nDo not add `@KeyUniqueConstraint` merely because the index below exists: nullable-key and partial-index conflict semantics must also match Jimmer’s generated save/upsert SQL.\n\n### PostgreSQL migration\n\nThis choice requires **PostgreSQL 15+** and treats `NULL` as an “unknown country” bucket: two active destinations cannot both have `(NULL, 'Paris')`.\n\nUse the established migration runner. The following is a transactional migration; omit explicit transaction statements if the runner manages them.\n\n```sql\nBEGIN;\n\n-- Fail rather than wait indefinitely for a busy production table.\nSET LOCAL lock_timeout = '5s';\n\n-- Nullable, with no default: existing rows remain NULL.\nALTER TABLE travel_destination\n    ADD COLUMN country_code varchar(2);\n\n-- Optional NULL; otherwise exactly two uppercase ASCII letters.\nALTER TABLE travel_destination\n    ADD CONSTRAINT ck_travel_destination_country_code\n    CHECK (\n        country_code IS NULL\n        OR country_code ~ '^[A-Z]{2}$'\n    );\n\n-- Abort without changing existing data if active duplicates exist.\n-- The preceding ALTER TABLE holds its lock until COMMIT, preventing\n-- concurrent writes from racing this check and index creation.\nDO $$\nBEGIN\n    IF EXISTS (\n        SELECT 1\n        FROM travel_destination\n        WHERE deleted = false\n        GROUP BY country_code, name\n        HAVING count(*) > 1\n    ) THEN\n        RAISE EXCEPTION\n            'Active destination duplicates exist; resolve them before retrying';\n    END IF;\nEND\n$$;\n\nCREATE UNIQUE INDEX uq_travel_destination_active_country_name\n    ON travel_destination (country_code, name)\n    NULLS NOT DISTINCT\n    WHERE deleted = false;\n\nCOMMIT;\n```\n\n### Why this index\n\n- **Partial unique index**, not an ordinary unique constraint: only non-deleted rows participate. PostgreSQL does not support a `WHERE` predicate on an ordinary unique constraint.\n- Active `(FR, Paris)` and `(US, Paris)` can coexist.\n- A second active `(FR, Paris)` or `(NULL, Paris)` is rejected.\n- Deleted duplicates are unrestricted. Restoring a deleted row fails if its active key is already taken.\n- Name comparison follows the column’s existing database comparison semantics; this does not introduce case-insensitive uniqueness.\n- The check validates the country-code **format**, not membership in ISO 3166-1.\n\nDo **not** use `UNIQUE(country_code, name, deleted)`: it would also restrict repeated tombstones. Ordinary PostgreSQL uniqueness without `NULLS NOT DISTINCT` would allow multiple active `(NULL, name)` rows.\n\n### Deployment considerations\n\nThis migration is atomic and does not guess how to merge duplicates, but it blocks table access while holding the DDL lock. For a large/busy table, use a staged rollout and `CREATE UNIQUE INDEX CONCURRENTLY` outside a transaction, with explicit invalid-index cleanup and retry handling.\n\nIf an existing name-only unique constraint/index exists, it will remain stricter than the requested rule. Review its dependencies and remove it **only with explicit approval**, after the replacement is established.\n\nOn PostgreSQL before 15, use two partial unique indexes instead: `(country_code, name)` for active rows with non-null country codes, and `(name)` for active rows with null country codes.\n\nNot executed here. Before deployment, compile the mapping, apply the migration to a disposable database, and test duplicate inserts, soft deletion, restoration, and Jimmer natural-key saves—especially generated SQL for null keys and partial-index upserts."
+      },
+      {
+        "id": "inventory-repository-fetcher",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 15.286,
+        "exit_code": 0,
+        "context_bytes": 13898,
+        "task_sha256": "829c4144a7e52991771acf8a8ae6eed4d85c52dbf2be77c603b28abee0f2b53b",
+        "prompt_sha256": "b1ae618008b3f330de2710e85f542c5192433f6ed8d4c152f09c99d6fa6f140f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "7383db5ca6d9a17da48c85784888fdc7f873f62958e0fa393780eb1e32f2455e",
+        "answer": "```kotlin\n// inventory/repository/WarehouseRepository.kt\npackage com.example.inventory.repository\n\nimport com.example.inventory.model.Warehouse\nimport io.quarkiverse.jimmer.runtime.repository.KRepository\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\nimport java.util.UUID\n\n// Use the actual ID type declared by Warehouse.\ninterface WarehouseRepository : KRepository<Warehouse, UUID> {\n\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse?\n}\n```\n\n```kotlin\n// inventory/service/WarehouseService.kt\npackage com.example.inventory.service\n\nimport com.example.inventory.model.Warehouse\nimport com.example.inventory.repository.WarehouseRepository\nimport jakarta.enterprise.context.ApplicationScoped\nimport jakarta.inject.Inject\nimport org.babyfish.jimmer.sql.fetcher.Fetcher\n\n@ApplicationScoped\nclass WarehouseService @Inject constructor(\n    private val repository: WarehouseRepository\n) {\n    fun findByCode(\n        code: String,\n        fetcher: Fetcher<Warehouse>? = null\n    ): Warehouse? = repository.findByCode(code, fetcher)\n}\n```\n\n- `findByCode` is a **derived query**, with no SQL or method body. The unified Quarkus extension generates the repository implementation and exposes it through CDI.\n- Callers can omit the fetcher or pass a generated `Fetcher<Warehouse>` selecting bins and current stock summaries. Unselected associations remain unloaded; selected associations may use batched secondary queries.\n- `Warehouse?` preserves **not found → `null`**. The REST resource delegates to the service and maps `null` to HTTP 404. This singular lookup assumes warehouse codes are unique; enforce that in the database."
+      }
+    ],
+    "complete_answers": 27
+  },
+  "method": "Same source-grounded masked grader per task across all models and conditions; labels unmasked only after all 192 grade vectors were validated. No post-unmask grade changes."
+}

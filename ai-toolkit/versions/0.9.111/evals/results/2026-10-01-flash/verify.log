@@ -1,0 +1,53 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.12.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Task :java:compileJava
+Note: Immutable: example.TenantScoped
+Note: Immutable: example.BookStore
+Note: Entity: example.BookStore
+Note: Immutable: example.Book
+Note: Entity: example.Book
+Note: Some input files use unchecked or unsafe operations.
+Note: Recompile with -Xlint:unchecked for details.
+
+> Task :java:processResources
+> Task :java:classes
+
+> Task :java:run
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+MODEL-GENERATED JAVA: strict create, duplicate preservation, generated ID and filtered pagination passed
+
+> Task :kotlin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :java:compileTestJava NO-SOURCE
+> Task :java:processTestResources NO-SOURCE
+> Task :java:testClasses UP-TO-DATE
+> Task :java:test NO-SOURCE
+> Task :java:check UP-TO-DATE
+> Task :kotlin:kspKotlin
+> Task :kotlin:processResources
+> Task :kotlin:compileKotlin
+> Task :kotlin:compileJava NO-SOURCE
+> Task :kotlin:classes
+
+> Task :kotlin:run
+SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+SLF4J: Defaulting to no-operation (NOP) logger implementation
+SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+MODEL-GENERATED KOTLIN: conditional atomic update, stale/missing no-op and filtered pagination passed
+
+> Task :check
+> Task :kotlin:jar
+> Task :kotlin:kspTestKotlin NO-SOURCE
+> Task :kotlin:compileTestKotlin NO-SOURCE
+> Task :kotlin:compileTestJava NO-SOURCE
+> Task :kotlin:processTestResources NO-SOURCE
+> Task :kotlin:testClasses UP-TO-DATE
+> Task :kotlin:test NO-SOURCE
+> Task :kotlin:check UP-TO-DATE
+
+[Incubating] Problems report is available at: file:///tmp/jimmer-canary-compile-x4mvo6wr/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 9s
+8 actionable tasks: 8 executed

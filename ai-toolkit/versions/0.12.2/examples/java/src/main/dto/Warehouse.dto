@@ -1,0 +1,9 @@
+export example.Warehouse
+
+dynamic input WarehousePatch {
+    id
+    note
+    bins? {
+        id
+    }
+}

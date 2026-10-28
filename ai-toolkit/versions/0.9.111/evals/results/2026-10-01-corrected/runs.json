@@ -1,0 +1,22 @@
+[
+  {
+    "id": "save-result-contract",
+    "repeat": 1,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 18.459,
+    "exit_code": 0,
+    "context_bytes": 11831,
+    "task_sha256": "287a1c58eead3313342655a4a2b657de24d1935b6bc3bb1866860d250a3a3373",
+    "prompt_sha256": "2c083e3670dbeec50e701b3cf72ffeaf81a5bad2f5107a7d3fea30d4e4f26668"
+  },
+  {
+    "id": "save-result-contract",
+    "repeat": 2,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 25.14,
+    "exit_code": 0,
+    "context_bytes": 11831,
+    "task_sha256": "287a1c58eead3313342655a4a2b657de24d1935b6bc3bb1866860d250a3a3373",
+    "prompt_sha256": "2c083e3670dbeec50e701b3cf72ffeaf81a5bad2f5107a7d3fea30d4e4f26668"
+  }
+]

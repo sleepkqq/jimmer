@@ -1,0 +1,13 @@
+{
+  "version": "0.12.2",
+  "repository": "https://github.com/babyfish-ct/jimmer",
+  "tag": "v0.12.2",
+  "commit": "871c49379149c1950a836bb11b59d30a0babd476",
+  "integrations": [
+    {
+      "repository": "https://github.com/sleepkqq/jimmer",
+      "commit": "d16eb39ee49a7429093fcc8c8b6db22f57262f04",
+      "scope": "Unified Quarkus integration; separate fork coordinates, not part of the official release"
+    }
+  ]
+}

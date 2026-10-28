@@ -1,0 +1,231 @@
+{
+  "description": "Frozen regression and transfer tasks, unchanged, for cross-model reference ablation",
+  "cases": [
+    {
+      "id": "cache-cdc",
+      "skills": [
+        "jimmer-caching"
+      ],
+      "prompt": "We run Jimmer 0.12.2 with Redis and two application instances. A scheduled SQL importer also writes to the database. Our current trigger-type is TRANSACTION_ONLY. Propose the current supported cache consistency setup and a rollout check. Is changing the enum enough? What should happen if Redis deletion fails while processing a CDC record? Keep the answer under 250 words.",
+      "assertions": [
+        "Rejects new use of TRANSACTION_ONLY and BOTH because both transaction-trigger modes are deprecated.",
+        "Chooses BINLOG_ONLY plus an actual database CDC/binlog delivery path to Jimmer, including external SQL writes.",
+        "Acknowledges/checkpoints only after successful invalidation; failure is retried, not swallowed.",
+        "Explains that changing the enum alone does not install CDC and verifies multi-instance invalidation or gates/disables caches during an unsafe transition."
+      ]
+    },
+    {
+      "id": "insert-if-absent-result",
+      "skills": [
+        "jimmer-save-modes",
+        "jimmer-performance"
+      ],
+      "prompt": "Jimmer 0.12.2: create a catalog item if its unique SKU does not exist, never update an existing item, and return the existing item's database-generated ID on a conflict. A teammate proposes saveCommand(input).setMode(INSERT_IF_ABSENT).execute(ItemView.class).getModifiedView(), citing a rule that save must never be followed by a query. Is that contract correct? Give the smallest correct service flow and its concurrency caveat, under 250 words.",
+      "assertions": [
+        "Explains that a skipped INSERT_IF_ABSENT root has isAccepted=false and does not return the conflicting database row just because a View was requested.",
+        "Checks acceptance and permits a separate lookup by unique key for the rejected branch when the existing row is required.",
+        "Does not silently replace no-update semantics with UPSERT; notes that a technical self-assignment can invoke database update triggers.",
+        "Notes the separate-statement concurrency/isolation issue rather than claiming a whole graph or insert-plus-read is one atomic statement."
+      ]
+    },
+    {
+      "id": "external-version",
+      "skills": [
+        "jimmer-save-modes",
+        "jimmer-kotlin"
+      ],
+      "prompt": "Using Kotlin and Jimmer 0.12.2, ingest a supplied CatalogRevision object whose @Version field is an external revision number. Insert missing IDs; update an existing row only when incoming version is greater. Older revisions should be normal rejected results, not optimistic-lock exceptions. Show the save configuration and how the caller distinguishes rejection. State whether the version mode applies to child objects. Under 250 words.",
+      "assertions": [
+        "Uses VersionMode.ASSIGNMENT instead of the implicit optimistic-lock increment policy.",
+        "Uses setUpdateWhere with incoming newNonNull(CatalogRevision::version) greater than table.version and keeps UPSERT insertion semantics.",
+        "Checks isAccepted and treats a false condition as ordinary rejection, not an optimistic-lock failure.",
+        "States that setVersionMode is root-only and does not propagate to associated objects."
+      ]
+    },
+    {
+      "id": "dissociation",
+      "skills": [
+        "jimmer-entity",
+        "jimmer-migrations",
+        "jimmer-debug"
+      ],
+      "prompt": "A Jimmer entity Warehouse has @OneToMany(mappedBy=\"warehouse\") List<Bin> bins(). Bin has a non-null @ManyToOne Warehouse warehouse(). Replacing bins must delete removed Bin rows. Where exactly does @OnDissociate belong? Do we have to change the existing database FK from RESTRICT to ON DELETE CASCADE? Explain the ORM operation versus the SQL FK behavior, and give the minimal annotation snippets. Under 200 words.",
+      "assertions": [
+        "Places @OnDissociate(DELETE) on Bin.warehouse, the owning reference, not Warehouse.bins.",
+        "Keeps the inverse OneToMany free of @OnDissociate.",
+        "Explains that ORM dissociation and database ON DELETE are separate; ON DELETE CASCADE is not automatically required by @OnDissociate(DELETE)."
+      ]
+    },
+    {
+      "id": "dto-patch",
+      "skills": [
+        "jimmer-dto"
+      ],
+      "prompt": "Write exactly one Jimmer DTO named ShelfPatch for entity com.example.inventory.Shelf (UUID id, nullable String note, List<Bin> bins). PATCH semantics: omitted note or bins leaves it unchanged; explicit note:null clears the note; bins:[] clears the collection. Do not expose any other writable properties. Show the .dto declaration and state one JSON round-trip assertion needed to verify generated presence handling. Under 200 words.",
+      "assertions": [
+        "Uses dynamic input with optional writable properties as required for PATCH rather than fuzzy input or static input.",
+        "Keeps omitted note distinct from explicit null through generated toEntity loaded state.",
+        "Keeps omitted bins distinct from an explicitly empty collection and explains that clearing depends on the associated save mode/dissociation policy.",
+        "Generates only ShelfPatch and allow-lists id, note and the requested association IDs/shape."
+      ]
+    },
+    {
+      "id": "quarkus-current",
+      "skills": [
+        "jimmer-quarkus",
+        "jimmer-config",
+        "jimmer-caching"
+      ],
+      "prompt": "Set up a Kotlin Quarkus application against the current sleepkqq/jimmer 1.0.1 unified fork. Show Gradle runtime and KSP coordinates and their repository. Explain how to expose entities from a separate model JAR. We enable quarkus.jimmer.cache.guard.enabled: what CDI provider is required, what does it gate, and does Redis tracker isReady prove the CDC consumer has caught up? Also name the current constraint exception translation defaults. Under 300 words.",
+      "assertions": [
+        "Uses com.github.sleepkqq.jimmer:quarkus-jimmer:1.0.1 and same-family jimmer-ksp:1.0.1 from JitPack without mixing org.babyfish.jimmer runtime/processors.",
+        "Includes Jandex/index-dependency visibility for the external model JAR and Kotlin language configuration.",
+        "Requires exactly one CacheReadiness provider with ready() and a stable nonblank namespace(); not-ready bypasses reads and fills while invalidations still run.",
+        "Distinguishes tracker subscription readiness from external CDC catch-up.",
+        "States constraint-violation-translatable=false and sql-state-exception-translator=true for this Quarkus module, not Spring's defaults."
+      ]
+    },
+    {
+      "id": "inheritance",
+      "skills": [
+        "jimmer-entity",
+        "jimmer-advanced-mappings",
+        "jimmer-inheritance"
+      ],
+      "prompt": "Jimmer 0.12.2 needs a polymorphic Asset with BookAsset and ToolAsset branches. Explain a SINGLE_TABLE mapping: discriminator annotations, database nullability for branch-only fields, and how a root DTO can expose branch-specific properties and fail compilation if a concrete branch is missing. Can we switch an existing ID to another subtype just by writing its discriminator? Under 250 words, with short mapping/DTO snippets.",
+      "assertions": [
+        "Uses @Inheritance(SINGLE_TABLE), @Discriminator and concrete @Entity branches, distinguishing entity inheritance from MappedSuperclass reuse.",
+        "Makes branch-only physical columns nullable at database level even if their subtype properties are non-null.",
+        "Uses #types with #exhaustive for polymorphic DTO compile-time coverage.",
+        "Explains that discriminator is derived/read-only and type change is disabled by default, requiring explicit setTypeChangeAllowed and exact matching for an intended transition."
+      ]
+    },
+    {
+      "id": "insert-from-select",
+      "skills": [
+        "jimmer-query",
+        "jimmer-dml"
+      ],
+      "prompt": "In Jimmer 0.12.2 Java, copy filtered Warehouse rows into WarehouseArchive (same physical id and name columns) without loading entities in application memory. Sketch the typed API using a base query that directly selects the source table, skip ID conflicts, and return inserted IDs. Describe whether this accepts a joined-inheritance target and whether returning order matches source order. Under 250 words.",
+      "assertions": [
+        "Builds a typed createBaseQuery(...).select(sourceTable).asBaseTable() source and a separate target table.",
+        "Uses createInsert(target, source).set(...) mappings and onConflictDoNothing with the ID or complete eligible metadata key.",
+        "Uses returning(target.id()) and explains that skipped conflicts are excluded, with no guaranteed return order.",
+        "States that joined-inheritance targets are unsupported and does not guarantee a native single statement for every dialect/shape."
+      ]
+    },
+    {
+      "id": "catalog-query-derived-upsert",
+      "skills": [
+        "jimmer-dml",
+        "jimmer-query"
+      ],
+      "prompt": "In Java, our catalog has Product(id, sku, title, price) and a staging table ProductPriceImport(sku, price). Build a typed mutation that selects rows from staging where imported price is non-null and then inserts new products or updates existing products matched by sku. It must run as one database-side operation, set title to a fixed value for newly created rows, and return the affected product ids and skus.",
+      "assertions": [
+        "Uses Jimmer's typed insert/upsert-from-select command rather than loading staging rows into Java.",
+        "The source is a typed query/base query with the non-null price predicate and maps sku and price into the target columns.",
+        "The conflict/matching key is sku and the update behavior changes price while insert behavior supplies the required title.",
+        "Uses a returning form (or an equivalent supported result mechanism) that returns the affected product ids and skus."
+      ]
+    },
+    {
+      "id": "inventory-optimistic-save",
+      "skills": [
+        "jimmer-save-modes",
+        "jimmer-entity"
+      ],
+      "prompt": "A Kotlin inventory service receives an immutable StockItem(id, warehouseId, productId, quantity, version) command. Existing rows must be updated only when the supplied version matches; a missing id is an error, and a duplicate warehouseId/productId pair must not create a second row. Show the entity mapping and the save call, including the behavior the service should expect when the version check fails.",
+      "assertions": [
+        "Maps the entity id, version property, and warehouse/product uniqueness needed by the stated persistence rules.",
+        "Chooses an update-only save mode (or an equivalent explicit update operation) so a missing id is not silently inserted.",
+        "Preserves optimistic-lock checking and explains that a stale version produces Jimmer's optimistic-lock failure rather than an overwrite.",
+        "Does not rely on an application-side existence check to enforce the unique pair; it uses a database/entity key constraint."
+      ]
+    },
+    {
+      "id": "travel-fetch-shape",
+      "skills": [
+        "jimmer-fetchers",
+        "jimmer-query"
+      ],
+      "prompt": "For a Java travel API, query published Trip objects by destination and departure date. The response needs trip id/name, destination name, and each itinerary stop's city and arrival time, but must not load internal notes or the full hotel object. Keep filtering in SQL and make the returned graph explicit.",
+      "assertions": [
+        "Builds a typed predicate for published trips, destination, and departure-date filtering instead of filtering the result list in Java.",
+        "Uses a Fetcher or equivalent explicit fetch graph selecting only the requested trip, destination, and stop scalar fields.",
+        "Does not include internal notes or an unrestricted hotel association in the fetch graph.",
+        "Executes the query through the Jimmer SQL client/repository with the shaped graph attached to the entity query."
+      ]
+    },
+    {
+      "id": "museum-kotlin-dto",
+      "skills": [
+        "jimmer-dto",
+        "jimmer-kotlin"
+      ],
+      "prompt": "В Kotlin-приложении музея нужен входной DTO для создания Exhibition: обязательны title и museumId, дата открытия может быть задана, а server-managed id и createdAt нельзя принимать от клиента. Нужен также read DTO с id, title, museum name и количеством экспонатов, без самих экспонатов. Покажите DTO-описания и способ их использования в сохранении и запросе.",
+      "assertions": [
+        "Defines a Jimmer input DTO whose writable properties are title, museumId, and optional opening date, excluding id and createdAt from client input.",
+        "Defines a separate output view/projection containing exhibition id/title, museum name, and an exhibit count rather than the exhibit collection.",
+        "Uses generated Kotlin DTO/input APIs in the save and query flow instead of accepting an arbitrary map or exposing the entity as the request body.",
+        "The count is computed by the database query/projection and does not require loading every exhibit into application memory."
+      ]
+    },
+    {
+      "id": "catalog-cache-invalidation",
+      "skills": [
+        "jimmer-caching",
+        "jimmer-config"
+      ],
+      "prompt": "A Spring catalog service reads Product with its Category frequently and writes products through Jimmer. Configure transparent entity/association caching with Caffeine as a local first level and Redis as a shared second level, then explain what must happen to cache entries after a Jimmer update. Do not add manual cache reads to every repository method.",
+      "assertions": [
+        "Configures a Jimmer CacheFactory (or the documented equivalent) with local and shared cache implementations rather than hand-written repository caches.",
+        "Includes entity and association cache handling sufficient for Product and its Category association.",
+        "States that Jimmer CRUD mutations invalidate affected cached data through its cache/transaction mechanism.",
+        "Keeps cache provider wiring centralized in configuration and does not claim that arbitrary out-of-band SQL is automatically observable without CDC/invalidation integration."
+      ]
+    },
+    {
+      "id": "museum-near-miss",
+      "skills": [
+        "jimmer-query",
+        "jimmer-performance"
+      ],
+      "prompt": "A museum dashboard must show the 20 most visited exhibits in a date range, with visit counts and museum names. The current proposal loads all Visit rows and sorts them in Java. Recommend and sketch the Jimmer solution, including pagination and the aggregate ordering. If a database view or native SQL is not necessary, avoid it.",
+      "assertions": [
+        "Uses a typed Jimmer query with grouping/count aggregation and orders by the count in the database.",
+        "Applies the date-range predicate before aggregation and limits the result to 20 through query pagination/limit.",
+        "Selects the exhibit identity/name and museum name alongside the aggregate count in a suitable tuple/projection.",
+        "Explicitly avoids loading all Visit entities or introducing native SQL/database views when the typed Jimmer query expresses the requirement."
+      ]
+    },
+    {
+      "id": "travel-migration",
+      "skills": [
+        "jimmer-migrations",
+        "jimmer-entity"
+      ],
+      "prompt": "Add a nullable two-letter countryCode to TravelDestination and enforce uniqueness of (countryCode, name) for non-deleted destinations. Existing rows may have null countryCode. Provide the entity mapping and a safe PostgreSQL migration, including the index/constraint choice and how the nullable values behave.",
+      "assertions": [
+        "Adds the nullable countryCode property with a length/column definition compatible with two-letter values.",
+        "Adds a database uniqueness rule for countryCode plus name that permits multiple rows whose countryCode is null, as PostgreSQL semantics require or via an explicit partial strategy.",
+        "Scopes uniqueness to non-deleted rows using the project's stated soft-delete condition rather than constraining deleted history.",
+        "The migration is additive and safe for existing rows by allowing nulls and creates the needed index/constraint before relying on the entity mapping."
+      ]
+    },
+    {
+      "id": "inventory-repository-fetcher",
+      "skills": [
+        "jimmer-repositories",
+        "jimmer-fetchers",
+        "jimmer-quarkus"
+      ],
+      "prompt": "In a Quarkus Kotlin inventory service, expose a repository method that finds a warehouse by code and optionally accepts a caller-selected fetch shape for its bins and current stock summaries. Keep the method declarative, preserve not-found semantics, and show the Quarkus/Jimmer repository placement rather than putting SQL in a resource class.",
+      "assertions": [
+        "Places the method in a Jimmer repository/repository abstraction recognized by the Quarkus integration, not in the HTTP resource.",
+        "Uses the warehouse code as a typed repository predicate and preserves a clear nullable/optional result for not found.",
+        "Accepts and applies a Fetcher for the warehouse graph so bins and stock summaries are caller-selected rather than always eagerly loaded.",
+        "Uses Quarkus CDI/Jimmer integration and does not embed hand-written SQL in the resource or repository method body."
+      ]
+    }
+  ]
+}

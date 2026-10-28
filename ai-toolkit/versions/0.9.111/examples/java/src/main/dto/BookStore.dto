@@ -1,0 +1,8 @@
+export example.BookStore
+
+dynamic input StorePatch {
+    id
+    books? {
+        id
+    }
+}

@@ -1,0 +1,72 @@
+[
+  {
+    "id": "java-create-and-query",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 26.558,
+    "exit_code": 0,
+    "context_bytes": 18944,
+    "task_sha256": "bc625b6769e7ba5c8de1eb905eda4c49518fb1b6094f3fca5e3871958b3eeb21",
+    "prompt_sha256": "329a081914b498ac77ec15cf7eb3183a071be4f014ed6c5cff0e4e7fa34ddeeb"
+  },
+  {
+    "id": "kotlin-conditional-and-query",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 17.422,
+    "exit_code": 0,
+    "context_bytes": 13559,
+    "task_sha256": "b76a8fb810b1d7e27e633cc01167ebfacb4f32460eb066ddc363706e83e67d96",
+    "prompt_sha256": "2e363b154763afc6c28d98fc20fcbdcda87400621924dba6da7fa2937d7707de"
+  },
+  {
+    "id": "kotlin-patch-presence",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 18.939,
+    "exit_code": 0,
+    "context_bytes": 20043,
+    "task_sha256": "7546ec3db58b74a70e64448f38da5b0472f0eed70116db45b20e8178813fb777",
+    "prompt_sha256": "b8ba944f244e23b9c5c81cb428231b7095ec339459043d1fd6ffd0ecc84f7b8e"
+  },
+  {
+    "id": "save-result-contract",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 14.262,
+    "exit_code": 0,
+    "context_bytes": 12384,
+    "task_sha256": "08fb8c19db98e1f014877eb8f3278d04aff5cb1320ba004aff2f414cdd746b8b",
+    "prompt_sha256": "a0ec275c82c95bfe594defaef4456a50514fb2f85321457fda334826caa52682"
+  },
+  {
+    "id": "trigger-version-boundary",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 12.283,
+    "exit_code": 0,
+    "context_bytes": 9874,
+    "task_sha256": "151f9c797f84b686a1606cbc39e03a595a99f4025169f13226b1a3b76852e08f",
+    "prompt_sha256": "9f6e7cf7498363f395ab128f5ecc036dad9752677c9ce78792602aaaf87da358"
+  },
+  {
+    "id": "kotlin-ksp-construction",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 7.924,
+    "exit_code": 0,
+    "context_bytes": 8757,
+    "task_sha256": "d1f57767d8978e00d6590fd4df52e1b9827e7f1bc23468717e6bcc1ae4d05327",
+    "prompt_sha256": "1d64a3c6ca1594a87d365b95aef890d30aa4944f6973c25f6b80f40c370ffe13"
+  },
+  {
+    "id": "typed-tuple-aggregate",
+    "repeat": 1,
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "seconds": 16.27,
+    "exit_code": 0,
+    "context_bytes": 9754,
+    "task_sha256": "d1c62ec472aef93d36d9b97f43ab1c60b00cce5b645a41b14999b3fbfa18a01a",
+    "prompt_sha256": "dfed0a06fbf7477e17171fead16aca352b807cf7179dabfb82192fbcd3b60e3c"
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "description": "Closed-book canaries for 0.9.111 model output. Prompts ask for concrete usage; assertions are frozen and graded by inspecting the raw answer, never by CLI exit status. Java/Kotlin function assertions are additionally checked by compiling the unedited generated code when a Gradle 8.12.1 / JDK 21 toolchain is available.",
+  "cases": [
+    {
+      "id": "java-create-and-query",
+      "skills": ["jimmer-entity", "jimmer-save-modes", "jimmer-query"],
+      "prompt": "Jimmer 0.9.111, Java 21. example.Book has generated identity long id, unique @Key String name, BigDecimal price, int @Version version, inherited String tenantId and a nullable BookStore store; generated example.dto.BookView exists. Write a compilable example.CanaryJava: static BookView create(JSqlClient sql, String name, BigDecimal price, String tenantId) for a strict create, and static Page<BookView> search(JSqlClient sql, String name, int page, int size) with an optional name filter and stable order. After the code, state briefly what a duplicate name produces and how callers learn the create succeeded.",
+      "assertions": [
+        "Java class compiles against official 0.9.111 APT-generated models and DTOs, including its declared Page return type.",
+        "Create uses INSERT_ONLY and returns the required BookView with the generated ID; a duplicate name surfaces as a constraint/save exception rather than a silent upsert.",
+        "Search uses the generated Book table, optional name predicate, deterministic name/id order and fetchPage.",
+        "Describes success through the returned BookView or the root-table affected-row count (or notes the duplicate exception path); does not use isAccepted and does not treat isModified as an acceptance flag."
+      ]
+    },
+    {
+      "id": "kotlin-conditional-and-query",
+      "skills": ["jimmer-kotlin", "jimmer-dml", "jimmer-query"],
+      "prompt": "Jimmer 0.9.111, Kotlin 2.1.20. example.Book has Long id, BigDecimal price, Int @Version version; example.dto.BookView exists. Write example.CanaryKotlin as an object with fun increasePrice(sql: KSqlClient, id: Long, expectedVersion: Int, delta: BigDecimal): Boolean that bumps price and version atomically only when id and version match (stale or missing rows return false), and fun search(sql: KSqlClient, name: String?, page: Int, size: Int): Page<BookView> with an optional name filter and stable order. Explain the API choice briefly after the code.",
+      "assertions": [
+        "Kotlin file compiles against the exact 0.9.111 KSP-generated model and DTO APIs.",
+        "Conditional update computes price and version in SQL, constrains both ID and expected version, never inserts, and returns false for zero changed rows.",
+        "Keeps the write as one typed createUpdate statement: no read-modify-write, no graph-save assignment expressions, no setUpdateWhere or VersionMode, and no acceptance flag.",
+        "Search uses native KSqlClient DSL, a null-aware predicate, stable name/id order and a Jimmer Page of the requested View."
+      ]
+    },
+    {
+      "id": "kotlin-patch-presence",
+      "skills": ["jimmer-dto", "jimmer-kotlin", "jimmer-save-modes"],
+      "prompt": "Jimmer 0.9.111 with Kotlin/KSP. BookStore (`example.BookStore`) has Long id, non-null String name, non-null List<Book> books, and Book.store is the nullable owning side. Give one StorePatch DTO where id is required, name is an optional change, omitted books keep membership and books: [] clears it; show the Kotlin save call and how to clear the links without deleting books. Also name the Jackson 2 module for a standalone mapper.",
+      "assertions": [
+        "Uses correctly bound dynamic input StorePatch with id, name? and books? containing id; no unsupported fragments, reusable-DTO arrows or newer grammar.",
+        "Distinguishes omission from loaded empty collection and chooses explicit REPLACE with UPDATE_ONLY through supported Kotlin save DSL.",
+        "Places SET_NULL dissociation on nullable owning Book.store, not inverse BookStore.books, without deleting target books.",
+        "Names org.babyfish.jimmer.jackson.ImmutableModule for standalone Jackson 2."
+      ]
+    },
+    {
+      "id": "save-result-contract",
+      "skills": ["jimmer-save-modes", "jimmer-performance"],
+      "prompt": "Jimmer 0.9.111, Java 21 and Kotlin. We need create-if-absent by unique SKU: insert when the SKU is missing, never update a conflicting row, and return the existing row's id on conflict. Show the smallest safe Java and Kotlin implementation and how each branch is verified. Also answer whether execute(ItemView.class).getModifiedView() is enough here, and give the concurrency caveat.",
+      "assertions": [
+        "Uses INSERT_IF_ABSENT with a real unique key/constraint and preserves the no-update contract; does not switch to UPSERT or INSERT_ONLY for the conflict-return requirement.",
+        "Verifies the insert branch via the returned view or the root-table affected-row count; does not treat isModified or isRowAffected as acceptance and does not read a required-ID view from a partial conflict result.",
+        "Reads the existing row on conflict through an explicit complete-key lookup in the required transaction/isolation scope; explains that getModifiedView() is sufficient for the successful insert but not for the conflict branch.",
+        "States that the save and follow-up lookup are separate operations with a race (bounded retry or explicit failure) and that the unique constraint, not application check-then-act, is the guarantee."
+      ]
+    },
+    {
+      "id": "cache-trigger-topology",
+      "skills": ["jimmer-caching", "jimmer-config"],
+      "prompt": "Jimmer 0.9.111 with Spring. Two application instances share a Jimmer cache, and the database is also written by a direct JDBC importer that bypasses Jimmer. Configure the cache trigger topology and list what must exist for consistent invalidation in this setup. A required cache deletion fails while handling a CDC event: when may the consumer acknowledge it?",
+      "assertions": [
+        "Chooses a topology that covers external and multi-instance writers (binlog delivery, or BOTH with both trigger channels deliberately wired); does not rely on transaction triggers alone for the JDBC importer or the second instance.",
+        "Explains that transaction triggers observe only Jimmer-managed mutations, in-process, on the instance that performed them, and that the trigger type alone does not install CDC.",
+        "Acknowledges only after required invalidations succeed; failures retry/redeliver, and outage/catch-up needs an explicit stale-read/bypass/reset policy with TTL only as a backstop.",
+        "Keeps multi-instance consistency and rollback/replay in view; does not treat events raised inside a transaction as proof that the transaction committed."
+      ]
+    },
+    {
+      "id": "kotlin-ksp-construction",
+      "skills": ["jimmer-kotlin", "jimmer-entity"],
+      "prompt": "Jimmer 0.9.111 with Kotlin and KSP. A colleague put two @Entity interfaces in one .kt file and the build failed: why, and how should Kotlin models be laid out? Also show the ways we can create an example.Book draft in this release, and name the Jackson 2 module for standalone mappers.",
+      "assertions": [
+        "States that KSP rejects several immutable/model declarations in one file with a generator error, and the fix is one model type per Kotlin source file.",
+        "Shows new(Book::class).by { ... } with org.babyfish.jimmer.kt.new plus the generated by import from the model package.",
+        "Shows the generated Book { ... } factory from the model package as an available creation form and does not forbid it.",
+        "Names org.babyfish.jimmer.jackson.ImmutableModule for standalone Jackson 2."
+      ]
+    },
+    {
+      "id": "typed-tuple-aggregate",
+      "skills": ["jimmer-query", "jimmer-dml"],
+      "prompt": "Jimmer 0.9.111, Java 21. We need grouped aggregate rows with a store id, a book count and a minimum price straight from a query, without hand-written mapping code or Lombok. Show the tuple class and the query, and how large result sets should be consumed.",
+      "assertions": [
+        "Identifies @TypedTuple (org.babyfish.jimmer.sql) with TYPE target and says APT/KSP generate a <SimpleName>Mapper fluent builder whose methods map the tuple components.",
+        "Declares the tuple class with matching component properties/getters (constructor or setter based); no hand-written mapper class.",
+        "Query uses the generated StoreAggregateMapper.storeId(...).bookCount(...).minPrice(...) builder inside select(...) with groupBy on the generated table.",
+        "Consumes large results with forEach(batchSize) or a bounded ID-keyset loop; does not promise a JDBC stream() query API."
+      ]
+    }
+  ]
+}

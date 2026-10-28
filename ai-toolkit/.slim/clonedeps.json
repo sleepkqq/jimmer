@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "dependencies": [
+    {
+      "name": "jimmer",
+      "resolvedVersion": "0.9.111",
+      "repoUrl": "https://github.com/babyfish-ct/jimmer.git",
+      "ref": "03cc7aac141c8be951c37535f42c341951e83025",
+      "path": ".slim/clonedeps/babyfish-ct__jimmer",
+      "packagePath": "project",
+      "reason": "Verify version-specific skills and Java/Kotlin examples against official v0.9.111 source and tests"
+    }
+  ]
+}

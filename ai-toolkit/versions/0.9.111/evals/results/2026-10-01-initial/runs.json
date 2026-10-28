@@ -1,0 +1,52 @@
+[
+  {
+    "id": "java-create-and-query",
+    "repeat": 1,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 15.942,
+    "exit_code": 0,
+    "context_bytes": 15972,
+    "task_sha256": "5336adb0f06d8d64f9c9eb7e60af1f7ff09b1d1b999563da1b9417c10d337e6d",
+    "prompt_sha256": "725a51b0e14e568de26a7b5084e9999be90f76d419fc3fca791cfd44c3d46465"
+  },
+  {
+    "id": "kotlin-conditional-and-query",
+    "repeat": 1,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 16.131,
+    "exit_code": 0,
+    "context_bytes": 12696,
+    "task_sha256": "55b969ddb8a604453420f833a58477d1a25cb0818445cd2e4aca162de7fe1a94",
+    "prompt_sha256": "eabbbdd7848fd6b67b5b3fb84883f9c0145a0d2f3a1c823b8c1f6ffcccf08732"
+  },
+  {
+    "id": "kotlin-patch-presence",
+    "repeat": 1,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 18.843,
+    "exit_code": 0,
+    "context_bytes": 17485,
+    "task_sha256": "e83674507e6f8b46df7d6f73ca52db98f1b6af2bead7c90703afb609e9ef3c50",
+    "prompt_sha256": "72c8ec8e713fce49a2b9bc733221f89b16b4737121a23f0eacbd33248be7b50e"
+  },
+  {
+    "id": "save-result-contract",
+    "repeat": 1,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 17.589,
+    "exit_code": 0,
+    "context_bytes": 9866,
+    "task_sha256": "287a1c58eead3313342655a4a2b657de24d1935b6bc3bb1866860d250a3a3373",
+    "prompt_sha256": "c6bddfb3b62f1b0b3aecbc569f39f3d17b3a66d27c1c064bd22ecb692b4fe5bb"
+  },
+  {
+    "id": "trigger-version-boundary",
+    "repeat": 1,
+    "model": "openai/gpt-6-astra#low",
+    "seconds": 20.619,
+    "exit_code": 0,
+    "context_bytes": 9838,
+    "task_sha256": "383aa203c94b95851fd7ae42692acc16bca6bb2fcc635240c9a16cbfa8aec57b",
+    "prompt_sha256": "a57725b33e7df2811df7bf1e14969c58debcb6edb9955910d20c8b5c25602799"
+  }
+]

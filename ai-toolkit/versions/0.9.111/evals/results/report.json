@@ -1,0 +1,515 @@
+{
+  "grading_method": "Non-blind source-grounded self-review of frozen assertions. Java/Kotlin function assertions additionally checked by compiling the unedited generated code and executing it on H2; generated StorePatch compiled with both APT and KSP.",
+  "findings": [
+    {
+      "case": "save-result-contract",
+      "assertion": 2,
+      "evidence": "The initial answer says isRowAffected is unavailable. KSimpleSaveResult.kt lines 7-8 define it as affectedRowCountMap.isNotEmpty(). The answer also suggests a Java-style getAffectedRowCount with Item::class.java for Kotlin, but KMutationResult declares affectedRowCount(KClass) and affectedRowCount(KProperty1).",
+      "fix": "Added a Java/Kotlin result-contract table and exact count-call examples to jimmer-save-modes, with a short cross-reference in jimmer-performance. Neither isModified nor Kotlin isRowAffected is an acceptance flag."
+    },
+    {
+      "case": "java-create-and-query",
+      "assertion": 1,
+      "evidence": "Two pre-final simplified rounds produced `BookDraft x = BookDraft.$.produce(...)` and instance methods, failing compile against the harness contract; the release also ships an `Immutables` facade that the skills had not documented.",
+      "fix": "jimmer-entity and jimmer-kotlin now lead with `Immutables.createBook(...)` for Java and `Book { ... }` for Kotlin, note that all creation forms return the entity, and the prompts state the static/object call interface the checks compile against. Graded answer compiled and passed H2."
+    },
+    {
+      "case": "kotlin-patch-presence",
+      "assertion": 3,
+      "evidence": "Simplified-prompt answers argued that a nullable owning FK needs no dissociation policy. Source: DetachOptions.getDissociateAction maps NONE to CHECK when default-dissociation-action-checkable is true, and ChildTableOperator.disconnect with force throws SaveException.CannotDissociateTarget even for an empty retained set.",
+      "fix": "jimmer-save-modes now requires SET_NULL/DELETE on the owning reference (or a setDissociateAction override on that prop) for save-time dissociation, and does not present a nullable FK as sufficient. Both reruns then named @OnDissociate(SET_NULL) on Book.store."
+    },
+    {
+      "case": "typed-tuple-aggregate",
+      "assertion": 3,
+      "evidence": "A simplified-prompt answer used `new StoreAggregateMapper()`; the generated mapper's only constructor takes Selection<?>[] and the public chain starts with the static method named after the first declared component.",
+      "fix": "jimmer-query now says the chain starts with that static first-component method. The targeted rerun used `StoreBookStatsMapper.storeId(...)` and passed."
+    },
+    {
+      "case": "kotlin-ksp-construction",
+      "assertion": 4,
+      "evidence": "The facades-round answer named only the `jimmer-jackson` artifact; the module class was documented in jimmer-dto and jimmer-advanced-mappings, neither of which the case lists.",
+      "fix": "Named `org.babyfish.jimmer.jackson.ImmutableModule` in jimmer-kotlin. Rerun answers the module class."
+    },
+    {
+      "case": "typed-tuple-aggregate",
+      "assertion": 3,
+      "evidence": "The facades-round answer omitted `createQuery` and hung groupBy/orderBy off the generated mapper chain.",
+      "fix": "jimmer-query GUIDE now contains a complete annotated-class + createQuery/groupBy/select/Mapper example. Rerun follows that shape."
+    }
+  ],
+  "initial": {
+    "passed": 19,
+    "total": 20,
+    "pass_rate": 0.95,
+    "median_seconds": 17.589,
+    "mean_context_bytes": 13171.4,
+    "runs": [
+      {
+        "id": "java-create-and-query",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 15.942,
+        "exit_code": 0,
+        "context_bytes": 15972,
+        "task_sha256": "5336adb0f06d8d64f9c9eb7e60af1f7ff09b1d1b999563da1b9417c10d337e6d",
+        "prompt_sha256": "725a51b0e14e568de26a7b5084e9999be90f76d419fc3fca791cfd44c3d46465",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "e4982a41c5445555e02da098b428f6eb20991aeea2ccfb63d15fde40e7ce0c7f",
+        "answer": "```java\npackage example;\n\nimport example.dto.BookView;\nimport java.math.BigDecimal;\nimport org.babyfish.jimmer.Page;\nimport org.babyfish.jimmer.sql.JSqlClient;\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode;\n\npublic final class CanaryJava {\n\n    private CanaryJava() {}\n\n    public static BookView create(\n            JSqlClient sql,\n            String name,\n            BigDecimal price,\n            String tenant\n    ) {\n        Book input = BookDraft.$.produce(draft -> {\n            draft.setName(name);\n            draft.setPrice(price);\n            draft.setTenantId(tenant);\n            draft.setVersion(0);\n        });\n\n        return sql.saveCommand(input)\n                .setMode(SaveMode.INSERT_ONLY)\n                .execute(BookView.class)\n                .getModifiedView();\n    }\n\n    public static Page<BookView> search(\n            JSqlClient sql,\n            String name,\n            int page,\n            int size\n    ) {\n        BookTable book = BookTable.$;\n\n        return sql.createQuery(book)\n                .where(book.name().likeIf(name))\n                .orderBy(book.name().asc(), book.id().asc())\n                .select(book.fetch(BookView.class))\n                .fetchPage(page, size);\n    }\n}\n```\n\n**No, `isAccepted()` is not available in official Jimmer 0.9.111.** `INSERT_ONLY` strictly inserts; duplicate-key failures propagate because this method does not catch them. The generated identity ID is left unset.\n\n`execute(BookView.class).getModifiedView()` requests the required successful-save shape directly, potentially using a follow-up fetch, rather than converting a possibly partially loaded entity.\n\n`likeIf(name)` skips an absent name filter. Pagination uses a zero-based page index and stable ordering by name, then ID."
+      },
+      {
+        "id": "kotlin-conditional-and-query",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 16.131,
+        "exit_code": 0,
+        "context_bytes": 12696,
+        "task_sha256": "55b969ddb8a604453420f833a58477d1a25cb0818445cd2e4aca162de7fe1a94",
+        "prompt_sha256": "eabbbdd7848fd6b67b5b3fb84883f9c0145a0d2f3a1c823b8c1f6ffcccf08732",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "afcc9bedeb2886895ce4de1a979a7a93ff8e93851f6b0816d8d36377a3992352",
+        "answer": "```kotlin\npackage example\n\nimport example.dto.BookView\nimport java.math.BigDecimal\nimport org.babyfish.jimmer.Page\nimport org.babyfish.jimmer.sql.kt.KSqlClient\nimport org.babyfish.jimmer.sql.kt.ast.expression.*\nimport org.babyfish.jimmer.sql.kt.ast.table.*\n\nobject CanaryKotlin {\n\n    fun increasePrice(\n        sql: KSqlClient,\n        id: Long,\n        expectedVersion: Int,\n        delta: BigDecimal\n    ): Boolean {\n        val changed = sql.createUpdate(Book::class) {\n            set(table.price, table.price + delta)\n            set(table.version, table.version + 1)\n            where(\n                table.id eq id,\n                table.version eq expectedVersion\n            )\n        }.execute()\n\n        return changed == 1\n    }\n\n    fun search(\n        sql: KSqlClient,\n        name: String?,\n        page: Int,\n        size: Int\n    ): Page<BookView> {\n        require(page >= 0) { \"page must be non-negative (zero-based)\" }\n        require(size > 0) { \"size must be positive\" }\n\n        return sql.createQuery(Book::class) {\n            where(table.name `like?` name)\n            orderBy(table.name.asc(), table.id.asc())\n            select(table.fetch(BookView::class))\n        }.fetchPage(page, size)\n    }\n}\n```\n\nJimmer 0.9.111 supports Kotlin `createUpdate` with expression-based assignments. Both increments happen atomically in one conditional update; bulk updates require the version predicate and increment explicitly, even with `@Version`. A stale version or missing ID affects zero rows and returns `false`; this API never inserts.\n\nSearch uses this release’s backticked `like?` operator to omit the name predicate when the argument is null. Ordering by name and then unique ID provides stable pagination, while `fetchPage` returns `Page<BookView>` with a total count. Generated model property extensions are available directly because this file shares their `example` package."
+      },
+      {
+        "id": "kotlin-patch-presence",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 18.843,
+        "exit_code": 0,
+        "context_bytes": 17485,
+        "task_sha256": "e83674507e6f8b46df7d6f73ca52db98f1b6af2bead7c90703afb609e9ef3c50",
+        "prompt_sha256": "72c8ec8e713fce49a2b9bc733221f89b16b4737121a23f0eacbd33248be7b50e",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "0b9377753c3cb837ad6da754dbe781dc2e349299ebda8836f09f3b14413005be",
+        "answer": "```dto\nexport example.BookStore\n\ndynamic input StorePatch {\n    id\n    name?\n    books? {\n        id\n    }\n}\n```\n\n```kotlin\nimport org.babyfish.jimmer.sql.ast.mutation.AssociatedSaveMode\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode\nimport org.babyfish.jimmer.sql.kt.KSqlClient\n// Import StorePatch from its generated package.\n\nfun patchStore(sqlClient: KSqlClient, patch: StorePatch) =\n    sqlClient.save(patch) {\n        setMode(SaveMode.UPDATE_ONLY)\n        setAssociatedModeAll(AssociatedSaveMode.REPLACE)\n    }\n```\n\n- `id` remains required. `dynamic` preserves omission: absent `name` or `books` becomes an unloaded entity property and is not changed.\n- `name?` permits omission of the non-null name; it does not authorize clearing the database column to null.\n- `books?` permits omission of the non-null collection. A submitted `books: []` is loaded empty, so `REPLACE` removes all membership. Nonempty input uses nested references such as `{\"books\":[{\"id\":42}]}`.\n\n**Dissociation policy:** For an inverse `BookStore.books` association mapped by `Book.store`, annotate the owning nullable reference with:\n\n```kotlin\n@OnDissociate(DissociateAction.SET_NULL)\nval store: BookStore?\n```\n\nBoth annotation types are in `org.babyfish.jimmer.sql`. The database foreign-key column must allow null. This clears removed books’ `store` foreign keys without deleting books; do not use `DissociateAction.DELETE`.\n\n**Generated Kotlin DTOs:** They are immutable by default. Use constructor arguments, for example `StorePatch(id = 1L, name = \"Renamed\")`, rather than assigning properties in `apply`. Nested association DTOs are generated too; use their generated constructors rather than handwritten mappers.\n\n**Standalone Jackson 2:** Register `org.babyfish.jimmer.jackson.ImmutableModule`. Verify omission, explicit null, values, and empty collections through the actual mapper and generated `toEntity()` before relying on presence semantics."
+      },
+      {
+        "id": "save-result-contract",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 17.589,
+        "exit_code": 0,
+        "context_bytes": 9866,
+        "task_sha256": "287a1c58eead3313342655a4a2b657de24d1935b6bc3bb1866860d250a3a3373",
+        "prompt_sha256": "c6bddfb3b62f1b0b3aecbc569f39f3d17b3a66d27c1c064bd22ecb692b4fe5bb",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "cbcefdfd41e95b9ad4f659a2d4d9b8135f2383848b6354e6381c004ec57803a0",
+        "answer": "### API availability in 0.9.111\n\n| API | Available? | Meaning |\n|---|---|---|\n| `isAccepted()` / `getIsAccepted()` | **No** | No save-acceptance protocol in this release. |\n| Java `isModified()` / Kotlin `isModified` | **Yes** | Whether the returned entity differs from the original input instance—not whether a database row was updated or an insert was accepted. |\n| `isRowAffected()` | **No** | Inspect affected-row counts instead. |\n\n`totalAffectedRowCount` includes graph effects. For a particular entity table, use `getAffectedRowCount(AffectedTable.of(Item.class))` in Java (the corresponding Kotlin call uses `Item::class.java`). Counts are not a general whole-graph acceptance flag.\n\n### Smallest safe create-if-absent algorithm\n\n1. Enforce **database uniqueness on SKU**, and configure SKU as Jimmer’s matching natural key. Accept only creation fields; do not accept a conflicting caller-supplied ID.\n2. Within the chosen transaction boundary, save using **`SaveMode.INSERT_IF_ABSENT`**. Do not substitute `UPSERT`: it permits updating the conflicting row.\n3. Explicitly query by the complete unique SKU and select the required ID or `ItemView`. Return that query result; handle an unexpectedly missing row with a defined retry/failure policy.\n\n**No:** `execute(ItemView.class).getModifiedView()` alone is not a reliable “insert or return existing ID” contract. View execution supports successful-save result shaping, but a conflicting insert-if-absent can leave a partial result; it is not a general existing-row lookup.\n\n**Concurrency caveat:** uniqueness prevents duplicates, but a transaction alone does not guarantee that the follow-up lookup sees a concurrent winner or that the row cannot be deleted meanwhile. Verify dialect-specific conflict behavior and isolation visibility; use bounded whole-transaction retries or appropriate serialization where necessary."
+      },
+      {
+        "id": "trigger-version-boundary",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 20.619,
+        "exit_code": 0,
+        "context_bytes": 9838,
+        "task_sha256": "383aa203c94b95851fd7ae42692acc16bca6bb2fcc635240c9a16cbfa8aec57b",
+        "prompt_sha256": "a57725b33e7df2811df7bf1e14969c58debcb6edb9955910d20c8b5c25602799",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "70eef93c897a801d2e38238549a947cf89729405c590a30b8c15bc959baacb46",
+        "answer": "- **No:** `TRANSACTION_ONLY` and `BOTH` are **not deprecated in official Jimmer 0.9.111**.\n- **Spring default:** `jimmer.trigger-type: BINLOG_ONLY`.\n\n**What transaction triggers observe:** mutations executed through Jimmer’s transaction-trigger-aware mutation paths on that client. They do not automatically observe direct JDBC importer writes, native SQL writes, or writes made by the other application instance. Each instance’s transaction triggers alone therefore cannot guarantee consistency across both instances’ caches. Preserve the framework’s transaction-aware cache operator: an event raised inside a transaction does not establish that it committed.\n\n**Before `BINLOG_ONLY` can maintain consistency:** an actual CDC/binlog pipeline must deliver committed row and relevant middle-table changes from **all writers** to Jimmer’s BinLog. Selecting the enum does not install CDC. Invalidation must reach every affected cache across both instances, including old/new association owners and resolver dependencies where applicable. Local caches need cross-instance invalidation coverage even if Redis is shared.\n\nThe delivery path must support retries/redelivery, restart/replay, and an explicit outage/catch-up policy such as cache bypass or reset; TTL alone is insufficient.\n\n**Acknowledgement:** acknowledge/checkpoint only after **all required cache invalidations succeed**. If a required cache deletion fails, do not acknowledge that event or advance the checkpoint past it; retry/redeliver safely."
+      }
+    ]
+  },
+  "targeted_after_fix": {
+    "passed": 8,
+    "total": 8,
+    "pass_rate": 1.0,
+    "median_seconds": 21.799500000000002,
+    "mean_context_bytes": 11831,
+    "runs": [
+      {
+        "id": "save-result-contract",
+        "repeat": 1,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 18.459,
+        "exit_code": 0,
+        "context_bytes": 11831,
+        "task_sha256": "287a1c58eead3313342655a4a2b657de24d1935b6bc3bb1866860d250a3a3373",
+        "prompt_sha256": "2c083e3670dbeec50e701b3cf72ffeaf81a5bad2f5107a7d3fea30d4e4f26668",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "6798a70d3651c1288405341836e049d05c932f2c8f8ed62b6c7ffc16a3cef808",
+        "answer": "### Result APIs in official 0.9.111\n\n| API | Java `SimpleSaveResult` | Kotlin `KSimpleSaveResult` | Meaning |\n|---|---|---|---|\n| `isAccepted` / `getIsAccepted` | Absent | Absent | No acceptance protocol in this release. |\n| `isModified` | `result.isModified()` | `result.isModified` | Original and modified immutable instances differ. Generated IDs, versions, or back-references can cause this; **not persistence success**. |\n| `isRowAffected` | Absent | `result.isRowAffected` | Exactly `affectedRowCountMap.isNotEmpty()`. Includes graph effects; **not root acceptance**. |\n\nFor an entity-table count, use Java `result.getAffectedRowCount(Item.class)` or Kotlin `result.affectedRowCount(Item::class)`. Its interpretation depends on the operation and driver; it is not general whole-graph acceptance.\n\n### Smallest safe create-if-absent algorithm\n\n1. Define SKU as Jimmer’s natural key (`@Key` or `setKeyProps`) and enforce matching **database uniqueness**. Include tenant identity if uniqueness is tenant-scoped.\n2. Within the chosen transaction policy, save a **root-only**, caller-writable input:\n   ```java\n   sqlClient.saveCommand(input)\n       .setMode(SaveMode.INSERT_IF_ABSENT)\n       .execute();\n   ```\n   Do not load associations unless their independent mutation behavior is intentional.\n3. Explicitly query the row by its complete unique key, with authorization scope, selecting its ID or required view. Return that result.\n\n**No:** `execute(ItemView.class).getModifiedView()` alone is not a reliable conflict-to-existing-ID contract. View execution supports successful-save shaping, but a conflicting insert-if-absent is not a general existing-row lookup. Never substitute `UPSERT`: it permits updates.\n\n**Concurrency caveat:** uniqueness arbitrates competing inserts, but transaction scope alone does not guarantee lookup visibility or prevent concurrent deletion. Choose and test isolation/retry behavior on the actual dialect; retry the transaction when necessary, or report a defined conflict if lookup finds nothing."
+      },
+      {
+        "id": "save-result-contract",
+        "repeat": 2,
+        "model": "openai/gpt-6-astra#low",
+        "seconds": 25.14,
+        "exit_code": 0,
+        "context_bytes": 11831,
+        "task_sha256": "287a1c58eead3313342655a4a2b657de24d1935b6bc3bb1866860d250a3a3373",
+        "prompt_sha256": "2c083e3670dbeec50e701b3cf72ffeaf81a5bad2f5107a7d3fea30d4e4f26668",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9b41de9d9a0dcd41ef52dd8f61c3bfe0036051a9a7a096dea2753978f44b08f5",
+        "answer": "### Result APIs in official 0.9.111\n\n| API | Java `SimpleSaveResult` | Kotlin `KSimpleSaveResult` | Meaning |\n|---|---|---|---|\n| `isAccepted` / `getIsAccepted` | Absent | Absent | No acceptance protocol in this release. |\n| `isModified` | `result.isModified()` | `result.isModified` | Original and modified immutable instances differ—for example, through generated IDs, versions, or back-references. **Not persistence success.** |\n| `isRowAffected` | Absent | `result.isRowAffected` | Exactly `affectedRowCountMap.isNotEmpty()`. Includes graph effects; **not root acceptance**. |\n\nEntity-table counts are Java `result.getAffectedRowCount(Item.class)` and Kotlin `result.affectedRowCount(Item::class)`. Their interpretation depends on operation/dialect semantics; they are not general whole-graph success flags.\n\n### Smallest safe create-if-absent algorithm\n\n1. Enforce a **real database unique constraint on SKU** and configure SKU as Jimmer’s natural key (`@Key` or `setKeyProps`). Use the complete key if uniqueness is composite.\n2. Within the chosen transaction boundary, save a **root-only, caller-writable input**, with no supplied ID, using `SaveMode.INSERT_IF_ABSENT`.\n3. Explicitly query by the complete unique SKU key, applying authorization, and select the ID or required view. Return that query result.\n\nDo **not** switch to `UPSERT`: it violates the no-update-on-conflict requirement.\n\n**No**, `execute(ItemView.class).getModifiedView()` alone is not a reliable existing-row retrieval contract on conflict. View execution supports successful-save result shaping, but a conflicting insert-if-absent can leave a partial result; it is not a general existing-row fetch.\n\n**Concurrency caveat:** choose and test isolation/visibility on the actual database. Concurrent insertion or deletion can affect the subsequent lookup; snapshot isolation may require retrying the transaction. Handle missing lookup results and retryable transaction failures explicitly rather than assuming a transaction alone guarantees visibility."
+      }
+    ]
+  },
+  "executable_checks": {
+    "source_answers": "2026-10-01-initial",
+    "toolchain": "JDK 21, Gradle 8.12.1, Jimmer 0.9.111, Kotlin 2.1.20, KSP 2.1.20-1.0.32",
+    "command": "python3 versions/0.9.111/evals/verify-generated.py --runs versions/0.9.111/evals/results/2026-10-01-initial --gradle /path/to/gradle-8.12.1/bin/gradle",
+    "result": "PASS: unchanged generated Java/Kotlin implementations and StorePatch compiled; H2 checks passed for strict create, duplicate preservation, generated ID, filtering/pagination, and conditional price/version update with stale/missing no-op branches"
+  },
+  "flash": {
+    "passed": 28,
+    "total": 28,
+    "pass_rate": 1.0,
+    "median_seconds": 18.261,
+    "mean_context_bytes": 13218.857142857143,
+    "notes": [
+      "Model opencode-go/deepseek-v4.1-flash, repeats=1, simplified prompts as in cases.json.",
+      "Artifacts are assembled from the coherent final rounds: all cases from 2026-10-01-final3 except kotlin-patch-presence (final4) and typed-tuple-aggregate (final5), which were rerun after guidance fixes and are the answers graded here.",
+      "verify.log records the compile+H2 verification of the graded Java/Kotlin answers and the graded StorePatch DTO (JDK 21, Gradle 8.12.1).",
+      "Harness changes made during this round: verify-generated.py accepts a single untagged code fence, writes the patch DTO to src/main/dto/example/ and drops the repository's same-entity dto to avoid a Filer collision, and the runner was invoked through a gradle wrapper that forces IPv4/timeouts because Maven Central TLS handshakes were flaky on this network."
+    ],
+    "runs": [
+      {
+        "id": "java-create-and-query",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 10.259,
+        "exit_code": 0,
+        "context_bytes": 18770,
+        "task_sha256": "bc625b6769e7ba5c8de1eb905eda4c49518fb1b6094f3fca5e3871958b3eeb21",
+        "prompt_sha256": "7749afca459db5d58d098dc6f1c03b867558d69f98d4694736cda3a507106a4f",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "5469a7b210c4020ea93841bb11dcecba38040d8e142dd85c2ff153bc845d28aa",
+        "answer": "## Maximum steps reached\n\nThe maximum number of steps for this agent has been reached, so no files could be created or compiled. Below is the complete, ready-to-save answer that was derived from the supplied 0.9.111 references.\n\n### `example/CanaryJava.java`\n\n```java\npackage example;\n\nimport example.dto.BookView;\nimport org.babyfish.jimmer.Page;\nimport org.babyfish.jimmer.sql.JSqlClient;\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode;\n\nimport java.math.BigDecimal;\n\npublic final class CanaryJava {\n\n    private CanaryJava() {\n    }\n\n    /** Strict create: never upserts an existing name/id. */\n    public static BookView create(JSqlClient sql, String name, BigDecimal price, String tenantId) {\n        return sql.saveCommand(\n                        Immutables.createBook(draft -> {\n                            draft.setName(name);\n                            draft.setPrice(price);\n                            draft.setTenantId(tenantId);\n                        })\n                )\n                .setMode(SaveMode.INSERT_ONLY)\n                .execute(BookView.class)\n                .getModifiedView();\n    }\n\n    /** Optional name filter, stable order, page with exact total. */\n    public static Page<BookView> search(JSqlClient sql, String name, int page, int size) {\n        BookTable b = BookTable.$;\n        return sql.createQuery(b)\n                .where(b.name().likeIf(name))\n                .orderBy(b.name().asc(), b.id().asc())\n                .select(b.fetch(BookView.class))\n                .fetchPage(page, size);\n    }\n}\n```\n\nNotes:\n- `@Key` on `name` means `INSERT_ONLY` fails with a constraint error on duplicates instead of silently updating — that is the strict-create contract.\n- `@Version version` is `int`, so nothing special is needed for this path.\n- Ordering includes `b.id().asc()` as the ID tie-breaker for stable paging.\n\n### Can a teammate call `result.isAccepted()`?\n\n**No.** In 0.9.111 there is no `isAccepted` on either `SimpleSaveResult` (Java) or `KSimpleSaveResult` (Kotlin); the acceptance protocol does not exist in this release. If proof of a successful create is needed, use the returned `BookView` (or a root-table affected-row count such as `result.getAffectedRowCount(Book.class)`); `isModified` is not a persistence-success flag.\n\n## Work done vs. remaining\n\n- **Done:** produced the full `CanaryJava` source and the `isAccepted` answer from the references.\n- **Not done (tools disabled):** no file was written under `/tmp/opencode/jimmer-eval-0.9.111-final3`, and the project was not compiled with APT, so the generated names (`Immutables.createBook`) are unverified against the actual codebase.\n- **Next:** write the file to `example/CanaryJava.java`, run the skill's `scripts/compile.sh` against the project, and adjust only if the generated Immutables entry point or `Page` import differs."
+      },
+      {
+        "id": "kotlin-conditional-and-query",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 29.466,
+        "exit_code": 0,
+        "context_bytes": 13514,
+        "task_sha256": "b76a8fb810b1d7e27e633cc01167ebfacb4f32460eb066ddc363706e83e67d96",
+        "prompt_sha256": "b7e6ccee5f744de3d233b82a77485a2c7741c97543548c3784b3dba2f906da99",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "78769dd2af0d3586f65c9183cbc6251c639030ddb46eceef0231431f970bb871",
+        "answer": "Max steps were reached before any tool run; tools are disabled now. No prior implementation steps occurred — the task is answerable directly, so the deliverable is below as text.\n\n```kotlin\npackage example\n\nimport example.dto.BookView\nimport java.math.BigDecimal\nimport org.babyfish.jimmer.Page\nimport org.babyfish.jimmer.sql.kt.KSqlClient\nimport org.babyfish.jimmer.sql.kt.ast.expression.*\nimport org.babyfish.jimmer.sql.kt.ast.table.*\n\nobject CanaryKotlin {\n\n    fun increasePrice(\n        sql: KSqlClient,\n        id: Long,\n        expectedVersion: Int,\n        delta: BigDecimal\n    ): Boolean {\n        val changed = sql.createUpdate(Book::class) {\n            set(table.price, table.price + delta)\n            set(table.version, table.version + 1)\n            where(table.id eq id, table.version eq expectedVersion)\n        }.execute()\n        return changed == 1 // 0 = stale version or missing row\n    }\n\n    fun search(sql: KSqlClient, name: String?, page: Int, size: Int): Page<BookView> =\n        sql.createQuery(Book::class) {\n            where(table.name `like?` name)\n            orderBy(table.name.asc(), table.id.asc())\n            select(table.fetch(BookView::class))\n        }.fetchPage(page, size)\n}\n```\n\n**Why these APIs**\n\n- `createUpdate` is typed bulk DML: one atomic `UPDATE ... SET price = price + ?, version = version + 1 WHERE id = ? AND version = ?`. No read-modify-write race, and `execute()` returns the affected count, so `changed == 1` is exactly \"non-stale existing row\"; `0` covers both stale and missing. Unlike graph save, bulk update does not apply the optimistic `@Version` increment automatically or run preprocessors/interceptors — hence the explicit `version + 1`, acceptable here since no entity lifecycle logic is involved.\n- `like?` is a dynamic predicate: when `name` is null it is skipped entirely (it is not `IS NULL`); use `isNull()` if null matching were intended.\n- `fetchPage` returns `Page<BookView>` with the total count, and `table.fetch(BookView::class)` selects the View instead of loading full entities. Ordering by name with `id` as tie-breaker keeps pagination stable across equal names.\n\n**Status / remaining**\n\n- Max steps reached: no tools were used or required; the code above is the complete response.\n- Not verified here: that KSP-generated `table.price`/`like?`/`fetch` resolve under Kotlin 2.1.20 + `jimmer-ksp` 0.9.111. Next action: compile the module (KSP) and inspect the emitted SQL/count for one stale and one matching update."
+      },
+      {
+        "id": "kotlin-patch-presence",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 80.116,
+        "exit_code": 0,
+        "context_bytes": 20132,
+        "task_sha256": "7546ec3db58b74a70e64448f38da5b0472f0eed70116db45b20e8178813fb777",
+        "prompt_sha256": "291a88c4bec748b244cac27565b5c412b45004417ece2a8a63c26eaeb27aa5cc",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "844092b0a909a0c072aa6016da9b5258a74ff04f9fec6c1f7a708fe13b43f226",
+        "answer": "Maximum steps reached — no further tool calls. The task was fully answerable from the supplied Jimmer 0.9.111 reference, so here is the complete solution.\n\n## DTO — `src/main/dto/example/BookStore.dto`\n\n```dto\nexport example.BookStore\n\ndynamic input StorePatch {\n    id          // non-null, no `?` -> required\n    name?       // non-null String, optional to submit\n    books? {    // non-null List<Book>, `?` allows omission\n        id\n    }\n}\n```\n\nWhy:\n- `dynamic` is required so an **absent** JSON key becomes *unloaded* (preserve) rather than *loaded null* (static mode would clear nullable state).\n- `dynamic` does not make required fields optional by itself, so `name?` and `books?` are needed for omission to be legal. A non-null collection needs `?` when omission is allowed.\n- `id` has no `?`, so a body without `id` fails deserialization — required.\n- `books: []` is still *loaded empty* even with `?`, so it is the only clear signal. Do not send `null` for books.\n\n## Kotlin save\n\n```kotlin\nval patch: BookStore = input.toEntity()\n\nsqlClient.save(patch) {\n    setMode(SaveMode.UPDATE_ONLY)\n    setAssociatedModeAll(AssociatedSaveMode.REPLACE)\n    // only if Book.store has no @OnDissociate(SET_NULL):\n    setDissociateAction(Book::store, DissociateAction.SET_NULL)\n}\n```\n\n- `{\"id\":1}` → `books` unloaded → membership untouched.\n- `{\"id\":1,\"name\":\"new\"}` → name updated, membership untouched.\n- `{\"id\":1,\"books\":[]}` → loaded-empty collection + `REPLACE` → missing members detached, i.e. `UPDATE book SET store_id = NULL`; book rows are **not deleted**.\n\n`REPLACE` must be explicit: convenience save overloads can default associations to `MERGE`, and `MERGE` with `[]` retains members.\n\n## Clearing links without deleting books\n\nThe FK lives on the owning side `Book.store`. Declare the dissociation policy there:\n\n```kotlin\n@OnDissociate(DissociateAction.SET_NULL)\nval store: BookStore?\n```\n\nor override per command with `setDissociateAction(Book::store, DissociateAction.SET_NULL)`. In 0.9.111 a nullable owning FK alone is not enough — the detach path treats `NONE` as `CHECK` (with `default-dissociation-action-checkable=true`) and throws `SaveException.CannotDissociateTarget`. Use `SET_NULL`; never `DELETE`/`VIOLENTLY_REPLACE` when books must survive.\n\n## Jackson 2\n\nStandalone Jackson 2 mapper module: `org.babyfish.jimmer.jackson.ImmutableModule` (not the newer `ImmutableModuleV2`/`V3` packages).\n\n## Remaining / next\n\nNot run (no tools this turn): round-trip the three JSON bodies through the application's real Jackson mapper and generated `toEntity()`, assert `isLoaded(patch, BookStore::books)` presence semantics, then confirm the emitted SQL nulls `book.store_id` instead of deleting rows."
+      },
+      {
+        "id": "save-result-contract",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 10.956,
+        "exit_code": 0,
+        "context_bytes": 12303,
+        "task_sha256": "08fb8c19db98e1f014877eb8f3278d04aff5cb1320ba004aff2f414cdd746b8b",
+        "prompt_sha256": "bff650ee8e2477d1a8e30168ac4f2e0ad5038e75d65971f6f4c86791310db28b",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "d7a6b1ed43d175b901f1404922349a40d8a1f8abc1cf0c5fa606f925a030f75a",
+        "answer": "Maximum steps for this agent have been reached; tools are disabled. No files were read or modified — the question is answered from the supplied reference material.\n\n**Accomplished (analysis):**\n\nSave-result API matrix in 0.9.111:\n\n| API | Java `SimpleSaveResult` | Kotlin `KSimpleSaveResult` |\n|---|---|---|\n| `isAccepted`/`getIsAccepted` | Absent | Absent |\n| `isModified` | `isModified()` | `isModified` property |\n| `isRowAffected` | Absent | `isRowAffected` property (nonempty affected-count map) |\n| root-table count | `getAffectedRowCount(Item.class)` | `affectedRowCount(Item::class)` |\n\n`isModified` is only \"original vs modified immutable instance differ\" (generated IDs/versions/backrefs can trigger it), not persistence success. `isRowAffected` covers the whole graph's nonempty count map, not root acceptance. Neither is an acceptance check.\n\n**Create-if-absent by unique SKU / return existing ID on conflict:**\n\n- Put `@Key` (and `@KeyUniqueConstraint` matching real uniqueness) on SKU; use `SaveMode.INSERT_IF_ABSENT`.\n- `execute(ItemView.class).getModifiedView()` is **not enough**. The Fetcher/View overload runs a follow-up fetch for the *modified (inserted)* entity; on conflict there is no modified entity, so no existing-row ID is produced. The conflict result is partial and must not be converted blindly into a required-ID DTO.\n- Smallest safe approach: run `saveCommand(input).setMode(INSERT_IF_ABSENT).execute(ItemView.class).getModifiedView()` for the insert path; on conflict, do an explicit complete-key lookup by SKU for the existing ID.\n- **Never** switch to `UPSERT` just to obtain the ID — it violates the \"never update a conflicting row\" contract.\n- Concurrency caveat: between the failed insert and the follow-up key lookup, a concurrent transaction can delete/change the row, so the lookup may return nothing or stale data. Wrap insert+lookup in one transaction at adequate isolation (repeatable read with retry, or a locking read of the key row) and verify under concurrency. Dialect matters: native upsert may be unavailable (`QueryReason.UPSERT_NOT_SUPPORTED`, `KEY_UNIQUE_CONSTRAINT_REQUIRED`) and null/unique-constraint semantics affect behavior.\n\n**Remaining tasks:** none required for the question; only live verification against the actual schema/dialect (conflict test under concurrency) would remain.\n\n**Recommendation:** implement `@Key` + `INSERT_IF_ABSENT`, treat the modified view as insert-path-only, and add a transactional key lookup with a retry on the conflict path; test duplicate-SKU conflict concurrently on the target dialect."
+      },
+      {
+        "id": "trigger-version-boundary",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 8.162,
+        "exit_code": 0,
+        "context_bytes": 9838,
+        "task_sha256": "151f9c797f84b686a1606cbc39e03a595a99f4025169f13226b1a3b76852e08f",
+        "prompt_sha256": "41346e43f1c8e5c06779f3344f238beb941b0e65896e70ba2dcc5f17c178c970",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "561c393753d7ee3465953a1634b6f2cb493fecdc77d03f27dec871150a9fc0eb",
+        "answer": "Maximum steps for this agent have been reached; no further tool calls will be made. This task was analysis-only, and the answer is fully derivable from the supplied reference, so no files were read or edited.\n\n## Answer\n\n**1. Deprecation status (0.9.111)**\n\nNo. `TriggerType` in this release contains `BINLOG_ONLY`, `TRANSACTION_ONLY`, and `BOTH`, and **neither transaction mode is deprecated in 0.9.111**. Do not apply the deprecation policy from later releases retroactively.\n\n**2. Spring default trigger mode**\n\n`jimmer.trigger-type` defaults to `BINLOG_ONLY`. `TRANSACTION_ONLY` and `BOTH` are supported alternatives.\n\n**3. Two instances + direct JDBC importer**\n\n- Transaction triggers only observe mutations performed through Jimmer transactions, and only on the instance/JVM where those transactions run. They do **not** see writes made by the direct JDBC importer (which bypasses Jimmer), nor reliably cover the *other* instance's transactions for cross-instance consistency — so external/native writers need separate invalidation coverage.\n- Under `BINLOG_ONLY`, the enum itself installs no CDC. Before it can keep caches consistent, you need actual delivery of committed row and middle-table events into Jimmer BinLog: a working DB binlog/CDC pipeline feeding BinLog, correct event processing, and successful required cache invalidations with acknowledgement/checkpointing. Failed invalidations must retry/redeliver, and outage/catch-up needs an explicit stale-read/bypass/reset policy (TTL is only a backstop). This should be verified with external writers, two instances, rollback, restart, and replay.\n\n**4. Failed cache deletion during CDC — when to acknowledge**\n\nOnly after the required cache invalidation succeeds. The contract is: committed events → BinLog → **successful required cache invalidations** → acknowledgement/checkpoint. A failed deletion must not be acknowledged; it must be retried or redelivered (and only then checked off), since acknowledging early would leave stale cache entries with no redelivery path.\n\n## Work completed / remaining\n\n- Completed: interpreted the pinned reference against the four questions (deprecation, default, trigger coverage with two instances and a JDBC importer, CDC acknowledgement ordering).\n- Remaining: none for this question. No verification of the user's actual code/config was requested or performed, so if you want the answer applied to your project, the next step is to inspect the resolved `jimmer.*` config and confirm which write paths use Jimmer transactions vs. JDBC/binlog."
+      },
+      {
+        "id": "kotlin-ksp-construction",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 35.065,
+        "exit_code": 0,
+        "context_bytes": 8613,
+        "task_sha256": "d1f57767d8978e00d6590fd4df52e1b9827e7f1bc23468717e6bcc1ae4d05327",
+        "prompt_sha256": "f987536496c2e72b67eb4343d06c04eeb31f1a48175874be524c062d165a76c4",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "ae704a6b8d55299b39a01215d290c5aef6627747b602a0aec8c527321c370235",
+        "answer": "Maximum steps for this agent have been reached, so no tools are available — none were needed here: this is answerable from the supplied reference, and no repository work was performed. Complete answer below.\n\n## Why the build failed\n\nKSP in this release rejects **more than one** Jimmer immutable declaration per Kotlin source file. That covers `@Entity`, `@MappedSuperclass`, `@Embeddable`, and `@Immutable`. So two `@Entity` interfaces in one `.kt` file is exactly the case KSP errors on. This is a Kotlin/KSP restriction only — the Java APT path does not have it, so a `.java` file with multiple interfaces compiles fine.\n\n## How Kotlin models should be laid out\n\n- **One Jimmer model declaration per `.kt` file**: `Book.kt`, `BookStore.kt`, and separate files for any mapped superclass / embeddable / immutable type.\n- Keep the normal package naming; the generated factory (`Book { ... }`) is emitted into the model's package, and the older `new(Book::class).by { ... }` spelling goes into the same file.\n- Everything else (owning vs inverse, `@Key`, `@OnDissociate` on the owning reference only, nullability) is unchanged — this is purely a file-per-type constraint.\n\n## Creating an `example.Book` draft in 0.9.111\n\nBoth Kotlin spellings return the **immutable `Book`**, never the mutable draft:\n\n```kotlin\nimport example.Book\n\nval book = Book {\n    name = \"Jimmer Guide\"\n    price = BigDecimal(\"29.90\")\n}\n```\n\n```kotlin\nimport org.babyfish.jimmer.kt.new\nimport example.Book\n\nval book = new(Book::class).by {\n    name = \"Jimmer Guide\"\n    price = BigDecimal(\"29.90\")\n}\n```\n\n`Book { ... }` (KSP-generated factory in the model's package) is the preferred short form; `new(Book::class).by { ... }` with the generated `by` is the equivalent older spelling in the same file.\n\nJava equivalents against the APT-generated `Immutables` facade (same result; `BookDraft.$.produce(...)` is identical):\n\n```java\nBook book = Immutables.createBook(draft -> {\n    draft.setName(\"Jimmer Guide\");\n    draft.setPrice(new BigDecimal(\"29.90\"));\n});\n```\n\nIf the input is a generated DTO/Input, prefer its `toEntity()` or a direct save overload rather than hand-copying properties.\n\n## Jackson 2 module for standalone mappers\n\nThe Jackson 2 integration is the **`jimmer-jackson`** artifact, and the module you register on a standalone mapper is **`ImmutableModule`** (`org.babyfish.jimmer.jackson.ImmutableModule`):\n\n```java\nObjectMapper mapper = new ObjectMapper();\nmapper.registerModule(new ImmutableModule());\n```\n\n```kotlin\nval mapper = ObjectMapper().registerModule(ImmutableModule())\n```\n\nFramework starters auto-register it; you only name it explicitly when building your own mapped `ObjectMapper`.\n\n## Remaining tasks / next steps\n\n- Split any multi-model `.kt` files one type per file, then recompile through KSP (`scripts/compile.sh /path/to/project`) to confirm the generator passes — compilation is the check that this rule is satisfied.\n- No other follow-ups: the draft-factory spellings and the Jackson module answer are complete as given."
+      },
+      {
+        "id": "typed-tuple-aggregate",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 18.261,
+        "exit_code": 0,
+        "context_bytes": 9362,
+        "task_sha256": "d1c62ec472aef93d36d9b97f43ab1c60b00cce5b645a41b14999b3fbfa18a01a",
+        "prompt_sha256": "5dbd4d7e79e38acb559260d5718f6e246765f5f3a932114c231963bce67b6f2d",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "7a5ccceeeb839534f67702a3df6164dbf6826bcd203d187083e17f72b51a003d",
+        "answer": "**Yes** — 0.9.111 has `@TypedTuple`; **no** — `query.stream()` does not exist.\n\n## Tuple class\n\n```java\npackage com.example.dto;\n\nimport org.babyfish.jimmer.sql.TypedTuple;\nimport java.math.BigDecimal;\n\n@TypedTuple\npublic class StoreBookStats {\n\n    private final long storeId;\n    private final long bookCount;\n    private final BigDecimal minPrice; // nullable: prices may be null\n\n    public StoreBookStats(long storeId, long bookCount, BigDecimal minPrice) {\n        this.storeId = storeId;\n        this.bookCount = bookCount;\n        this.minPrice = minPrice;\n    }\n\n    public long getStoreId() { return storeId; }\n    public long getBookCount() { return bookCount; }\n    public BigDecimal getMinPrice() { return minPrice; }\n}\n```\n\nAPT generates `StoreBookStatsMapper` — one fluent method per declared component, **no separate root entry point**; the chain starts at the static method named after the first declared component. That's the \"no hand-written mapping, no Lombok\" path, and it exists because Java select expressions have no arbitrary `.as(\"alias\")` API.\n\n## Query\n\n```java\nvar b = BookTable.$;\n\nreturn sqlClient.createQuery(b)\n    .groupBy(b.store().id())\n    .select(\n        StoreBookStatsMapper\n            .storeId(b.store().id())\n            .bookCount(Expression.rowCount())\n            .minPrice(b.price().min())\n    )\n    .orderBy(b.store().id().asc())\n    .execute();   // List<StoreBookStats>\n```\n\nNotes:\n- Grouped columns must come first in the selection; `StoreBookStatsMapper` starting with `storeId` matches that ordering. Add `having(...)` in the same chain when filtering groups.\n- If you can't add a tuple class, `Tuple3<Long, Long, BigDecimal>` with `select(b.store().id(), Expression.rowCount(), b.price().min())` is the fallback; `Tuple2..TupleN` projections are supported.\n- Add tenant/authorization predicates before `groupBy`; `eqIf`/`likeIf` skip absent operands rather than producing `IS NULL`.\n\n## stream()\n\nNo JDBC `stream()` query API in 0.9.111 — don't call `.execute().stream()` and claim bounded DB consumption. For bounded traversal:\n\n```java\nquery.forEach(128, row -> { ... });   // fetch batches; returns after consumption\n```\n\nIt returns only after consumption, so keep the connection/transaction alive for the call. Batch size does not bound a single root's collection, and fetcher batching is not JDBC driver fetch size. For resumable work, use an ID-keyset page loop.\n\n**Status:** no tool calls were made or needed; this is a reference/API answer. Nothing remains outstanding — if you want, the next step is compiling the tuple class so APT emits `StoreBookStatsMapper` and confirming generated SQL has one grouped aggregate statement."
+      }
+    ]
+  },
+  "facades": {
+    "passed": 28,
+    "total": 28,
+    "pass_rate": 1.0,
+    "median_seconds": 16.27,
+    "mean_context_bytes": 13330.714285714286,
+    "notes": [
+      "Model opencode-go/deepseek-v4.1-flash, repeats=1, after the facade/version-agnostic skill cleanup.",
+      "All cases ran in one round except kotlin-ksp-construction and typed-tuple-aggregate, which were rerun after two evidence-driven guidance fixes and are the graded answers here.",
+      "verify.log covers the graded Java/Kotlin answers and StorePatch DTO (JDK 21, Gradle 8.12.1): the Java answer uses Immutables.createBook and Tables.BOOK_TABLE and passed the H2 checks.",
+      "Residual nit: the typed-tuple answer declared `int bookCount` while Expression.rowCount() is Long; this case is not compiled, so it is recorded rather than fixed in the answer."
+    ],
+    "runs": [
+      {
+        "id": "java-create-and-query",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 26.558,
+        "exit_code": 0,
+        "context_bytes": 18944,
+        "task_sha256": "bc625b6769e7ba5c8de1eb905eda4c49518fb1b6094f3fca5e3871958b3eeb21",
+        "prompt_sha256": "329a081914b498ac77ec15cf7eb3183a071be4f014ed6c5cff0e4e7fa34ddeeb",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "65d468bd1b3f566a5c6109a58934935e0d50ced3c589477276dda01e737de8b9",
+        "answer": "Maximum steps for this agent have been reached; no tools are available, so nothing was written to disk, compiled, or run this turn. The code below is the intended deliverable, provided as text and **not compile-verified in this session**.\n\n## Summary of work so far\n\nNo implementation work was completed — the step limit was hit at first dispatch before any files were created or checks run. Based on the supplied references, the correct 0.9.111 shape is: strict create via `SaveMode.INSERT_ONLY` + `execute(BookView.class).getModifiedView()`, and page search via `likeIf` + `(name, id)` ordering + `fetchPage`. That is reproduced here:\n\n```java\npackage example;\n\nimport java.math.BigDecimal;\n\nimport org.babyfish.jimmer.Page;\nimport org.babyfish.jimmer.sql.JSqlClient;\nimport org.babyfish.jimmer.sql.ast.mutation.SaveMode;\n\nimport example.dto.BookView;\n\npublic final class CanaryJava {\n\n    private CanaryJava() {}\n\n    /** Strict create: INSERT_ONLY never upserts; a duplicate @Key name fails. */\n    public static BookView create(JSqlClient sql, String name, BigDecimal price, String tenantId) {\n        return sql.saveCommand(\n                Immutables.createBook(draft -> {\n                    draft.setName(name);\n                    draft.setPrice(price);\n                    draft.setTenantId(tenantId);\n                })\n        )\n        .setMode(SaveMode.INSERT_ONLY)\n        .execute(BookView.class)\n        .getModifiedView();\n    }\n\n    /** Optional name filter; stable order (name, id); exact total via fetchPage. */\n    public static Page<BookView> search(JSqlClient sql, String name, int page, int size) {\n        var table = Tables.BOOK_TABLE;\n        return sql.createQuery(table)\n                .where(table.name().likeIf(name))\n                .orderBy(table.name().asc(), table.id().asc())\n                .select(table.fetch(BookView.class))\n                .fetchPage(page, size);\n    }\n}\n```\n\n**Can a teammate call `result.isAccepted()`?** No. `isAccepted`/`getIsAccepted` does not exist in 0.9.111 on Java `SimpleSaveResult` (nor Kotlin `KSimpleSaveResult`); that acceptance protocol is newer and will not compile here. On this release use the thrown exception from `INSERT_ONLY` for strict-create success and `getModifiedEntity()`/`getModifiedView()`, `isModified()`, `getAffectedRowCount(Book.class)` for inspection — remembering `isModified` is not a persistence-success flag.\n\n## Remaining tasks / not completed\n\n- File was not created; facade spelling (`Immutables.createBook`, draft setters including `setTenantId`), `Tables.BOOK_TABLE`, and `BookView`->`fetch(Class)` compatibility were not checked against actual generated sources.\n- No compilation, no save/search runtime test.\n\n## Recommendation\n\nIn a fresh session, write the file to `src/main/java/example/CanaryJava.java`, run the project's documented compile step, then smoke-test: duplicate-name create must fail, null-name search must return the stable-ordered page. If facade names differ in the generated sources, adjust those call sites first."
+      },
+      {
+        "id": "kotlin-conditional-and-query",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 17.422,
+        "exit_code": 0,
+        "context_bytes": 13559,
+        "task_sha256": "b76a8fb810b1d7e27e633cc01167ebfacb4f32460eb066ddc363706e83e67d96",
+        "prompt_sha256": "2e363b154763afc6c28d98fc20fcbdcda87400621924dba6da7fa2937d7707de",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "4719da60d45af2e4b916aa4fecc4be48e2c832287d6a26489a087c5b6a795cd9",
+        "answer": "Maximum steps for this agent have been reached, so tools are disabled; I cannot compile or run anything. Below is the deliverable as text — the code is written but unverified against the compiler.\n\n## Code\n\n```kotlin\npackage example\n\nimport example.dto.BookView\nimport org.babyfish.jimmer.Page\nimport org.babyfish.jimmer.sql.kt.KSqlClient\nimport org.babyfish.jimmer.sql.kt.ast.expression.*\nimport org.babyfish.jimmer.sql.kt.ast.table.*\nimport java.math.BigDecimal\n\nobject CanaryKotlin {\n\n    fun increasePrice(\n        sql: KSqlClient,\n        id: Long,\n        expectedVersion: Int,\n        delta: BigDecimal\n    ): Boolean {\n        val changed = sql.createUpdate(Book::class) {\n            set(table.price, table.price + delta)\n            set(table.version, table.version + 1)\n            where(table.id eq id, table.version eq expectedVersion)\n        }.execute()\n        return changed == 1\n    }\n\n    fun search(sql: KSqlClient, name: String?, page: Int, size: Int): Page<BookView> =\n        sql.createQuery(Book::class) {\n            where(table.name `like?` name)\n            orderBy(table.name.asc(), table.id.asc())\n            select(table.fetch(BookView::class))\n        }.fetchPage(page, size)\n}\n```\n\n## API choice\n\n**`increasePrice` — `createUpdate` (typed bulk DML), not graph save.** The condition and the arithmetic are pushed into one SQL `UPDATE`: `SET price = price + ?, version = version + 1 WHERE id = ? AND version = ?`. The database makes the read-modify-write atomic, so there is no load-then-save race and no need for retry logic. `execute()` returns the affected-row count; since `id` is the PK at most one row can match, so `1` means the version matched and `0` means stale or missing — exactly the required `false` in both cases. A graph `save` would need a pre-read or different version semantics, and this release has no update-returning variant, so the explicit predicate/increment is the correct fit. Deliberate trade-off: bulk update does **not** run graph-save preprocessors/interceptors; this is intended, since the operation is a single conditional statement with no per-row draft hook.\n\n**`search` — optional `like?` plus `fetchPage`, not a fetcher-only read.** The backticked `` `like?` `` skips the predicate entirely when `name` is null (it is not `IS NULL`), so one method serves both filtered and unfiltered calls. Ordering by `name` then `id` gives a stable total order with a unique tie-breaker, which keeps paging deterministic when names repeat. `fetchPage(page, size)` is the choice over `fetchSlice`/`forEach` because `Page<BookView>` is the required return type and needs the exact total, which triggers Jimmer's count query.\n\n## Remaining (not done — blocked by step limit)\n\n1. Compile with `scripts/compile.sh` for the project to confirm generated symbols (`table`, `fetch`, `like?`, `eq`, `asc`) resolve for KSP output.\n2. Verify generated SQL: one `UPDATE` for `increasePrice`, and `WHERE name LIKE ?` present/absent for the two `search` cases.\n3. Test the zero-row branch (wrong version, missing id → `false`; matching → `true` and incremented version).\n\nRecommended next step: run the skill's compile script against the project, then a small test round-tripping `increasePrice` with a stale and a fresh version."
+      },
+      {
+        "id": "kotlin-patch-presence",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 18.939,
+        "exit_code": 0,
+        "context_bytes": 20043,
+        "task_sha256": "7546ec3db58b74a70e64448f38da5b0472f0eed70116db45b20e8178813fb777",
+        "prompt_sha256": "b8ba944f244e23b9c5c81cb428231b7095ec339459043d1fd6ffd0ecc84f7b8e",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "98918184bd7e593e11e7b4fa88fdf691d36ecf41cb8f47da83b4f61ae7f5d410",
+        "answer": "Maximum steps for this agent have been reached, so this is a text-only final answer. No files were changed; the deliverable below is the complete solution. Remaining: nothing beyond running a compile/JVM presence test in the target project, which I could not execute.\n\n## DTO (`src/main/dto/example/BookStore.dto`)\n\n```dto\nexport example.BookStore\n\ndynamic input StorePatch {\n    id            // required: dynamic does not optionalize required scalars\n    name?         // absent -> unloaded (preserved); explicit null -> error (entity name is non-null)\n    books? {      // absent -> unloaded (membership untouched); [] -> loaded empty (clear)\n        id\n    }\n}\n```\n\n`books` is a non-null `List<Book>`, so `?` is required to allow omission. `dynamic` is what makes an absent `name` stay unloaded instead of loading null.\n\n## Owning-side dissociation (so clearing links does not delete books)\n\n`Book.store` is the nullable owning reference; removing a child from the inverse collection is a dissociation, and in 0.9.111 `NONE` is treated as `CHECK` (throws `SaveException.CannotDissociateTarget`):\n\n```kotlin\n@ManyToOne\n@OnDissociate(DissociateAction.SET_NULL)   // books stay, store_id -> NULL\nval store: BookStore?\n```\n\n`DELETE` there would delete the books — contrary to the requirement. Per-command override with `setDissociateAction` is the alternative when the annotation cannot be used.\n\n## Kotlin save\n\n```kotlin\nval patch = storePatch.toEntity()\n\nval result = sqlClient.save(patch) {\n    setMode(SaveMode.UPDATE_ONLY)\n    setAssociatedModeAll(AssociatedSaveMode.REPLACE) // explicit: [] clears, omitted stays untouched\n}\nval saved = result.modifiedEntity\n\n// or, if the caller needs the View shape:\nval view = sqlClient.saveCommand(storePatch) {\n    setMode(SaveMode.UPDATE_ONLY)\n    setAssociatedModeAll(AssociatedSaveMode.REPLACE)\n}.execute(StoreView::class).modifiedView\n```\n\n`REPLACE` with an omitted collection leaves membership alone; `REPLACE` with `books: []` removes the links. `MERGE` would retain them, so do not rely on the `SaveMode`-taking convenience overload's association default. Write `REPLACE` explicitly. `REPLACE` on a `[]` collection dissociates the removed children — with `@OnDissociate(SET_NULL)` the `Book` rows survive and `store_id` becomes `NULL`.\n\n## Jackson 2\n\nRegister `org.babyfish.jimmer.jackson.ImmutableModule` on the standalone `ObjectMapper` (not `ImmutableModuleV2`/`V3`, which belong to the newer streaming package):\n\n```kotlin\nval mapper = ObjectMapper().registerModule(ImmutableModule())\n```\n\nVerify omission / explicit null / `[]` / ID list through this real mapper and `toEntity()` before asserting presence semantics; `dynamic` guarantees only omission behavior, not collection persistence, which the associated mode above decides."
+      },
+      {
+        "id": "save-result-contract",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 14.262,
+        "exit_code": 0,
+        "context_bytes": 12384,
+        "task_sha256": "08fb8c19db98e1f014877eb8f3278d04aff5cb1320ba004aff2f414cdd746b8b",
+        "prompt_sha256": "a0ec275c82c95bfe594defaef4456a50514fb2f85321457fda334826caa52682",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "54da2446d5348793e4eaeed63a21ac884baad607d4771cc6b1b4e4798e15fa8b",
+        "answer": "All three answers, then the safe approach.\n\n## Result APIs in 0.9.111\n\n| API | Java `SimpleSaveResult` | Kotlin `KSimpleSaveResult` | Meaning |\n|---|---|---|---|\n| `isAccepted` / `getIsAccepted` | **Absent** | **Absent** | No acceptance protocol in this release |\n| `isModified` | `isModified()` | `isModified` | Original vs modified immutable instances differ (generated IDs/versions/back-refs can make this true). **Not** a persistence-success flag |\n| `isRowAffected` | **Absent** | `isRowAffected` | `affectedRowCountMap.isNotEmpty()`, including graph effects. **Not** root acceptance |\n| Root-table count | `getAffectedRowCount(Item.class)` | `affectedRowCount(Item::class)` | Count for that entity table only |\n\nSo: only `isModified` exists in both, `isRowAffected` is Kotlin-only, `isAccepted` exists in neither. Don't call Java's `getAffectedRowCount(...)` on `KSimpleSaveResult`, and don't pass `Item::class.java` to Kotlin's native method. Neither flag substitutes for acceptance.\n\n## Is `execute(ItemView.class).getModifiedView()` enough?\n\n**No — not for the conflict path.** Fetcher/View execution returns the required shape of the *saved* root after a successful save (possibly a follow-up fetch). `modifiedEntity` is not automatically a full row: generated IDs and known save values may be present, unloaded properties still throw. A conflicting `INSERT_IF_ABSENT` is **not** a general existing-row fetch — there is no guarantee the View gives you the pre-existing row. Do not blindly convert the partial conflict result into a required-ID DTO.\n\n## Smallest safe approach\n\n1. Save with `SaveMode.INSERT_IF_ABSENT` and a `@Key` on SKU (identity by natural key). Absent → insert; conflicting root → **no update**. Not `INSERT_ONLY` (that's a constraint error, deliberately), not `UPSERT` (that updates).\n2. Make `@KeyUniqueConstraint` match the real DB unique index. Null semantics (`isNullNotDistinct`) and MySQL's extra constraints (`noMoreUniqueConstraints`) affect native-upsert behavior — test the conflict on the actual dialect.\n3. Insert path: take the generated ID from `modifiedEntity`/`modifiedView`.\n4. Conflict path where the caller needs the existing ID: do an **explicit complete-key lookup by SKU** in the required transaction scope, verified under concurrency. Never switch a strict no-update contract to `UPSERT` just to retrieve an ID.\n5. Inspect `QueryReason`: `KEY_UNIQUE_CONSTRAINT_REQUIRED`, `UPSERT_NOT_SUPPORTED`, `TRIGGER`, `INTERCEPTOR`, `OPTIMISTIC_LOCK` explain extra preselection.\n\n```java\nvar result = sqlClient.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)   // not UPSERT, not INSERT_ONLY\n    .execute(ItemView.class);\nItemView saved = result.getModifiedView(); // insert path only\n```\n\n```kotlin\nval result = sqlClient.saveCommand(input) {\n    setMode(SaveMode.INSERT_IF_ABSENT)\n}.execute(ItemView::class)\nval saved = result.modifiedView // insert path only\n```\n\n## Concurrency caveat\n\nThe conditional insert and the follow-up SKU lookup are separate operations. Between them another transaction can delete or change the row, so the lookup can return a different row or none at all. Without an explicit transaction/isolation policy the only authoritative guard is the unique constraint at commit; whatever you return on conflict must be defined for that isolation level, and the behavior must be verified under concurrent inserts on the real dialect. Also, don't infer whole-graph success from a single affected count."
+      },
+      {
+        "id": "trigger-version-boundary",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 12.283,
+        "exit_code": 0,
+        "context_bytes": 9874,
+        "task_sha256": "151f9c797f84b686a1606cbc39e03a595a99f4025169f13226b1a3b76852e08f",
+        "prompt_sha256": "9f6e7cf7498363f395ab128f5ecc036dad9752677c9ce78792602aaaf87da358",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "4148cfb2c282c81ab57511d98a426a38f7a195b0c5f620cafa9a577158761229",
+        "answer": "**Maximum steps for this agent have been reached** — no tools were used beyond the supplied reference; the answer below is derived entirely from it.\n\n## Answers\n\n### 1. Deprecation status in 0.9.111\n**Neither `TRANSACTION_ONLY` nor `BOTH` is deprecated in this release.** `TriggerType` contains `BINLOG_ONLY`, `TRANSACTION_ONLY`, and `BOTH`, and the reference explicitly says the deprecation policy from later releases must **not** be applied retroactively. So all three modes are legitimate here; choose based on evidence, not on a presumed deprecation.\n\n### 2. Spring default trigger mode\n`jimmer.trigger-type` defaults to **`BINLOG_ONLY`**. (The client-builder default is the same `BINLOG_ONLY`.) `TRANSACTION_ONLY` and `BOTH` are supported alternatives.\n\n### 3. Two instances + direct JDBC importer: what do transaction triggers observe?\n- Transaction triggers observe **only mutations performed through Jimmer's transaction-aware machinery** — i.e., writes executed inside a Jimmer transaction on that instance. The framework's transaction-aware cache operator must be preserved; a custom listener is not a substitute.\n- The **direct JDBC importer is invisible to transaction triggers.** It does not go through Jimmer's transaction events, so it needs **separate invalidation coverage** (or those caches will go stale). This is the same gap the trigger-policy table flags: `TRANSACTION_ONLY` requires Jimmer-transaction mutations, and external/native writers require their own coverage.\n- With **two instances**, transaction triggers are local to the writing instance; they do not propagate invalidation to the other instance's in-memory caches. Cross-instance consistency needs a shared channel — the binlog/CDC path (or another explicit invalidation mechanism), not the transaction channel alone.\n- With `BOTH`, Java/Kotlin `getTriggers(true)` selects the **transaction** channel and the default/nontransaction channel is **binlog**; don't accidentally double-register a listener on both.\n- Also note: **events raised inside a transaction are not proof of commit.** Rollback and post-commit invalidation behavior must be verified before trusting a listener (otherwise a rolled-back write can invalidate caches erroneously, or an uncommitted event can be treated as durable).\n\n### Before BINLOG_ONLY can keep caches consistent\nThe enum **does not install CDC**. `BINLOG_ONLY` is only valid when **committed row and middle-table events actually reach Jimmer BinLog**. Required evidence/infrastructure:\n- Real CDC delivery from the database (including the JDBC importer's committed writes) into Jimmer's BinLog listener, for both row tables and middle tables.\n- Working invalidation wiring such that all required cache invalidations run successfully.\n- A retry/redelivery path for failed invalidations.\n- An explicit outage/catch-up policy (stale-read, bypass, or reset), with **TTL only as a backstop**, never the primary consistency mechanism.\n- Test coverage for: external writers, two instances, rollback, restart, and replay.\n\n### 4. CDC acknowledgement with a failed cache deletion\nAcknowledgement happens **only after the full successful chain**: committed events → BinLog → **successful required cache invalidations** → acknowledgement/checkpoint. Since the deletion **failed**, you **must not acknowledge**. The failure must go to **retry/redeliver** until invalidation succeeds, then acknowledge. Acknowledging on failed invalidation would let the checkpoint advance past an event whose caches were never invalidated, guaranteeing persistent stale reads.\n\n## Work summary\n- Interpreted the trigger-deprecation, default-mode, and CDC-acknowledgement questions against the supplied `jimmer-caching` and `jimmer-config` references for v0.9.111.\n- Cross-checked the `BINLOG_ONLY`/`TRANSACTION_ONLY`/`BOTH` evidence requirements and the `getTriggers(true)` channel semantics.\n\n## Remaining tasks\n- None for this analysis-only request; no code was edited, as none was requested.\n\n## Recommendations\n- If you actually rely on `BINLOG_ONLY`, verify committed events reach Jimmer BinLog end to end (including the JDBC importer) before enabling caches; otherwise leave those properties uncached or choose the mode you can fully support.\n- For the two-instance setup, plan cross-instance invalidation explicitly (binlog channel) rather than assuming transaction triggers propagate.\n- Inspect effective client configuration at runtime, not just YAML, and check abandoned-cache diagnostics rather than assuming a configured cache is active."
+      },
+      {
+        "id": "kotlin-ksp-construction",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 7.924,
+        "exit_code": 0,
+        "context_bytes": 8757,
+        "task_sha256": "d1f57767d8978e00d6590fd4df52e1b9827e7f1bc23468717e6bcc1ae4d05327",
+        "prompt_sha256": "1d64a3c6ca1594a87d365b95aef890d30aa4944f6973c25f6b80f40c370ffe13",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "c2723c57e14110a6ec5392d9c2e6721ccab5d848ed1e32ca6dc14c80b3ac2e50",
+        "answer": "Maximum steps for this agent have been reached, so I can't run tools or inspect the repo further. This was an analysis-only request, so no code was edited. Answer from the supplied reference:\n\n## Why the build failed\n\nIn Jimmer 0.9.111, **KSP rejects more than one immutable model declaration per Kotlin file**. The check covers `@Entity`, `@MappedSuperclass`, `@Embeddable`, and `@Immutable` types — putting two `@Entity` interfaces in one `.kt` file fails KSP generation. It's a generator limitation of this release, not the runtime.\n\n## How Kotlin models should be laid out\n\n- **One Jimmer model declaration per Kotlin source file.** Two entities → two files.\n- Keep model interfaces in their normal (often common) package so the generated facades are emitted there; `Book { ... }` lives in the model's package.\n- Same file rule applies in both languages: use separate files in both Java and Kotlin source sets.\n- Compile with KSP/APT to verify, and test a representative save when keys/ownership change — compilation doesn't prove DB constraints.\n\n## Creating an `example.Book` draft in 0.9.111\n\nKotlin (both return the immutable `Book`, never a draft):\n```kotlin\n// generated factory in the model's package\nval book = Book {\n    name = \"Jimmer Guide\"\n    price = BigDecimal(\"29.90\")\n}\n\n// equivalent older spelling; emitted into the same file\nval book2 = new(Book::class).by {\n    name = \"Jimmer Guide\"\n    price = BigDecimal(\"29.90\")\n}\n```\nwith `org.babyfish.jimmer.kt.new`.\n\nJava equivalents (APT-generated facades; `Immutables`/`Tables`/`TableExes`/`Fetchers` are generated per common package):\n```java\nBook book = Immutables.createBook(draft -> {\n    draft.setName(\"Jimmer Guide\");\n    draft.setPrice(new BigDecimal(\"29.90\"));\n});\n\n// identical $-style call\nBook book2 = BookDraft.$.produce(draft -> {\n    draft.setName(\"Jimmer Guide\");\n    draft.setPrice(new BigDecimal(\"29.90\"));\n});\n```\n\n## Jackson 2 module\n\n`org.babyfish.jimmer.jackson.ImmutableModule`:\n```java\nObjectMapper mapper = new ObjectMapper().registerModule(new ImmutableModule());\n```\nThe newer suffixed modules do not exist in this release.\n\n## Remaining work / next steps\n\nNothing was completed against a real project — I only answered from the provided reference. If you want this verified against the actual workspace, the next step is to split the offending `.kt` file into one entity per file, rebuild KSP, and confirm the generated `Book { ... }` factory and `ImmutableModule` class are on the 0.9.111 classpath."
+      },
+      {
+        "id": "typed-tuple-aggregate",
+        "repeat": 1,
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "seconds": 16.27,
+        "exit_code": 0,
+        "context_bytes": 9754,
+        "task_sha256": "d1c62ec472aef93d36d9b97f43ab1c60b00cce5b645a41b14999b3fbfa18a01a",
+        "prompt_sha256": "dfed0a06fbf7477e17171fead16aca352b807cf7179dabfb82192fbcd3b60e3c",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "646dfc025e7ac8fb6070655736e0f6fac3b6d6896a430f9ccb9b54d686ac3c34",
+        "answer": "**Step limit notice:** The maximum steps for this agent have been reached, so no tools were used — this answer is derived entirely from the supplied reference material. Nothing was edited or compiled.\n\n## Answer\n\n**Yes, 0.9.111 has a typed tuple API — two forms:**\n\n1. `Tuple2..TupleN` for ad-hoc projections.\n2. `@TypedTuple` on a Java/Kotlin class; APT/KSP generate a `<Name>Mapper` with exactly one fluent method per declared component (no separate root entry point — the chain starts with the static method named after the first declared component).\n\n**Tuple class (no Lombok, plain Java):**\n\n```java\n@TypedTuple\npublic class StoreAggregate {\n    private long storeId;\n    private int bookCount;\n    private BigDecimal minPrice;\n\n    public long getStoreId() { return storeId; }\n    public void setStoreId(long storeId) { this.storeId = storeId; }\n    public int getBookCount() { return bookCount; }\n    public void setBookCount(int bookCount) { this.bookCount = bookCount; }\n    public BigDecimal getMinPrice() { return minPrice; }\n    public void setMinPrice(BigDecimal minPrice) { this.minPrice = minPrice; }\n}\n```\n\n**Query** — grouping, ordering, and the client stay on the query; the mapper chain goes into `select(...)`:\n\n```java\nvar b = Tables.BOOK_TABLE;\nreturn sqlClient.createQuery(b)\n    .groupBy(b.storeId())\n    .orderBy(b.storeId().asc())\n    .select(\n        StoreAggregateMapper\n            .storeId(b.storeId())\n            .bookCount(Expression.rowCount())\n            .minPrice(b.price().min())\n    )\n    .execute();\n```\n\nAd-hoc alternative returning a tuple directly:\n\n```java\n.select(b.storeId(), Expression.rowCount(), b.price().min())  // -> Tuple3<Long, Integer, BigDecimal>\n```\n\n**Is there `query.stream()`?** No. This release has **no JDBC `stream()` query API**. Do not call `.execute().stream()` and claim bounded database consumption. Use Java `query.forEach(128, consumer)` (Kotlin `query.forEach(batchSize = 128) { ... }`), which processes results in fetch batches and returns only after consumption — keep the connection/transaction alive for the call. Batch size does not bound a single root's enormous collection. A bounded ID-keyset page loop is the resumable alternative.\n\n## Remaining / not verified\n- Exact `@TypedTuple` component-declaration shape (fields vs. accessors) isn't specified in the supplied reference; I did not inspect the installed 0.9.111 jar.\n- No compile run (`scripts/compile.sh`) or generated-mapper inspection was performed.\n\n## Recommendation\nCompile against the installed 0.9.111 with the skill's compile script; if mapper generation rejects the class shape, check the release's `TypedTupleTest` for the canonical declaration. For large result sets, use `forEach(128, ...)` rather than attempting a stream."
+      }
+    ]
+  }
+}

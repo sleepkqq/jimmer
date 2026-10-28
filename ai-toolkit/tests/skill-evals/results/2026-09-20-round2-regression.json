@@ -1,0 +1,661 @@
+{
+  "grading_method": "Independent agent grading, hidden condition labels and shuffled answer order; source-verified whole assertions, including code validity. No post-unmask grade changes.",
+  "baseline": {
+    "passed": 52,
+    "total": 64,
+    "pass_rate": 0.8125,
+    "median_seconds": 9.6485,
+    "mean_context_bytes": 15279.625,
+    "runs": [
+      {
+        "id": "cache-cdc",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.801,
+        "exit_code": 0,
+        "context_bytes": 8750,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "8dfee9a9a84f7afe667a0bd7b5f57381cfdbd6d93c89932f4dcfa153c56c1991",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "a3e350788a442264dd0d042818f1f4e067f08cd05673fcf2e6544a5427a668b4",
+        "answer": "Use `BINLOG_ONLY`, not `TRANSACTION_ONLY`. Wire all committed database changes\u2014including the scheduled importer\u2019s writes, inserts/updates/deletes, and association-table events\u2014into Jimmer\u2019s `BinLog` with complete old/new row images.\n\nChanging the enum alone is insufficient: it does not install CDC, remove existing transaction listeners, or make existing cache entries trustworthy. Before enabling cached reads, establish CDC catch-up, use a fresh cache namespace (or bypass caching), and verify freshness.\n\nRollout checks:\n\n- Test both application instances.\n- Validate entity and association changes from Jimmer and the importer.\n- Test consumer restart, replay/redelivery, Redis outage, and recovery.\n- Confirm cache reads/fills are bypassed while readiness is false, while invalidations still run.\n- Verify an in-flight database load cannot repopulate stale local or Redis cache after invalidation.\n- For user-filtered entities, test two filter contexts and configure multi-view caching or leave those properties uncached.\n\nIf Redis deletion/invalidation fails while processing a CDC record, propagate the failure and do **not** acknowledge/checkpoint the record. Retry it safely, tolerating redelivery. TTL is only a fallback, not a substitute for successful invalidation."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.374,
+        "exit_code": 0,
+        "context_bytes": 18335,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "6063581f06f87e67b0d2637ab0ceefed4cd1c657fa1e352bbdf10c33f0999da8",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "236b627e6ef7aafd89d7294b703c09d1650a353ccce994334b02ef031ac4ba9f",
+        "answer": "No. `INSERT_IF_ABSENT` rejects a conflicting root (`isAccepted() == false`) and does not return the existing row\u2014even when a view is requested.\n\nSmallest correct flow:\n\n```java\nSaveResult<Item> result = sql.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute(ItemView.class);\n\nif (result.isAccepted()) {\n    return result.getModifiedView();\n}\nreturn itemRepository.findBySku(input.getSku()); // returns generated ID\n```\n\nThe SKU must have a database unique constraint. The insert and conflict lookup are separate statements, so under concurrency another transaction can affect visibility between them. Use an appropriate transaction isolation/locking or retry policy; the unique constraint remains the final race-safety mechanism."
+      },
+      {
+        "id": "external-version",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 10.931,
+        "exit_code": 0,
+        "context_bytes": 14041,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "47658276d9794660653b5a4d40bc6cbbb61c1a3f495c771b86dadea8b80c6ee7",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "1f3887ca5a6d8db4b17e6d7d2fdc42ac253b36aca49b781018517f4db5f3601f",
+        "answer": "```kotlin\nval result = sqlClient.save(incomingCatalogRevision) {\n    setMode(SaveMode.UPSERT)\n    setVersionMode(VersionMode.ASSIGNMENT)\n    setUpdateWhere(CatalogRevision::class) {\n        newNonNull(CatalogRevision::version) gt table.version\n    }\n}\n\nif (result.isAccepted) {\n    val saved = result.modifiedEntity\n    // Consume the accepted insert or newer-version update.\n} else {\n    // Normal rejection: the existing row has an equal or newer version.\n    // Do not treat this as an optimistic-lock exception.\n}\n```\n\n`VersionMode.ASSIGNMENT` writes the supplied external `@Version` value without implicit version checking or incrementing. The `setUpdateWhere` predicate allows updates only when the incoming version is greater than the stored version. Missing IDs are still inserted by `UPSERT`.\n\nThe version mode is root-only; it is not propagated to associated child objects. Configure child saves separately if they require external-version behavior."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 12.103,
+        "exit_code": 0,
+        "context_bytes": 16106,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "d7fbdfc9141697b27cd15e619153716b44ca4bdfe9ccdad022132ec97752c024",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "f1b56df869a7feb99d3f138dec0c0dc17163349bb252305b1ef804ac062d19ad",
+        "answer": "`@OnDissociate` belongs on the owning, non-null `Bin.warehouse` association\u2014not on the inverse `Warehouse.bins` collection:\n\n```java\n// Warehouse\n@OneToMany(mappedBy = \"warehouse\")\nList<Bin> bins();\n```\n\n```java\n// Bin\n@ManyToOne\n@OnDissociate(DissociateAction.DELETE)\nWarehouse warehouse();\n```\n\nWhen a save replaces `Warehouse.bins`, Jimmer treats removed bins as dissociated and, because of `DELETE`, issues ORM `DELETE` statements for those `Bin` rows.\n\nYou do **not** need to change the existing database foreign key from `RESTRICT` to `ON DELETE CASCADE`. The annotation controls Jimmer\u2019s dissociation behavior; it does not configure or imply the database FK\u2019s `ON DELETE` action.\n\n`ON DELETE CASCADE` affects what happens when the **warehouse row itself** is deleted. It is separate from removing a bin from a saved collection. Keep `RESTRICT` if parent deletion should be prevented while bins exist; use database cascade only if parent deletion should independently remove them."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.468,
+        "exit_code": 0,
+        "context_bytes": 10141,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "0c7565c7f5ae72fadfae87105863d978a0274712aa10b52c16d557cbb8df1b20",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "de38847dfb6988885661ad5696013c38e29cddddc4bda1520429dd4a8b1a1eb4",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: after deserializing `{\"id\":\"\u2026\",\"note\":null,\"bins\":[]}`, `toEntity()` must show `note` loaded with `null` and `bins` loaded as an empty collection; when either property is omitted, it must remain unloaded."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 10.042,
+        "exit_code": 0,
+        "context_bytes": 24250,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "14c10163bc7b920360064f289a319f9bdc479c8aabc8ba2f22e067f75bdc74c6",
+        "passed": 5,
+        "total": 5,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "31def89f9fcd87f9c93b076876dba468b1f7385c99543a84461fdce741f3ee6d",
+        "answer": "```kotlin\nrepositories {\n    mavenCentral()\n    maven(\"https://jitpack.io\")\n}\n\nval jimmerVersion = \"1.0.1\"\n\ndependencies {\n    implementation(\"com.github.sleepkqq.jimmer:quarkus-jimmer:$jimmerVersion\")\n    ksp(\"com.github.sleepkqq.jimmer:jimmer-ksp:$jimmerVersion\")\n}\n```\n\nConfigure Kotlin mode:\n\n```yaml\nquarkus:\n  jimmer:\n    language: kotlin\n```\n\nFor entities in a separate model JAR, make the dependency visible to Jandex:\n\n```yaml\nquarkus:\n  index-dependency:\n    model:\n      group-id: com.example\n      artifact-id: example-model\n```\n\nWith:\n\n```yaml\nquarkus:\n  jimmer:\n    cache:\n      guard:\n        enabled: true\n```\n\nthe application must provide exactly one CDI `CacheReadiness` implementation:\n\n- `ready()` \u2014 whether the application considers source data fresh;\n- `namespace()` \u2014 a nonblank, process-stable cache namespace.\n\nWhen not ready, Jimmer bypasses cache reads and fills; invalidations still run and failures propagate. The guard does not install or operate a CDC consumer.\n\n`QuarkusRedisCacheTracker.isReady()` only proves local Redis invalidation-subscription readiness. It does **not** prove that the CDC consumer has caught up with the database or that cached data is globally fresh.\n\nCurrent Quarkus constraint-translation defaults are:\n\n- `constraint-violation-translatable=false`\n- `sql-state-exception-translator=true`"
+      },
+      {
+        "id": "inheritance",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.154,
+        "exit_code": 0,
+        "context_bytes": 19017,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "89b715c282e23fb76e552282227b18e86df3e9629cb0c2656eff33365596add1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9cf7509289478332157d6c0eee6b838557ad608050ca4eabfaaad3bc9a2aac11",
+        "answer": "```java\n@Entity\n@Inheritance(strategy = InheritanceType.SINGLE_TABLE)\npublic interface Asset {\n    @Id long id();\n\n    @Discriminator\n    String kind();\n\n    String name();\n}\n\n@Entity\n@DiscriminatorValue(\"BOOK\")\npublic interface BookAsset extends Asset {\n    String isbn();\n}\n\n@Entity\n@DiscriminatorValue(\"TOOL\")\npublic interface ToolAsset extends Asset {\n    int inspectionInterval();\n}\n```\n\n`kind` is the physical discriminator column. Jimmer derives it from the runtime subtype; it is read-only. In a `SINGLE_TABLE` schema, subtype-only columns such as `isbn` and `inspection_interval` must be nullable at the database level, even though their subtype properties are non-null in the entity contracts.\n\nA root DTO can expose subtype fields with type branches:\n\n```text\nexport com.example.catalog.Asset\n\nAssetView {\n    id\n    name\n    #types {\n        #exhaustive\n        BookAsset {\n            isbn\n        }\n        ToolAsset {\n            inspectionInterval\n        }\n    }\n}\n```\n\n`#exhaustive` makes DTO compilation fail if a concrete subtype is omitted.\n\nNo. Changing an existing asset\u2019s discriminator value does not switch its subtype. The discriminator is derived and cannot be assigned as an ordinary property. An intentional type transition requires an exact subtype save and explicitly enabling `setTypeChangeAllowed(true)`; it must not be enabled globally merely to resolve a discriminator mismatch."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.266,
+        "exit_code": 0,
+        "context_bytes": 11597,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "0308a4f7d7f3b2e441bd6ce11f0a9649c4ae0f9215c9a4099438f6c2f65b112e",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          false
+        ],
+        "answer_sha256": "398d1f4ade224bb25d40803f70717e48d81dc714daa426195fd79e719bbf4b51",
+        "answer": "```java\nWarehouseTable warehouse = WarehouseTable.$;\nWarehouseArchiveTable archive = WarehouseArchiveTable.$;\n\nWarehouseTable source = sqlClient\n    .createBaseQuery(warehouse)\n    .where(warehouse.active().eq(true)) // example filter\n    .select(warehouse)                   // preserves WarehouseTable type\n    .asBaseTable();\n\nList<Long> insertedIds = sqlClient\n    .createInsert(archive, source)\n    .set(archive.id(), source.id())\n    .set(archive.name(), source.name())\n    .onConflictDoNothing(archive.id())\n    .returning(archive.id())\n    .execute();\n```\n\nThis uses a typed `INSERT ... SELECT` path, so filtered rows are not loaded as application entities. `onConflictDoNothing(archive.id())` skips rows whose archive ID already exists.\n\nThe target must map to one physical table. A joined-inheritance target is not accepted; single-table subtype targets are supported.\n\n`returning(archive.id())` returns IDs for inserted rows only, but Jimmer does not guarantee that their order matches source-row order."
+      },
+      {
+        "id": "cache-cdc",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.164,
+        "exit_code": 0,
+        "context_bytes": 8750,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "8dfee9a9a84f7afe667a0bd7b5f57381cfdbd6d93c89932f4dcfa153c56c1991",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "647e0b8b047416f2558e9dcbc33f061094f143224f377c888f5a750150d089d9",
+        "answer": "Use `BINLOG_ONLY`; `TRANSACTION_ONLY` is deprecated and unsuitable for writes from the SQL importer.\n\nBefore enabling caches:\n\n- Connect committed CDC events\u2014including importer writes and association/middle-table changes\u2014to Jimmer\u2019s `BinLog`, with required old/new row images.\n- Run two application instances against the shared Redis cache.\n- Establish CDC catch-up and use a fresh cache namespace, or bypass/disable caching until freshness is confirmed.\n- Test insert, update, delete, association changes, consumer restart/replay, Redis outage/recovery, and both instances.\n\nChanging the enum alone is **not enough**. `BINLOG_ONLY` does not install CDC, and existing transaction listeners or stale cache entries can remain problematic.\n\nIf Redis deletion/invalidation fails while processing a CDC record, propagate the failure and **do not acknowledge/checkpoint the record**. Retry it safely; tolerate redelivery. Do not resume cached traffic merely because Redis reconnects or responds to `PING`. TTL is only a fallback, not reliable consistency."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 6.086,
+        "exit_code": 0,
+        "context_bytes": 18335,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "6063581f06f87e67b0d2637ab0ceefed4cd1c657fa1e352bbdf10c33f0999da8",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "ede8f2bf7aa7c4509355168a197efc11e0442be3547a8c926de062e781b8a1c8",
+        "answer": "No. `INSERT_IF_ABSENT` rejects a conflicting root (`isAccepted() == false`) and does not return the existing row, even with `execute(ItemView.class)`. The \u201cnever query after save\u201d rule has this explicit exception.\n\n```java\nSaveResult<Item> result = sqlClient.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute();\n\nif (result.isAccepted()) {\n    return result.getModifiedEntity(); // new ID\n}\n\nreturn itemRepository.findBySku(input.getSku()); // existing ID\n```\n\nThe SKU must have a database unique constraint. The insert and conflict lookup are separate statements, so the flow needs an explicit transaction/isolation policy. Under concurrent deletes or replacement, the lookup may observe a changed state; handle a missing result or retry according to the service\u2019s consistency requirements."
+      },
+      {
+        "id": "external-version",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 8.105,
+        "exit_code": 0,
+        "context_bytes": 14041,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "47658276d9794660653b5a4d40bc6cbbb61c1a3f495c771b86dadea8b80c6ee7",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "0fd53366383db60c07d3541ebaa9870bd1011f4cb219c102ae807d36a994bc6a",
+        "answer": "```kotlin\nval result = sqlClient.save(catalogRevision) {\n    setMode(SaveMode.UPSERT)\n    setVersionMode(VersionMode.ASSIGNMENT)\n    setUpdateWhere(CatalogRevision::class) {\n        newNonNull(CatalogRevision::version) gt table.version\n    }\n}\n\nif (result.isAccepted) {\n    val saved = result.modifiedEntity\n    // Consume the inserted or updated revision.\n} else {\n    // Incoming revision is older/equal: normal rejected result.\n    // No optimistic-lock exception is thrown.\n}\n```\n\n`VersionMode.ASSIGNMENT` writes the supplied external `@Version` value without implicit incrementing or optimistic checking. The `setUpdateWhere` predicate applies only to the update branch: missing IDs are inserted, while existing rows update only when the incoming version is greater than the stored version.\n\nVersion mode is root-only; it is not propagated to associated child objects. Configure version/update behavior separately for child saves if required."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 11.177,
+        "exit_code": 0,
+        "context_bytes": 16106,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "d7fbdfc9141697b27cd15e619153716b44ca4bdfe9ccdad022132ec97752c024",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "d56c5f8f09436fc2d2daa703f637517965f1847e77ce193990d0fb43a68498cb",
+        "answer": "Put `@OnDissociate(DissociateAction.DELETE)` on the owning, non-null `Bin.warehouse` association\u2014not on `Warehouse.bins`:\n\n```java\n// Warehouse\n@OneToMany(mappedBy = \"warehouse\")\nList<Bin> bins();\n\n// Bin\n@ManyToOne\n@OnDissociate(DissociateAction.DELETE)\nWarehouse warehouse();\n```\n\nWhen a replacement save removes a `Bin` from the loaded `Warehouse.bins` collection, Jimmer treats that as dissociation and physically deletes the removed `Bin` row.\n\nYou do **not** need to change the existing database FK from `RESTRICT` to `ON DELETE CASCADE` for this operation. Jimmer explicitly issues the child `DELETE` before/independently of the FK restriction.\n\n`ON DELETE CASCADE` is separate database behavior: it applies when the referenced `Warehouse` row itself is deleted. Add it only if database-level cascading for warehouse deletion is intentionally required and compatible with the migration/schema policy."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 6.544,
+        "exit_code": 0,
+        "context_bytes": 10141,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "0c7565c7f5ae72fadfae87105863d978a0274712aa10b52c16d557cbb8df1b20",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "4730d56bb5943441f29dcf6e1d733d8cec8778aba24f428be3a3ac5bb1fbedac",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: deserialize `{\"id\":\"\u2026\",\"note\":null,\"bins\":[]}` and assert `toEntity()` marks `note` and `bins` as loaded, with `note == null` and an explicitly loaded empty `bins`; omitting either field must leave it unloaded."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 13.203,
+        "exit_code": 0,
+        "context_bytes": 24250,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "14c10163bc7b920360064f289a319f9bdc479c8aabc8ba2f22e067f75bdc74c6",
+        "passed": 5,
+        "total": 5,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "3ffa0c515892e61db4995b4eaa182bf5c5e4650cd7f3a3b5ff952b86d0fc498d",
+        "answer": "```kotlin\nrepositories {\n    mavenCentral()\n    maven(\"https://jitpack.io\")\n}\n\nval jimmerVersion = \"1.0.1\"\n\ndependencies {\n    implementation(\"com.github.sleepkqq.jimmer:quarkus-jimmer:$jimmerVersion\")\n    ksp(\"com.github.sleepkqq.jimmer:jimmer-ksp:$jimmerVersion\")\n}\n```\n\nConfigure Kotlin:\n\n```yaml\nquarkus:\n  jimmer:\n    language: kotlin\n```\n\nFor entities in a separate model JAR, make that dependency visible to Jandex:\n\n```yaml\nquarkus:\n  index-dependency:\n    model:\n      group-id: com.example\n      artifact-id: example-model\n```\n\nWith:\n\n```yaml\nquarkus:\n  jimmer:\n    cache:\n      guard:\n        enabled: true\n```\n\nthe application must provide exactly one CDI\n`io.quarkiverse.jimmer.runtime.cache.CacheReadiness` provider. It must expose\n`ready()` and a nonblank, process-stable `namespace()`.\n\nThe guard gates cache reads and cache fills: when not ready, Jimmer loads from\nthe database without reading or populating caches. Cache invalidations still\nrun and failures propagate. The application owns the readiness decision; the\nextension does not provide CDC.\n\n`QuarkusRedisCacheTracker.isReady()` only proves local Redis invalidation\nsubscription readiness. It does **not** prove that the CDC consumer has caught\nup or that the cache is globally fresh.\n\nCurrent Quarkus constraint-translation defaults are:\n\n- `constraint-violation-translatable=false`\n- `sql-state-exception-translator=true`"
+      },
+      {
+        "id": "inheritance",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.829,
+        "exit_code": 0,
+        "context_bytes": 19017,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "89b715c282e23fb76e552282227b18e86df3e9629cb0c2656eff33365596add1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "027d1ac034bbe076a1a81ae5e0dbff8e85a3b22b245b4c37ad0df63506126fec",
+        "answer": "```java\n@Entity\n@Inheritance(strategy = InheritanceType.SINGLE_TABLE)\npublic interface Asset {\n    @Id long id();\n    @Discriminator String kind();\n    String name();\n}\n\n@Entity\n@DiscriminatorValue(\"BOOK\")\npublic interface BookAsset extends Asset {\n    String isbn();\n}\n\n@Entity\n@DiscriminatorValue(\"TOOL\")\npublic interface ToolAsset extends Asset {\n    int inspectionInterval();\n}\n```\n\n`Asset` owns the single table and discriminator column. `BookAsset.isbn` and `ToolAsset.inspectionInterval` are subtype-only columns, so both must be nullable in the database even though their Jimmer properties are non-null within the corresponding subtype.\n\nA root DTO can expose subtype fields explicitly:\n\n```text\nexport com.example.Asset\n\nAssetView {\n    id\n    name\n    #types {\n        #exhaustive\n        BookAsset { isbn }\n        ToolAsset { inspectionInterval }\n    }\n}\n```\n\n`#exhaustive` makes DTO compilation fail when a concrete subtype is omitted. Without it, omitted types use the implicit common-fields branch.\n\nNo. Writing a different discriminator does not safely change an existing entity\u2019s subtype. The discriminator is read-only in the mapping and is derived from the runtime entity type. Type transitions are disabled by default; an intentional transition requires enabling type changes and using exact save matching, not manually assigning the discriminator."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 12.066,
+        "exit_code": 0,
+        "context_bytes": 11597,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "0308a4f7d7f3b2e441bd6ce11f0a9649c4ae0f9215c9a4099438f6c2f65b112e",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "a8f45f0ee15c0b4e237df3d7c31e27e156acc5191d3c2b1f2376474334e6963f",
+        "answer": "```java\nWarehouseTable warehouse = WarehouseTable.$;\nWarehouseArchiveTable archive = WarehouseArchiveTable.$;\n\nWarehouseTable source = sqlClient\n    .createBaseQuery(warehouse)\n    .where(warehouse.active().eq(true)) // filtered rows\n    .select(warehouse)                  // preserves WarehouseTable type\n    .asBaseTable();\n\nList<Long> insertedIds = sqlClient\n    .createInsert(archive, source)\n    .set(archive.id(), source.id())\n    .set(archive.name(), source.name())\n    .onConflictDoNothing(archive.id())\n    .returning(archive.id())\n    .execute();\n```\n\nWith a capable dialect, this is executed as a typed `INSERT ... SELECT`; entities are not materialized in application memory. The source must provide compatible `id` and `name` columns.\n\nA joined-inheritance target is not accepted: entity targets must map to one physical table (single-table subtypes are allowed).\n\n`insertedIds` has no guaranteed source-row order."
+      }
+    ]
+  },
+  "updated": {
+    "passed": 54,
+    "total": 64,
+    "pass_rate": 0.84375,
+    "median_seconds": 8.831,
+    "mean_context_bytes": 16141.625,
+    "runs": [
+      {
+        "id": "cache-cdc",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 6.651,
+        "exit_code": 0,
+        "context_bytes": 9471,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "e295a9bb5b49a70d2bffe36a070f247df37ba997f20c915373221440dd4d1d41",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "138cc91e9de8b98c98b3770294e5116c4b2236ad321d6590a8e36d8f48b52c57",
+        "answer": "Use `BINLOG_ONLY` with a real committed-change delivery pipeline covering **all writers**, including the scheduled SQL importer:\n\n```text\nDB changes \u2192 CDC row/middle-table events \u2192 Jimmer BinLog\n\u2192 successful cache invalidation \u2192 acknowledge/checkpoint\n```\n\nConfigure Redis cache tiers with the existing Quarkus cache integration. If using the readiness guard, provide exactly one `CacheReadiness` CDI provider that gates both cache reads and fills until CDC freshness is established. Keep a stable namespace, and reset/change it after an unrecoverable source gap. Redis subscription readiness alone is insufficient.\n\nChanging the enum is **not enough**. Migrate/remove existing transaction listeners, ensure CDC emits complete old/new row images, account for warm entries, and verify both application instances and external importer writes. Roll out with cross-instance entity and association tests, consumer restart/replay, Redis subscription loss/recovery, and a load held across invalidation to ensure stale fills cannot return.\n\nIf Redis deletion fails while processing a CDC record, do **not acknowledge or checkpoint the record**. Propagate the failure and retry/redeliver it; duplicate processing must be safe. Cached traffic should remain bypassed while readiness or freshness is unknown."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 13.518,
+        "exit_code": 0,
+        "context_bytes": 19363,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "0129cf8377178c17774d784643ff024ac4767f26a734c8418a3919f1522b9cb0",
+        "passed": 2,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          false,
+          true
+        ],
+        "answer_sha256": "cbf80c68b36b4177482b5791e7c0d2150ecf6feeec0fed8ea3a0fd610446b640",
+        "answer": "No. `INSERT_IF_ABSENT` never updates a conflicting item, but its rejected result does not contain that item\u2019s generated ID\u2014even when a view is requested.\n\n```java\nSaveResult<Item> result = sql.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute();\n\nif (result.isAccepted()) {\n    return result.getModifiedEntity().getId();\n}\nreturn itemRepository.findIdBySku(input.getSku())\n    .orElseThrow(); // conflict row must now exist\n```\n\nThe lookup after a rejected insert is the documented exception to the \u201cdon\u2019t save, then query\u201d optimization rule. If the service needs the full existing item, query a view by SKU instead.\n\nConcurrency caveat: the insert and subsequent lookup are separate statements. Use an actual unique database constraint on SKU; otherwise concurrent requests can both observe absence. If the returned row must be guaranteed to correspond to this operation under concurrent deletion or unusual transaction isolation, define an explicit transaction/isolation or retry policy."
+      },
+      {
+        "id": "external-version",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 6.961,
+        "exit_code": 0,
+        "context_bytes": 15069,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "70ed007672dafed6f4f1ca4bd23711d032a8a84658fadcf5b20b101dadc21e59",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "5f6fff61c6a3ca2c0da57150d706361f3b6ec1b429fd62f3cdc2168526d09013",
+        "answer": "```kotlin\nval result = sqlClient.save(suppliedCatalogRevision) {\n    setMode(SaveMode.UPSERT)\n    setVersionMode(VersionMode.ASSIGNMENT)\n\n    setUpdateWhere(CatalogRevision::class) {\n        newNonNull(CatalogRevision::version) gt table.version\n    }\n}\n\nif (result.isAccepted) {\n    val saved = result.modifiedEntity\n    // Consume the inserted row or the accepted newer revision.\n} else {\n    // Normal rejection: an existing row has an equal or newer version.\n    // Do not treat this as an optimistic-lock exception.\n}\n```\n\n`VersionMode.ASSIGNMENT` writes the supplied external version without implicit checking or incrementing. The `setUpdateWhere` predicate applies only to the update branch; a missing ID is still inserted. `VersionMode` is root-only and is not propagated to child/associated objects."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 6.701,
+        "exit_code": 0,
+        "context_bytes": 16106,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "d7fbdfc9141697b27cd15e619153716b44ca4bdfe9ccdad022132ec97752c024",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "1b5ca3109091ae1821c0c4281152f069e6a60f23626a57852a3b4165cd0560a9",
+        "answer": "Place `@OnDissociate(DissociateAction.DELETE)` on the owning `Bin.warehouse` property\u2014not on the inverse `Warehouse.bins` collection:\n\n```java\n// Warehouse\n@OneToMany(mappedBy = \"warehouse\")\nList<Bin> bins();\n```\n\n```java\n// Bin\n@ManyToOne\n@OnDissociate(DissociateAction.DELETE)\nWarehouse warehouse();\n```\n\nWhen a saved replacement removes a `Bin` from `Warehouse.bins`, Jimmer dissociates that child and deletes the `Bin` row through ORM operations. This does **not** depend on the database foreign key\u2019s `ON DELETE` action.\n\nTherefore, an existing `RESTRICT` FK does not need to change for this replacement behavior. It only affects deleting a `Warehouse` directly: `RESTRICT` prevents deletion while bins reference it. Change the FK to `ON DELETE CASCADE` only if physical warehouse deletion should be delegated to the database and automatically delete its bins."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 14.579,
+        "exit_code": 0,
+        "context_bytes": 11053,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "3097723e167279076b98d09a9ccf56d1aa6ef5c0ab6d1ec157e14dadd47af2d1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "3fea73af6541d6f8132af3bae220e3bf8cdd9c98a19bf5d1eccd5a56e3fb569c",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: deserialize `{\"id\":\"\u2026\",\"note\":null,\"bins\":[]}`, then assert `toEntity()` has `note` loaded as `null` and `bins` loaded as an empty collection; omitting either property must leave it unloaded."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 13.424,
+        "exit_code": 0,
+        "context_bytes": 24971,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "5fdff6874df23639841044c2411393f011186f7355339a747e6086cbbd7234fb",
+        "passed": 5,
+        "total": 5,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "a2eb8c2d2d5a7261d87ef8a6a887cd5ccd1a7f94210859d6dd06835f6c33d981",
+        "answer": "```kotlin\nrepositories {\n    mavenCentral()\n    maven(\"https://jitpack.io\")\n}\n\nval jimmerVersion = \"1.0.1\"\n\ndependencies {\n    implementation(\"com.github.sleepkqq.jimmer:quarkus-jimmer:$jimmerVersion\")\n    ksp(\"com.github.sleepkqq.jimmer:jimmer-ksp:$jimmerVersion\")\n}\n```\n\nConfigure Kotlin processing and Jimmer:\n\n```yaml\nquarkus:\n  jimmer:\n    language: kotlin\n    cache:\n      guard:\n        enabled: true\n```\n\nFor entities in a separate model JAR, make that artifact visible to Jandex:\n\n```yaml\nquarkus:\n  index-dependency:\n    model:\n      group-id: com.example\n      artifact-id: example-model\n```\n\nWith `quarkus.jimmer.cache.guard.enabled=true`, provide exactly one CDI bean implementing:\n\n```text\nio.quarkiverse.jimmer.runtime.cache.CacheReadiness\n```\n\nIt must provide `ready()` and a nonblank, process-stable `namespace()`. The guard bypasses cache reads and cache fills while not ready, but invalidations continue and failures propagate. The application must determine source/CDC freshness; the extension does not install or catch up a CDC consumer.\n\n`QuarkusRedisCacheTracker.isReady()` only proves local Redis invalidation-subscription readiness. It does **not** prove that the CDC consumer has caught up or that cached data is globally fresh.\n\nCurrent Quarkus constraint-translation defaults are:\n\n```text\nconstraint-violation-translatable = false\nsql-state-exception-translator = true\n```"
+      },
+      {
+        "id": "inheritance",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 8.191,
+        "exit_code": 0,
+        "context_bytes": 19017,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "89b715c282e23fb76e552282227b18e86df3e9629cb0c2656eff33365596add1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "f554104d80f4f16e493ce966915e2e85d64c582fcaf03d93a00aa329194e77d6",
+        "answer": "```java\n@Entity\n@Inheritance(strategy = InheritanceType.SINGLE_TABLE)\npublic interface Asset {\n    @Id long id();\n\n    @Discriminator\n    String kind();\n\n    String name();\n}\n\n@Entity\n@DiscriminatorValue(\"BOOK\")\npublic interface BookAsset extends Asset {\n    String isbn();              // database column must be nullable\n}\n\n@Entity\n@DiscriminatorValue(\"TOOL\")\npublic interface ToolAsset extends Asset {\n    Integer inspectionInterval(); // nullable database column\n}\n```\n\n`@Discriminator` is a physical, read-only discriminator property. Use stable explicit `@DiscriminatorValue`s. With `SINGLE_TABLE`, all subtype-only columns share one table and therefore must be nullable in the database, even if the subtype property is non-null in its Jimmer contract (use primitive types only where the mapping/schema supports the required nullability).\n\nA root DTO can expose subtype branches:\n\n```dto\nexport com.example.catalog.Asset\n\nAssetView {\n    id\n    name\n    #types {\n        #exhaustive\n        BookAsset { isbn }\n        ToolAsset { inspectionInterval }\n    }\n}\n```\n\n`#exhaustive` makes DTO compilation fail when a concrete subtype is omitted. Without it, omitted types use the common/default branch.\n\nNo. Changing `kind` (the discriminator) does not switch an existing entity\u2019s subtype; saves derive it from the runtime entity type. Type transitions are disabled by default and, when intentionally enabled, require `setTypeChangeAllowed(true)` plus exact save matching."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 1,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 7.119,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "4a754c40a6328949ae76b91e3df4dbdce0f05a25f8356ceff2a342357dcffb4a",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "9e43474f302766b0a50336a9da8dd85cc3a8cdad5846ca0fa4138829038a6f3f",
+        "answer": "```java\nWarehouseTable w = WarehouseTable.$;\nWarehouseArchiveTable a = WarehouseArchiveTable.$;\n\nWarehouseTable source = sqlClient.createBaseQuery(w)\n    .where(w.active().eq(true)) // additional filters as needed\n    .select(w)\n    .asBaseTable();\n\nList<Long> insertedIds = sqlClient\n    .createInsert(a, source)\n    .set(a.id(), source.id())\n    .set(a.name(), source.name())\n    .onConflictDoNothing(a.id())\n    .returning(a.id())\n    .execute();\n```\n\nOn a dialect supporting insert-select, this copies rows without loading entities into application memory. With an unsupported dialect, Jimmer may materialize the source, so verify the actual execution plan if constant application memory is required.\n\nThe target must map to one physical table; joined-inheritance targets are not accepted. Returned IDs include only inserted rows, and their order is unspecified\u2014it does not necessarily match source order."
+      },
+      {
+        "id": "cache-cdc",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 8.291,
+        "exit_code": 0,
+        "context_bytes": 9471,
+        "task_sha256": "bac6241682a60b115a3e0010d0e4d82eac748abfa9c343b4e2eaff8cf5417769",
+        "prompt_sha256": "e295a9bb5b49a70d2bffe36a070f247df37ba997f20c915373221440dd4d1d41",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "44a6a4d8c9a1bf06a776b444d36f362467e32821d2ef63774924b89792646c05",
+        "answer": "Use `BINLOG_ONLY` with a real committed-change/CDC pipeline covering **all writers**, including the scheduled SQL importer. Configure cache readiness so caches are bypassed for both reads and fills until CDC is caught up and Redis invalidation subscription is trusted. Use a fresh cache namespace/generation if recovery cannot prove freshness.\n\nChanging the enum is **not enough**. Migrate/remove existing transaction listeners, ensure CDC delivers the required old/new row and association changes, wire readiness and Redis recovery behavior, and account for warm cache entries.\n\nIf Redis deletion fails while processing a CDC record, **do not acknowledge or checkpoint the record**. Propagate the failure and retry/redeliver it; duplicate processing must be safe. TTL is only a fallback, not consistency.\n\nRollout checks:\n\n- Verify both application instances observe entity and association invalidations.\n- Write through the importer and confirm both instances stop serving stale data.\n- Test consumer restart, replay, Redis disconnect/reconnect, and cache namespace reset.\n- Hold a database load across invalidation and ensure it cannot repopulate stale L1/L2.\n- Confirm cache traffic resumes only after CDC catch-up/readiness\u2014not merely after Redis PING.\n- Test relevant filter contexts separately if filtered entities use property caches."
+      },
+      {
+        "id": "insert-if-absent-result",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 6.386,
+        "exit_code": 0,
+        "context_bytes": 19363,
+        "task_sha256": "cb1c1a428e0aa0a58c95d7b212ad7f841d70f6660f066708976ad170fe6d8800",
+        "prompt_sha256": "0129cf8377178c17774d784643ff024ac4767f26a734c8418a3919f1522b9cb0",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          false,
+          true,
+          true
+        ],
+        "answer_sha256": "c99b5ffa2d33df3bbb8f3fd024c577ad8be4b0c4e32fcb7fe5abaa8e4e0d6b0e",
+        "answer": "No. `INSERT_IF_ABSENT` rejects a conflicting insert and does **not** return the existing row, even with `execute(ItemView.class)`. A separate lookup is required.\n\n```java\nvar result = sql.saveCommand(input)\n    .setMode(SaveMode.INSERT_IF_ABSENT)\n    .execute();\n\nif (result.isAccepted()) {\n    return result.getModifiedEntity().getId();\n}\nreturn sql.createQuery(ItemTable.class)\n    .where(ItemTable::sku, eq(input.getSku()))\n    .select(ItemTable::id)\n    .fetchOne();\n```\n\nThe SKU must have a database unique constraint. The insert and conflict lookup are separate statements: under concurrency, the conflicting row may be deleted or otherwise change between them. Use an appropriate transaction/isolation policy and retry or handle \u201cnot found\u201d if that matters. Do not use `UPSERT` or self-assignment, because that can update the existing item and trigger update side effects."
+      },
+      {
+        "id": "external-version",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 15.637,
+        "exit_code": 0,
+        "context_bytes": 15069,
+        "task_sha256": "663604760f3525ef6338a16994122df242502ad6a267ade7775806970ab09ad1",
+        "prompt_sha256": "70ed007672dafed6f4f1ca4bd23711d032a8a84658fadcf5b20b101dadc21e59",
+        "passed": 4,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "3dff660c099fbd67b54cee5469a4a2228a3948594717af161c28b1d40dd59cee",
+        "answer": "```kotlin\nval result = sql.save(catalogRevision) {\n    setMode(SaveMode.UPSERT)\n    setVersionMode(VersionMode.ASSIGNMENT)\n    setUpdateWhere(CatalogRevision::class) {\n        newNonNull(CatalogRevision::version) gt table.version\n    }\n}\n\nif (result.isAccepted) {\n    val saved = result.modifiedEntity\n    // Consume the accepted revision.\n} else {\n    // Existing row has an equal or newer version; normal rejection.\n}\n```\n\n`UPSERT` inserts a missing ID and updates an existing row only when the incoming `version` is greater. `VersionMode.ASSIGNMENT` stores the supplied external revision and does not perform Jimmer\u2019s implicit optimistic-lock check or increment. Therefore, older revisions are rejected normally (`isAccepted == false`), rather than throwing an optimistic-lock exception.\n\nThe update condition applies only to the update branch; a missing row is still inserted. `VersionMode` is root-only and is not propagated to child objects. Configure child save/version behavior separately if needed."
+      },
+      {
+        "id": "dissociation",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 9.371,
+        "exit_code": 0,
+        "context_bytes": 16106,
+        "task_sha256": "1e255398bb24aab906d2a3aee39594a5a83896c58731dc6f4bb88925b7b29da4",
+        "prompt_sha256": "d7fbdfc9141697b27cd15e619153716b44ca4bdfe9ccdad022132ec97752c024",
+        "passed": 3,
+        "total": 3,
+        "assertion_passes": [
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "2c5f3803e7f6347006af5a0210fffde372f7dae449f66f151294fe568576eda3",
+        "answer": "`@OnDissociate` belongs on the owning, non-null `Bin.warehouse()` association\u2014not on `Warehouse.bins()`:\n\n```java\n// Warehouse\n@OneToMany(mappedBy = \"warehouse\")\nList<Bin> bins();\n\n// Bin\n@ManyToOne\n@OnDissociate(DissociateAction.DELETE)\nWarehouse warehouse();\n```\n\nNo database FK change is required for replacing a loaded `bins` collection. Jimmer\u2019s ORM save operation detects removed bins and explicitly deletes those `Bin` rows; the existing `RESTRICT` FK does not prevent that child deletion.\n\n`ON DELETE CASCADE` is separate SQL behavior: it controls what happens when a `Warehouse` row itself is deleted. Add it only if deleting a warehouse should be cascaded by the database:\n\n```sql\nFOREIGN KEY (warehouse_id)\nREFERENCES warehouse(id)\nON DELETE CASCADE\n```\n\nDo not put `@OnDissociate` on the inverse collection, and do not infer database cascade behavior from the annotation."
+      },
+      {
+        "id": "dto-patch",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 5.171,
+        "exit_code": 0,
+        "context_bytes": 11053,
+        "task_sha256": "4b9ef4b6aa2dd703c7c07d6a301bf223f0ae18a6c0fe0f49afff4f59e9b73ab4",
+        "prompt_sha256": "3097723e167279076b98d09a9ccf56d1aa6ef5c0ab6d1ec157e14dadd47af2d1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "2b6d86b6bb8c62864a9cffffbde0c054a4c31095132f280fbcbbbf03a335a599",
+        "answer": "```dto\nexport com.example.inventory.Shelf\n\ndynamic input ShelfPatch {\n    id\n    note\n    bins? {\n        id\n    }\n}\n```\n\nJSON round-trip assertion: deserializing `{\"id\":\"...\",\"note\":null,\"bins\":[]}` must produce a loaded-null `note` and a loaded-empty `bins`; omitting either property must leave that property unloaded."
+      },
+      {
+        "id": "quarkus-current",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 15.541,
+        "exit_code": 0,
+        "context_bytes": 24971,
+        "task_sha256": "2b390560da946a8f4d3d448b36c11a878d8f3f3506c1129670b5b67d0a544291",
+        "prompt_sha256": "5fdff6874df23639841044c2411393f011186f7355339a747e6086cbbd7234fb",
+        "passed": 5,
+        "total": 5,
+        "assertion_passes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "ce10c4204d56c92a6315acd292537ada359c7a8b023c3489340dd8cf07f8cfeb",
+        "answer": "```kotlin\nrepositories {\n    mavenCentral()\n    maven(\"https://jitpack.io\")\n}\n\nval jimmerVersion = \"1.0.1\"\n\ndependencies {\n    implementation(\"com.github.sleepkqq.jimmer:quarkus-jimmer:$jimmerVersion\")\n    ksp(\"com.github.sleepkqq.jimmer:jimmer-ksp:$jimmerVersion\")\n}\n```\n\nConfigure Kotlin with:\n\n```yaml\nquarkus:\n  jimmer:\n    language: kotlin\n```\n\nFor entities in a separate model JAR, make that dependency visible to Jandex:\n\n```yaml\nquarkus:\n  index-dependency:\n    model:\n      group-id: com.example\n      artifact-id: example-model\n```\n\nWith `quarkus.jimmer.cache.guard.enabled=true`, provide exactly one CDI `io.quarkiverse.jimmer.runtime.cache.CacheReadiness` bean. Its `ready()` method must report application-defined cache/source readiness, and `namespace()` must return a nonblank, process-stable namespace.\n\nThe guard bypasses cache reads and fills while not ready; cache invalidations still execute and failures must propagate. It does not install or manage CDC.\n\n`QuarkusRedisCacheTracker.isReady()` only indicates local Redis invalidation-subscription readiness. It does **not** prove that the CDC consumer has caught up or that cached data is globally fresh.\n\nCurrent Quarkus constraint-translation defaults are:\n\n- `constraint-violation-translatable=false`\n- `sql-state-exception-translator=true`"
+      },
+      {
+        "id": "inheritance",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 11.629,
+        "exit_code": 0,
+        "context_bytes": 19017,
+        "task_sha256": "e88aa4fdd0ab756605e0e3f43829c4eea4dbcad048fcd1a20d629c1dfc731876",
+        "prompt_sha256": "89b715c282e23fb76e552282227b18e86df3e9629cb0c2656eff33365596add1",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          false,
+          true,
+          true,
+          true
+        ],
+        "answer_sha256": "10de0daf4eed1e3a1d4eb16f92f1217508c505f1b1e0f819f7768c1ecd6194e2",
+        "answer": "```java\n@Entity\n@Inheritance(strategy = InheritanceType.SINGLE_TABLE)\npublic interface Asset {\n    @Id long id();\n\n    @Discriminator\n    String kind();\n\n    String name();\n}\n\n@Entity\n@DiscriminatorValue(\"BOOK\")\npublic interface BookAsset extends Asset {\n    String isbn();\n}\n\n@Entity\n@DiscriminatorValue(\"TOOL\")\npublic interface ToolAsset extends Asset {\n    int inspectionInterval();\n}\n```\n\n`kind` is the physical discriminator column. Jimmer derives it from the runtime subtype; it is read-only. In a `SINGLE_TABLE` schema, subtype-only columns such as `isbn` and `inspection_interval` must be database-nullable, even though their subtype properties are non-null in the entity contract.\n\nA root DTO can expose subtype fields with type branches:\n\n```text\nexport com.example.catalog.Asset\n\nAssetView {\n    id\n    name\n    #types {\n        #exhaustive\n        BookAsset {\n            isbn\n        }\n        ToolAsset {\n            inspectionInterval\n        }\n    }\n}\n```\n\n`#exhaustive` requires every concrete subtype branch. Omitting `BookAsset` or `ToolAsset` therefore fails DTO compilation.\n\nNo. Changing only `kind` cannot switch an existing entity to another subtype. The discriminator is not an assignable type-transition mechanism. Type changes are disabled by default and, when intentionally enabled, require `setTypeChangeAllowed(true)` together with exact save matching; use this only for an explicit, validated subtype transition."
+      },
+      {
+        "id": "insert-from-select",
+        "repeat": 2,
+        "model": "openai/gpt-5.6-luna#low",
+        "seconds": 11.973,
+        "exit_code": 0,
+        "context_bytes": 14083,
+        "task_sha256": "86e84882b7a74246a8436a8f0bd28a8bc47ce089b247dd4472588a5cb590a59c",
+        "prompt_sha256": "4a754c40a6328949ae76b91e3df4dbdce0f05a25f8356ceff2a342357dcffb4a",
+        "passed": 3,
+        "total": 4,
+        "assertion_passes": [
+          true,
+          true,
+          false,
+          true
+        ],
+        "answer_sha256": "960d2685018c3359b770dc54391b0932e77aa1bd648199764d67adb2a7b18539",
+        "answer": "```java\nWarehouseTable sourceTable = WarehouseTable.$;\nWarehouseArchiveTable targetTable = WarehouseArchiveTable.$;\n\nWarehouseTable source = sqlClient\n    .createBaseQuery(sourceTable)\n    .where(sourceTable.active().eq(true)) // example filter\n    .select(sourceTable)\n    .asBaseTable();\n\nList<Long> insertedIds = sqlClient\n    .createInsert(targetTable, source)\n    .set(targetTable.id(), source.id())\n    .set(targetTable.name(), source.name())\n    .onConflictDoNothing(targetTable.id())\n    .returning(targetTable.id())\n    .execute();\n```\n\nThe direct table selection preserves typed access (`source.id()`, `source.name()`). On a supporting dialect this is executed as an insert-select, without materializing entities; verify the dialect/SQL if constant application memory is required.\n\n`WarehouseArchive` must map to one physical table. Joined-inheritance targets are not supported. Returned IDs have no guaranteed order and need not match source order."
+      }
+    ]
+  }
+}
