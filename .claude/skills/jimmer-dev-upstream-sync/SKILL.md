@@ -87,7 +87,7 @@ Known carriers of fork hooks and the invariant each one holds:
 | `sql/loader/AbstractDataLoader` | `isObjectCacheContentOnly` isolation of the fresh subtree |
 | `sql/cache/CachesImpl` | `CacheAdmissionPolicy`, `objectCacheContentOnlyTypes` |
 | `sql/ast/impl/mutation/{Operator,Deleter,MiddleTableOperator}` | `MutationKeys.fire*` after each executed batch (BINLOG_ONLY own-write keys) |
-| `sql/ast/impl/mutation/{MutableUpdateImpl,MutableDeleteImpl}` | `MutationKeys.listenerOf(sqlClient, type)` gate: id pre-select instead of direct render |
+| `sql/ast/impl/mutation/{MutableUpdateImpl,MutableDeleteImpl}` | `MutationKeys.listenerOf(sqlClient, type)` gate: update-returning ids, or one id select before the unchanged direct delete |
 
 Fork-added siblings live in the same packages, so an upstream rewrite can orphan them without
 a conflict: `CacheContentMask`, `ObjectCacheQueryExecution`, `ObjectCacheQuerySeed`,

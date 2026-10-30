@@ -27,7 +27,7 @@ dependencies {
 }
 ```
 
-Current fork release: `1.2.2` (JitPack, no credentials; a tag alone does not prove the artifacts were built). It contains every v0.12.4 code change (only the upstream version-bump commits are absent). Do not mix upstream `org.babyfish.jimmer` artifacts with the fork's runtime/processors. Match the Kotlin compiler, KSP plugin, Quarkus platform and JDK to the fork's compatibility/build metadata (1.2.2 is tested with Kotlin 2.4.21, KSP 2.3.12 and Quarkus 3.40.1.1; the Quarkus extension targets JDK 25 while core modules stay on Java 8) rather than copying fixed versions from an example. Inspect the resolved runtime **and processor** dependency graphs after migration.
+Current fork release: `1.2.3` (JitPack, no credentials; a tag alone does not prove the artifacts were built). It contains every v0.12.4 code change (only the upstream version-bump commits are absent). Do not mix upstream `org.babyfish.jimmer` artifacts with the fork's runtime/processors. Match the Kotlin compiler, KSP plugin, Quarkus platform and JDK to the fork's compatibility/build metadata (1.2.3 is tested with Kotlin 2.4.21, KSP 2.3.12 and Quarkus 3.40.1.1; the Quarkus extension targets JDK 25 while core modules stay on Java 8) rather than copying fixed versions from an example. Inspect the resolved runtime **and processor** dependency graphs after migration.
 
 ## Differences From Spring Boot
 
@@ -50,8 +50,8 @@ The extension generates `JRepository`/`KRepository` implementations at build tim
 - Named SQL clients/repositories use `@io.quarkus.agroal.DataSource("name")`. Check entity/datasource association and qualify both repository and injection site.
 - Jimmer uses JDBC: execute blocking work on an appropriate worker, not a reactive event-loop thread.
 - Object-cache query admission requires a proven non-transactional read (JTA `NO_TRANSACTION`, auto-commit, connection owned by the manager). Reads inside `@Transactional` always run fresh SQL; do not wrap read-only endpoints in a transaction if they should use the cache.
-- The extension acquires a pooled connection only at the first real JDBC call (1.2.2). A read fully served by the object cache takes no connection and enlists nothing, inside or outside `@Transactional`; wrapping reads in a transaction does not save connections for them, and pool-exhaustion errors now surface at the first statement instead of at the `execute` entry.
-- With `BINLOG_ONLY` and caches, the writing instance sees its own committed writes: object and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes are evicted after commit (rollback: nothing; auto-commit: after the `execute` scope). Bulk update/delete of a cached type pre-selects ids once; inverse-side association caches and writes from other services still rely on CDC.
+- The extension acquires a pooled connection only at the first real JDBC call (1.2.3). A read fully served by the object cache takes no connection and enlists nothing, inside or outside `@Transactional`; wrapping reads in a transaction does not save connections for them, and pool-exhaustion errors now surface at the first statement instead of at the `execute` entry.
+- With `BINLOG_ONLY` and caches, the writing instance sees its own committed writes: object and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes are evicted after commit (rollback: nothing; auto-commit: after the `execute` scope). A bulk update of a cached type reads its ids through `UPDATE ... RETURNING` on PostgreSQL and a bulk delete adds one id select before its unchanged direct `DELETE`; inverse-side association caches and writes from other services still rely on CDC.
 
 ## Resource Layer
 
@@ -105,7 +105,7 @@ quarkus:
 
 ### Key registry
 
-Read `jimmer-config` for the relevant key and its scope: only datasource-scoped options accept `quarkus.jimmer.<datasource-name>.<key>`. Dialect is derived from datasource metadata. Validation is read only from `quarkus.jimmer.database-validation-mode` (`JimmerRuntimeConfig.databaseValidationMode()`); the deprecated nested `database-validation.mode` group still parses but `JQuarkusSqlClient` never reads it, so it is silently ignored. The module README's config table (checked at 1.2.2) still lists the nested key; source wins.
+Read `jimmer-config` for the relevant key and its scope: only datasource-scoped options accept `quarkus.jimmer.<datasource-name>.<key>`. Dialect is derived from datasource metadata. Validation is read only from `quarkus.jimmer.database-validation-mode` (`JimmerRuntimeConfig.databaseValidationMode()`); the deprecated nested `database-validation.mode` group still parses but `JQuarkusSqlClient` never reads it, so it is silently ignored. The module README's config table (checked at 1.2.3) still lists the nested key; source wins.
 
 The fork defaults to `constraint-violation-translatable=false` and `sql-state-exception-translator=true`: SQLState maps to `JimmerDataAccessException` subtypes. Enabling typed constraint investigation changes the error/performance contract; see `jimmer-debug`.
 

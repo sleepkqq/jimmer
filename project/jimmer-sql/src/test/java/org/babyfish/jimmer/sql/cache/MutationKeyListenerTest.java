@@ -7,9 +7,11 @@ import org.babyfish.jimmer.sql.ast.mutation.SaveMode;
 import org.babyfish.jimmer.sql.common.AbstractMutationTest;
 import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.event.TriggerType;
+import org.babyfish.jimmer.sql.exception.SaveException;
 import org.babyfish.jimmer.sql.model.Book;
 import org.babyfish.jimmer.sql.model.BookDraft;
 import org.babyfish.jimmer.sql.model.BookProps;
+import org.babyfish.jimmer.sql.model.BookStoreTable;
 import org.babyfish.jimmer.sql.model.BookTable;
 import org.babyfish.jimmer.sql.runtime.ConnectionManager;
 import org.babyfish.jimmer.sql.runtime.MutationKeyListener;
@@ -21,6 +23,7 @@ import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -227,6 +230,59 @@ public class MutationKeyListenerTest extends AbstractMutationTest {
                 sqlClient(TriggerType.BINLOG_ONLY, testConnectionManager())
         );
         assertEquals(withoutListener, withListener);
+    }
+
+    @Test
+    public void testBulkUpdateReturnsKeysFromTheUpdateStatement() {
+        assertEquals(
+                Collections.singletonList(
+                        "select ID from final table (update BOOK tb_1_ set PRICE = ? where tb_1_.NAME = ?)"
+                ),
+                updateSql(sqlClient(TriggerType.BINLOG_ONLY, new RecordingConnectionManager()))
+        );
+    }
+
+    @Test
+    public void testDirectBulkDeleteKeepsStatementAndDatabaseConstraint() {
+        List<String> withoutListener = new ArrayList<>();
+        Throwable withoutListenerError = directStoreDelete(
+                sqlClient(TriggerType.BINLOG_ONLY, testConnectionManager()),
+                withoutListener
+        );
+        RecordingConnectionManager listener = new RecordingConnectionManager();
+        List<String> withListener = new ArrayList<>();
+        Throwable withListenerError = directStoreDelete(
+                sqlClient(TriggerType.BINLOG_ONLY, listener),
+                withListener
+        );
+
+        List<String> expected = new ArrayList<>();
+        expected.add("select distinct tb_1_.ID from BOOK_STORE tb_1_ where tb_1_.NAME = ?");
+        expected.addAll(withoutListener);
+        assertEquals(expected, withListener);
+        assertNotNull(withListenerError);
+        assertFalse(withListenerError instanceof SaveException, withListenerError.toString());
+        assertEquals(withoutListenerError.getClass(), withListenerError.getClass());
+        assertTrue(listener.entityKeys(org.babyfish.jimmer.sql.model.BookStore.class).isEmpty());
+    }
+
+    private Throwable directStoreDelete(JSqlClient sqlClient, List<String> sqlList) {
+        Throwable[] errorBox = new Throwable[1];
+        jdbc(con -> {
+            clearExecutions();
+            try {
+                sqlClient.createDelete(BookStoreTable.$)
+                        .where(BookStoreTable.$.name().eq("MANNING"))
+                        .disableDissociation()
+                        .execute(con);
+            } catch (RuntimeException ex) {
+                errorBox[0] = ex;
+            }
+            for (Execution execution : getExecutions()) {
+                sqlList.add(execution.getSql());
+            }
+        });
+        return errorBox[0];
     }
 
     private List<String> updateSql(JSqlClient sqlClient) {

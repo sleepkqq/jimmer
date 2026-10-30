@@ -24,7 +24,7 @@ Use a global filter for a query visibility rule shared across root queries and a
 |---|---|
 | Joins inside a subquery's **select list**, including nested subqueries | Filtered since v0.12.4 (#1203): inner join → predicate in the subquery `WHERE`, left join → in the join `ON`. Earlier versions filtered only subquery predicates, so a scalar subquery projection could read hidden rows. Expect changed SQL and results after upgrading |
 | Fork: pagination/count of queries with projection subqueries | Filters applied to retained subqueries before the count query is derived (fork 1.0.6) |
-| Fork: ID reads with a single-view object cache | A user filter forces the current visibility to be rechecked by one ID-only SQL before cached bodies are used; `forUpdate` bypasses the cache (fork 1.0.6). When the only filter is the built-in logical-delete filter, its visibility is judged on the cached row instead, so a warm read issues no SQL (fork 1.2.2) |
+| Fork: ID reads with a single-view object cache | A user filter forces the current visibility to be rechecked by one ID-only SQL before cached bodies are used; `forUpdate` bypasses the cache (fork 1.0.6). When the only filter is the built-in logical-delete filter, its visibility is judged on the cached row instead, so a warm read issues no SQL (fork 1.2.3) |
 | Fork: object-cache query admission | Membership and visibility stay SQL; only admitted content comes from the cache. `CacheAdmissionPolicy` controls freshness, not authorization |
 
 ## Cache contract

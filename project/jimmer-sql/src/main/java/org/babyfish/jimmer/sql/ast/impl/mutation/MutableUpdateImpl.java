@@ -459,11 +459,34 @@ public class MutableUpdateImpl
         }
 
         if (MutationKeys.listenerOf(getSqlClient(), getType()) != null) {
-            return executeWithMutationKeys(builder, con);
+            return getSqlClient().getDialect().isUpdateReturningSupported() ?
+                    executeReturningMutationKeys(builder, con) :
+                    executeWithMutationKeys(builder, con);
         }
 
         renderTo(builder);
         return executeUpdateSql(builder, con);
+    }
+
+    private int executeReturningMutationKeys(SqlBuilder builder, Connection con) {
+        TableImplementor<?> table = getTableLikeImplementor();
+        List<Selection<?>> selections = Collections.<Selection<?>>singletonList(
+                table.get(table.getImmutableType().getIdProp())
+        );
+        renderReturningTo(builder, null, selections);
+        Tuple3<String, List<Object>, List<Integer>> sqlResult = builder.build();
+        List<Object> ids = Selectors.select(
+                getSqlClient(),
+                con,
+                sqlResult.get_1(),
+                sqlResult.get_2(),
+                sqlResult.get_3(),
+                selections,
+                null,
+                getPurpose()
+        );
+        fireMutationKeys(con, ids);
+        return ids.size();
     }
 
     private int executeWithMutationKeys(SqlBuilder builder, Connection con) {
