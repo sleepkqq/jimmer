@@ -2,13 +2,13 @@
 
 ## 2026-10-30 refresh (current)
 
-Tracks `sleepkqq/jimmer` **1.2.1**,
+Tracks `sleepkqq/jimmer` **1.2.2**,
 with upstream `dev` merged at `5ed2a810b` (`v0.12.4-4`, absorbing the DDL
 association-key fix and the upstream `v0.12.5` version bump).
 
 | Source | Snapshot |
 |---|---|
-| `sleepkqq/jimmer` | `1.2.1`; connection-free cache hits, own-write eviction, DTO admission fallback |
+| `sleepkqq/jimmer` | `1.2.2`; connection-free cache hits, own-write eviction, DTO admission fallback |
 | `babyfish-ct/jimmer` | `5ed2a810b` (`v0.12.4-4`); every v0.12.4 code change plus the DDL association-key fix |
 | Quarkus extension | `3.40.1.1`, JDK 25 (core modules stay Java 8); Kotlin `2.4.21`, KSP `2.3.12`, Gradle `9.8.2` |
 
@@ -33,7 +33,7 @@ Consumer-visible changes documented and, where contradicted, corrected:
   ordinary cached path; only an explicit content hint keeps the isolated
   cache-disabled fallback.
 
-Versions and snippets updated to `1.2.1`; historical "since 1.1.x" notes retained.
+Versions and snippets updated to `1.2.2`; historical "since 1.1.x" notes retained.
 Claims were re-checked against `FORK.md`, `QuarkusConnectionManager`,
 `LazyConnection`, `MutationKeyListener`, `MutationKeys`, `EntitiesImpl` and
 `project/jimmer-quarkus/.claude/connection-management.md`. No LLM evaluation was run.

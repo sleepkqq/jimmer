@@ -59,7 +59,7 @@ val status: Status
 val deletedMillis: Long
 ```
 
-- Global filter hides deleted rows automatically; `deleteById` becomes `UPDATE` when entity has the flag (`DeleteMode.AUTO`/`LOGICAL`; `PHYSICAL` forces a real delete). With an object cache, `findById`/`findByIds` of a type whose only filter is this built-in one judge visibility on the cached row (1.2.1), so a warm read issues no SQL; another filter, `forUpdate` or a content-only cache keeps the SQL visibility check.
+- Global filter hides deleted rows automatically; `deleteById` becomes `UPDATE` when entity has the flag (`DeleteMode.AUTO`/`LOGICAL`; `PHYSICAL` forces a real delete). With an object cache, `findById`/`findByIds` of a type whose only filter is this built-in one judge visibility on the cached row (1.2.2), so a warm read issues no SQL; another filter, `forUpdate` or a content-only cache keeps the SQL visibility check.
 - Save contract (0.12.4+, [#1359](https://github.com/sleepkqq/jimmer/blob/main/project/jimmer-core/src/main/java/org/babyfish/jimmer/sql/LogicalDeleted.java)):
   - a **loaded live** value is written as given (`RUNNING` stays `RUNNING`); an **unloaded** flag is initialized (from `@Default` or the strategy's live value) only on insert — never reset on update or the update branch of an upsert;
   - a **loaded deleted** value (including one set by a `DraftInterceptor`) is rejected with `IllegalArgumentException` — logical deletion goes through a delete command so its association rules run;

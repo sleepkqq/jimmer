@@ -27,7 +27,7 @@
 
 ## Migrate a consumer
 
-### Connection-free cache hits and own-write eviction in 1.2.1
+### Connection-free cache hits and own-write eviction in 1.2.2
 
 No configuration changes; behaviour follows from the existing cache and trigger settings.
 
@@ -50,10 +50,11 @@ No configuration changes; behaviour follows from the existing cache and trigger 
   package.
 
 The release also targets Java 25 for the Quarkus extension (core modules stay on Java 8) and
-moves to Quarkus 3.40.1.1, Kotlin 2.4.21 and Gradle 9.8.2. Release 1.2.1 includes these
+moves to Quarkus 3.40.1.1, Kotlin 2.4.21 and Gradle 9.8.2. Release 1.2.2 includes these
 changes; 1.1.14 does not.
-The `1.2.0` tag carries the same behaviour but has no JitPack build: two of its dependency
-versions were not yet on JitPack's Maven Central mirror. Use 1.2.1.
+The `1.2.0` and `1.2.1` tags carry the same behaviour but have no JitPack build: two of the
+1.2.0 dependency versions were not yet on JitPack's Maven Central mirror, and 1.2.1 landed on
+JitPack's legacy image, which could not install JDK 25. Use 1.2.2.
 
 ### Non-nullable key-group preference in 1.1.10
 
@@ -383,10 +384,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.2.1`, replace
+For version `1.2.2`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.1`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.1`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.2`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.2`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;

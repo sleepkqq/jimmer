@@ -32,7 +32,7 @@ Trace each arrow in the application's real integration before enabling caching. 
 
 A migration must account for existing transaction listeners and warm entries as well as changing the setting. Report the reason for the replacement and how cached traffic becomes safe; a successful startup or Redis PING is insufficient. Verify two instances, an external writer, consumer restart, replay, and a load held across invalidation.
 
-Under `BINLOG_ONLY`, the writing instance evicts the object cache and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes after commit (1.2.1): rollback evicts nothing, auto-commit evicts when the `execute` scope closes, and a bulk update/delete of a cached type pre-selects its target ids once. Inverse-side association caches and writes from other services still rely on CDC; there is no configuration key for this.
+Under `BINLOG_ONLY`, the writing instance evicts the object cache and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes after commit (1.2.2): rollback evicts nothing, auto-commit evicts when the `execute` scope closes, and a bulk update/delete of a cached type pre-selects its target ids once. Inverse-side association caches and writes from other services still rely on CDC; there is no configuration key for this.
 
 ## Cache kinds
 
@@ -50,7 +50,7 @@ Use the installed provider's `CacheFactory`/`KCacheFactory` and `ChainCacheBuild
 
 ## Fork: root queries can read the object cache
 
-Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.1`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
+Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.2`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
 
 | Fork situation | Behavior |
 |---|---|
@@ -63,7 +63,7 @@ Upstream object caches serve ID loads and association/fetcher hydration, never o
 
 A DTO used for an edit form is admitted like a display DTO. A read that must see the current row uses a bare entity projection, `useObjectCache(false)` or a policy veto.
 
-`findById`/`findByIds` (entity, Fetcher or DTO view) of a type whose only filter is the built-in logical-delete filter judge visibility on the cached row (1.2.1), so a warm read issues no SQL. User, reversed, ignored or sharding filters, `forUpdate` and `content-only` types keep the SQL visibility check; a cached payload without the logical-deleted column falls back to a visible-id query for the whole call. In Quarkus such a read also holds no pooled connection.
+`findById`/`findByIds` (entity, Fetcher or DTO view) of a type whose only filter is the built-in logical-delete filter judge visibility on the cached row (1.2.2), so a warm read issues no SQL. User, reversed, ignored or sharding filters, `forUpdate` and `content-only` types keep the SQL visibility check; a cached payload without the logical-deleted column falls back to a visible-id query for the whole call. In Quarkus such a read also holds no pooled connection.
 
 ## Multi-view caches — user filters
 

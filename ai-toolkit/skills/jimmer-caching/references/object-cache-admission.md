@@ -1,6 +1,6 @@
 # Object-cache query admission — sleepkqq/jimmer fork
 
-Fork-only (`com.github.sleepkqq.jimmer:*`, contract below is release `1.2.1`). Upstream `org.babyfish.jimmer` has no `useObjectCache`, `CacheAdmissionPolicy` or content-only caches: there the object cache serves ID loads and association/fetcher hydration only.
+Fork-only (`com.github.sleepkqq.jimmer:*`, contract below is release `1.2.2`). Upstream `org.babyfish.jimmer` has no `useObjectCache`, `CacheAdmissionPolicy` or content-only caches: there the object cache serves ID loads and association/fetcher hydration only.
 
 Admission lets a root query take entity **content** from a declared object cache. It is not a query-result cache: SQL still runs and decides which rows exist.
 
@@ -30,7 +30,7 @@ Admission is declined — the original query runs fresh — unless every guard h
 - QUERY purpose; command/save-internal reads, `forUpdate`/locking reads, aggregates, count, `stream`/`forEach` and merged set queries with a mask stay fresh.
 - The connection manager positively proves the connection is outside a transaction: `ConnectionManager.isTransactionKnownInactive(con)`. The fork implements it in the Spring, Quarkus (JTA status `NO_TRANSACTION` and auto-commit) and Jimmer transaction managers; the default implementation returns `false`. **A read inside `@Transactional` is therefore not admitted.**
 - Cacheable slots: no effective join fetch of the slot, no JOINED-inheritance root, a derived/base-table root declines.
-- Native ID lookups (`findById`/`findByIds`/`findMapByIds`) are outside this policy; they keep their complete-snapshot-or-fresh behavior and are fresh under `content-only`. Since 1.2.1 a type whose only filter is the built-in logical-delete filter judges visibility on the cached row, so a warm ID read issues no SQL; a user, reversed, ignored or sharding filter, `forUpdate` and content-only types keep the SQL visibility check.
+- Native ID lookups (`findById`/`findByIds`/`findMapByIds`) are outside this policy; they keep their complete-snapshot-or-fresh behavior and are fresh under `content-only`. Since 1.2.2 a type whose only filter is the built-in logical-delete filter judges visibility on the cached row, so a warm ID read issues no SQL; a user, reversed, ignored or sharding filter, `forUpdate` and content-only types keep the SQL visibility check.
 
 Fallback: a missing, negative or incompatible cached value (wrong concrete type, incomplete payload) re-runs the **whole original query once**; a page is never shortened. Only an explicit content hint (`useObjectCache()` or an explicit Fetcher mask) keeps the isolated cache-disabled fallback — an automatic admission that could not be applied (an active transaction, a locking read, an ineligible slot) continues on the ordinary cached path. A real cache exception propagates.
 
