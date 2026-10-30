@@ -400,18 +400,6 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         }
     }
 
-    private static ImmutableType resolveDeclaredCacheType(Caches caches, ImmutableType type) {
-        if (caches.getObjectCache(type) != null) {
-            return type;
-        }
-        for (ImmutableType derived : type.getAllDerivedTypes()) {
-            if (caches.getObjectCache(derived) != null) {
-                return derived;
-            }
-        }
-        return null;
-    }
-
     /**
      * The eligible stored leaves of a complete-snapshot declaration, derived from the
      * projected DTO/View itself. Id, discriminator, protected (version / logical-deleted),
@@ -466,7 +454,9 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 return null;
             }
         }
-        ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
+        ImmutableType declared = ObjectCacheQueryExecution.declaringObjectCacheType(
+                caches, fetcher.getImmutableType()
+        );
         if (declared == null) {
             return null;
         }
