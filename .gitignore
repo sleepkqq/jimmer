@@ -1,5 +1,8 @@
 HELP.md
 .*
+!/.claude/
+/.claude/*
+!/.claude/skills/
 *.log
 *.hprof
 .gradle

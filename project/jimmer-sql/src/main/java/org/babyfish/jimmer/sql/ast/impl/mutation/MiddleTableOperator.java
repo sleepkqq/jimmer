@@ -486,6 +486,7 @@ class MiddleTableOperator extends AbstractAssociationOperator {
                 idPairs.tuples(),
                 (ex, ctx) -> translateConnectException(ex, ctx, idPairs.tuples())
         );
+        fireMutatedKeysOfTuples(idPairs.tuples());
         AffectedRows.add(affectedRowCount, path, rowCount);
     }
 
@@ -500,6 +501,7 @@ class MiddleTableOperator extends AbstractAssociationOperator {
                 idPairs.tuples(),
                 (ex, args) -> translateConnectException(ex, args, idPairs.tuples())
         );
+        fireMutatedKeysOfTuples(idPairs.tuples());
         AffectedRows.add(affectedRowCount, path, sumRowCount(rowCounts));
         return rowCounts;
     }
@@ -521,6 +523,7 @@ class MiddleTableOperator extends AbstractAssociationOperator {
         addFilterPredicate(builder);
         builder.leave();
         int rowCount = execute(builder, idPairs.tuples(), null);
+        fireMutatedKeysOfTuples(idPairs.tuples());
         AffectedRows.add(affectedRowCount, path, rowCount);
     }
 
@@ -558,6 +561,7 @@ class MiddleTableOperator extends AbstractAssociationOperator {
                             args.retainedIdPairs.entries(),
                     null
             );
+            fireMutatedKeys(args);
             AffectedRows.add(affectedRowCount, path, rowCount);
             return;
         }
@@ -569,6 +573,7 @@ class MiddleTableOperator extends AbstractAssociationOperator {
         addFilterPredicate(builder);
         builder.leave();
         int rowCount = execute(builder);
+        fireMutatedKeys(args);
         AffectedRows.add(affectedRowCount, path, rowCount);
     }
 
@@ -600,6 +605,7 @@ class MiddleTableOperator extends AbstractAssociationOperator {
         addFilterPredicate(builder);
         builder.leave();
         int rowCount = execute(builder, idPairs.entries(), null);
+        fireMutatedKeysOfRetained(idPairs);
         AffectedRows.add(affectedRowCount, path, rowCount);
     }
 
@@ -1108,6 +1114,46 @@ class MiddleTableOperator extends AbstractAssociationOperator {
         } else {
             trigger.deleteMiddleTable(path.getBackProp(), targetId, sourceId);
         }
+    }
+
+    private void fireMutatedKeysOfTuples(Collection<Tuple2<Object, Object>> tuples) {
+        if (tuples.isEmpty()) {
+            return;
+        }
+        boolean forward = path.getProp() != null;
+        Set<Object> sourceIds = new LinkedHashSet<>();
+        for (Tuple2<Object, Object> tuple : tuples) {
+            sourceIds.add(forward ? tuple.get_1() : tuple.get_2());
+        }
+        fireMutatedKeys(sourceIds);
+    }
+
+    private void fireMutatedKeysOfRetained(IdPairs idPairs) {
+        Set<Object> sourceIds = new LinkedHashSet<>();
+        for (Tuple2<Object, Collection<Object>> entry : idPairs.entries()) {
+            sourceIds.add(entry.get_1());
+        }
+        fireMutatedKeys(sourceIds);
+    }
+
+    private void fireMutatedKeys(DisconnectionArgs args) {
+        if (args.deletedIds != null) {
+            fireMutatedKeys(args.deletedIds);
+        } else {
+            fireMutatedKeysOfRetained(args.retainedIdPairs);
+        }
+    }
+
+    private void fireMutatedKeys(Collection<?> sourceIds) {
+        if (sourceIds.isEmpty()) {
+            return;
+        }
+        MutationKeys.fireAssociationsMutated(
+                sqlClient,
+                con,
+                path.getProp() != null ? path.getProp() : path.getBackProp(),
+                sourceIds
+        );
     }
 
     private Exception translateConnectException(

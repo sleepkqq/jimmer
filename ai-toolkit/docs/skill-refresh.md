@@ -1,6 +1,44 @@
 # Skill refresh evidence
 
-## 2026-10-28 refresh (current)
+## 2026-10-30 refresh (current)
+
+Tracks `sleepkqq/jimmer` **1.2.0**,
+with upstream `dev` merged at `5ed2a810b` (`v0.12.4-4`, absorbing the DDL
+association-key fix and the upstream `v0.12.5` version bump).
+
+| Source | Snapshot |
+|---|---|
+| `sleepkqq/jimmer` | `1.2.0`; connection-free cache hits, own-write eviction, DTO admission fallback |
+| `babyfish-ct/jimmer` | `5ed2a810b` (`v0.12.4-4`); every v0.12.4 code change plus the DDL association-key fix |
+| Quarkus extension | `3.40.1.1`, JDK 25 (core modules stay Java 8); Kotlin `2.4.21`, KSP `2.3.12`, Gradle `9.8.2` |
+
+Consumer-visible changes documented and, where contradicted, corrected:
+
+- Quarkus acquires a pooled connection only at the first real JDBC call
+  (`LazyConnection`); a read fully served by the object cache takes no
+  connection, inside or outside `@Transactional`, and pool exhaustion surfaces
+  at the first statement. Removed the implication that a transaction saves
+  connections for cache-served reads.
+- `findById`/`findByIds` (entity, Fetcher, DTO view) of a type whose only filter
+  is the built-in logical-delete filter judge visibility on the cached row, so a
+  warm read issues no SQL; user/reversed/ignored/sharding filters, `forUpdate`
+  and content-only types keep the SQL check. Corrected the toolkit's previous
+  "every ID read rechecks visibility with SQL" wording.
+- `BINLOG_ONLY` clients evict their own object and owning-side association
+  cache entries after commit (rollback: nothing; auto-commit: after the
+  `execute` scope); bulk update/delete of a cached type pre-selects ids once.
+  Inverse-side association caches and other services' writes still need CDC; no
+  configuration key exists. Corrected "own writes stay stale until CDC".
+- Automatic DTO/View admission that cannot be applied now continues on the
+  ordinary cached path; only an explicit content hint keeps the isolated
+  cache-disabled fallback.
+
+Versions and snippets updated to `1.2.0`; historical "since 1.1.x" notes retained.
+Claims were re-checked against `FORK.md`, `QuarkusConnectionManager`,
+`LazyConnection`, `MutationKeyListener`, `MutationKeys`, `EntitiesImpl` and
+`project/jimmer-quarkus/.claude/connection-management.md`. No LLM evaluation was run.
+
+## 2026-10-28 refresh (historical)
 
 Release-specific sets were removed: `skills/` now tracks this repository's latest
 fork release. All 17 skills were re-verified claim by claim against:

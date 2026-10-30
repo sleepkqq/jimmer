@@ -36,6 +36,7 @@ configuration that makes it work:
 <!-- versions:start -->
 | Extension | Quarkus  | Jimmer    | Kotlin  | JDK  |
 |-----------|----------|-----------|---------|------|
+| `1.2.0`   | `3.40.1.1` | fork `1.2.0` | `2.4.21` | `25` |
 | `1.1.4`   | `3.39.2` | fork `1.1.4` | `2.4.20` | `21` |
 | `1.1.2`   | `3.39.2` | fork `1.1.2` | `2.4.20` | `21` |
 <!-- versions:end -->
@@ -478,7 +479,7 @@ cd project                              # from the repository root
 ./gradlew :jimmer-quarkus:integration-tests:test # Docker required: Postgres + Redis
 ```
 
-JDK 21, Gradle 9.7.1. Native-image commands above are also run from `project/`.
+JDK 25, Gradle 9.8.2. The extension targets Java 25; core modules still target Java 8. Native-image commands above are also run from `project/`.
 
 ## CI / Release
 

@@ -211,6 +211,7 @@ public class MutableDeleteImpl
 
         boolean binLogOnly = sqlClient.getTriggerType() == TriggerType.BINLOG_ONLY;
         boolean directlyEligible = binLogOnly &&
+                MutationKeys.listenerOf(sqlClient, getType()) == null &&
                 isDirectlyDeletableByDissociation(logicalDeleted) &&
                 isDirectlyDeletableByInheritance(logicalDeleted);
         DirectRenderMode directRenderMode = directlyEligible ?

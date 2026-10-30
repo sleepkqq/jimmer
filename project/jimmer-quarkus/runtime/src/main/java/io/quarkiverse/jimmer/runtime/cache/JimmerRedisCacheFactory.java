@@ -21,7 +21,7 @@ import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
 import io.quarkus.redis.datasource.RedisDataSource;
 
 /**
- * {@link CacheFactory} building per-entity chain caches from {@link JimmerCacheConfig}:
+ * {@link org.babyfish.jimmer.sql.cache.CacheFactory} building per-entity chain caches from {@link JimmerCacheConfig}:
  * {@code LOCAL_ONLY} is a Caffeine-only chain (plus cross-instance invalidation publication when a
  * {@link CacheTracker} is present), {@code REMOTE_ONLY} a Redis-only cache, {@code FULL} a Caffeine
  * local tier in front of Redis kept consistent across instances by the tracker.

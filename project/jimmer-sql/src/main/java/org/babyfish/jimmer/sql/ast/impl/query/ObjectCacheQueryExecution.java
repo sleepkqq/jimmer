@@ -24,7 +24,6 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple6;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple7;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple8;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple9;
-import org.babyfish.jimmer.sql.cache.CacheTypeMismatchException;
 import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
 import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
@@ -382,7 +381,7 @@ final class ObjectCacheQueryExecution {
             JSqlClientImplementor sqlClient,
             ConnectionManager connectionManager,
             Fetcher<?> cachedContent,
-            boolean configuredContent
+            boolean automaticContent
     ) {
         TypedQueryData data = query.getData();
         MutableRootQueryImpl<T> mutableQuery = query.getMutableQuery();
@@ -514,7 +513,7 @@ final class ObjectCacheQueryExecution {
             astContext.popStatement();
         }
         if (!maskMatched) {
-            if (configuredContent) {
+            if (automaticContent) {
                 return null;
             }
             throw new IllegalArgumentException(
@@ -951,7 +950,7 @@ final class ObjectCacheQueryExecution {
             Fetcher<?> fetcher,
             JSqlClientImplementor sqlClient
     ) {
-        if (!hasObjectCacheInHierarchy(sqlClient, entityType)) {
+        if (declaringObjectCacheType(sqlClient.getCaches(), entityType) == null) {
             return false;
         }
         // This is the legacy boolean/no-argument hint path. Content-only entities may
@@ -986,16 +985,19 @@ final class ObjectCacheQueryExecution {
         return sqlClient.getFilters().getTargetFilter(joinProp) == null;
     }
 
-    static boolean hasObjectCacheInHierarchy(JSqlClientImplementor sqlClient, ImmutableType type) {
-        if (sqlClient.getCaches().getObjectCache(type) != null) {
-            return true;
+    /**
+     * The type in {@code type}'s hierarchy that declares an object cache, or {@code null}.
+     */
+    static ImmutableType declaringObjectCacheType(Caches caches, ImmutableType type) {
+        if (caches.getObjectCache(type) != null) {
+            return type;
         }
         for (ImmutableType derived : type.getAllDerivedTypes()) {
-            if (sqlClient.getCaches().getObjectCache(derived) != null) {
-                return true;
+            if (caches.getObjectCache(derived) != null) {
+                return derived;
             }
         }
-        return false;
+        return null;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

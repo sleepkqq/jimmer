@@ -204,14 +204,6 @@ final class CacheContentMask {
         );
     }
 
-    CacheContentMask selectedBy(Fetcher<?> projection, JSqlClientImplementor sqlClient) {
-        Fetcher<?> selected = FetcherFactory.filterExpanded(
-                projection,
-                (type, prop, path) -> isRemovedAt(sqlClient, type, path, prop)
-        );
-        return selected != null ? of(selected) : null;
-    }
-
     /**
      * The SQL projection with every approved leaf of a cacheable node removed; associations
      * stay as edges. Returns {@code null} when reducing would drop a proving join, erase a
@@ -634,7 +626,9 @@ final class CacheContentMask {
 
     /** Whether this node's own approved leaves can be served from a cache. */
     boolean isCacheableNode(JSqlClientImplementor sqlClient) {
-        return isCacheable(sqlClient, cacheOwnerType);
+        return ObjectCacheQueryExecution.declaringObjectCacheType(
+                sqlClient.getCaches(), cacheOwnerType
+        ) != null;
     }
 
     private boolean hasStoredLeaves() {
@@ -827,18 +821,6 @@ final class CacheContentMask {
         }
         for (Fetcher<?> branch : typeBranchFetchers(fetcher).values()) {
             if (hasSelectableContent(branch)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isCacheable(JSqlClientImplementor sqlClient, ImmutableType type) {
-        if (sqlClient.getCaches().getObjectCache(type) != null) {
-            return true;
-        }
-        for (ImmutableType derived : type.getAllDerivedTypes()) {
-            if (sqlClient.getCaches().getObjectCache(derived) != null) {
                 return true;
             }
         }

@@ -129,13 +129,24 @@ public class Deleter {
                 ctx.options.getTypeMatchMode()
         );
         if (isStagedJoinedExactDeleteAvailable(inheritanceInfo, deletedTypes)) {
-            return finish(executeStagedJoinedExactDelete(input.ids));
+            DeleteResult result = finish(executeStagedJoinedExactDelete(input.ids));
+            fireMutationKeys(input.ids, deletedTypes);
+            return result;
         }
 
         AssociationCleanup cleanup = associationCleanup();
         DeleteScope scope = resolveDeleteScope(input, inheritanceInfo, deletedTypes, cleanup);
         disconnectDeleteScope(scope, cleanup);
-        return finish(executeDeleteScope(scope));
+        DeleteResult result = finish(executeDeleteScope(scope));
+        fireMutationKeys(scope.ids, deletedTypes);
+        return result;
+    }
+
+    private void fireMutationKeys(Collection<?> ids, Collection<ImmutableType> types) {
+        JSqlClientImplementor sqlClient = ctx.options.getSqlClient();
+        for (ImmutableType type : types) {
+            MutationKeys.fireEntitiesMutated(sqlClient, ctx.con, type, ids);
+        }
     }
 
     private DeleteInput drainInput() {

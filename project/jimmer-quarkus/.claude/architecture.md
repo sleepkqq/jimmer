@@ -20,13 +20,13 @@ cd project                            # from the repository root
 ./gradlew :jimmer-quarkus:integration-tests:test
 ```
 
-Extension Java/Kotlin target: JDK 21. Gradle 9.7.1.
+Extension Java/Kotlin target: JDK 25 (core modules stay on Java 8). Gradle 9.8.2.
 
 ## Key Versions (libs.versions.toml)
 
-- Quarkus: 3.39.2
-- Jimmer: fork 1.0.1 (upstream dev 7c1d302b0)
-- Kotlin: 2.4.20; KSP: 2.3.12
+- Quarkus: 3.40.1.1
+- Jimmer: sibling project modules at the version in `project/gradle.properties`
+- Kotlin: 2.4.21; KSP: 2.3.12
 
 ## Deployment vs Runtime
 
@@ -77,5 +77,5 @@ Extension Java/Kotlin target: JDK 21. Gradle 9.7.1.
 ## Code Style
 
 - Java for main code, Kotlin for SqlClients.kt and Kotlin-specific wrappers
-- 1 tab indentation
+- 4-space indentation (as in the existing sources)
 - Quarkus extension conventions: `@Record`, `@BuildStep`, synthetic CDI beans

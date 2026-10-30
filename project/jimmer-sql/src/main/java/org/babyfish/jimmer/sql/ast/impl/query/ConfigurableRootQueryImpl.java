@@ -400,18 +400,6 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         }
     }
 
-    private static ImmutableType resolveDeclaredCacheType(Caches caches, ImmutableType type) {
-        if (caches.getObjectCache(type) != null) {
-            return type;
-        }
-        for (ImmutableType derived : type.getAllDerivedTypes()) {
-            if (caches.getObjectCache(derived) != null) {
-                return derived;
-            }
-        }
-        return null;
-    }
-
     /**
      * The eligible stored leaves of a complete-snapshot declaration, derived from the
      * projected DTO/View itself. Id, discriminator, protected (version / logical-deleted),
@@ -466,7 +454,9 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                 return null;
             }
         }
-        ImmutableType declared = resolveDeclaredCacheType(caches, fetcher.getImmutableType());
+        ImmutableType declared = ObjectCacheQueryExecution.declaringObjectCacheType(
+                caches, fetcher.getImmutableType()
+        );
         if (declared == null) {
             return null;
         }
@@ -576,6 +566,17 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         return !rows.isEmpty();
     }
 
+    /**
+     * Whether the content mask came from a query-level hint: an explicit fetcher mask or a
+     * bare {@code useObjectCache()} hint. Explicit hints keep the isolated cache-disabled
+     * fallback. Automatic DTO/View admission is only an optimization, so its failure falls
+     * through to the ordinary legacy-cached path instead.
+     */
+    private boolean isExplicitContentHint() {
+        TypedQueryData data = getData();
+        return data.cachedContent != null || data.useObjectCache;
+    }
+
     private List<R> executeImpl(Connection con) {
         TypedQueryData data = getData();
         if (data.limit == 0) {
@@ -585,12 +586,6 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
         boolean queryPurpose =
                 getMutableQuery().getPurpose().getType() == ExecutionPurpose.Type.QUERY;
         if (resolveCachedContent() != null) {
-            // An explicit or configured content mask is a cache-content hint, not an
-            // authorization cache. Whenever it cannot be honored - a non-QUERY purpose,
-            // a locking read, an unproven transaction state or any decline - the complete
-            // original projection runs on a cache-disabled derived client, so no
-            // SELECT-loaded association can serve stale or uncommitted content and the
-            // render/read/loader stay consistent.
             if (data.forUpdate == null && queryPurpose) {
                 ConnectionManager connectionManager = sqlClient.getSlaveConnectionManager(false);
                 if (connectionManager.isTransactionKnownInactive(con)) {
@@ -601,7 +596,17 @@ public class ConfigurableRootQueryImpl<T extends TableLike<?>, R>
                     }
                 }
             }
-            return executeBypassed(con, data, sqlClient);
+            if (isExplicitContentHint()) {
+                // An explicit content mask is a cache-content hint, not an authorization
+                // cache. Whenever it cannot be honored - a non-QUERY purpose, a locking
+                // read, an unproven transaction state or any decline - the complete
+                // original projection runs on a cache-disabled derived client, so no
+                // SELECT-loaded association can serve stale or uncommitted content and the
+                // render/read/loader stay consistent.
+                return executeBypassed(con, data, sqlClient);
+            }
+            // Automatic admission could not be applied; the ordinary path must keep every
+            // legacy cache an unhinted query would use.
         }
         if (data.useObjectCache) {
             if (hasContentCacheHint()) {

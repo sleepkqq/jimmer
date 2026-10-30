@@ -4,6 +4,7 @@ import java.beans.Introspector;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.sql.Connection;
 import java.util.*;
 import java.util.function.Consumer;
 
@@ -1055,6 +1056,12 @@ final class JimmerProcessor {
                 }
             }
         }
+    }
+
+    @BuildStep
+    void registerJdbcConnectionProxy(BuildProducer<NativeImageProxyDefinitionBuildItem> proxies) {
+        // The runtime creates a deferred java.sql.Connection proxy per managed scope.
+        proxies.produce(new NativeImageProxyDefinitionBuildItem(Connection.class.getName()));
     }
 
     /**

@@ -33,12 +33,12 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.1.0
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: temurin
-      - uses: gradle/actions/setup-gradle@v6.3.0
+      - uses: gradle/actions/setup-gradle@v6.4.1
       - name: Start the canonical MySQL fixture
         run: |
           trap 'docker compose -f project/jimmer-sql/src/test/resources/docker-compose.yml logs mysql' ERR
@@ -53,7 +53,7 @@ jobs:
         run: bash ./gradlew --no-build-cache --no-parallel --max-workers=2 build
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: build-test-reports
           path: |
@@ -64,12 +64,12 @@ jobs:
   publish-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.1.0
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: temurin
-      - uses: gradle/actions/setup-gradle@v6.3.0
+      - uses: gradle/actions/setup-gradle@v6.4.1
       - name: Publish every fork module to an isolated repository
         run: project/gradlew -p project --no-parallel --max-workers=2 publishToMavenLocal -Dmaven.repo.local="$RUNNER_TEMP/jimmer-m2"
       - name: Verify every published artifact and shared version
@@ -82,7 +82,7 @@ jobs:
           project/gradlew -p smoke-tests --no-parallel --max-workers=2 build -PforkRepository="file://$RUNNER_TEMP/jimmer-m2" -PforkVersion="$version"
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: isolated-consumer-test-reports
           path: |
@@ -94,12 +94,12 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.publicReleaseVersion != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-java@v6.1.0
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: temurin
-      - uses: gradle/actions/setup-gradle@v6.3.0
+      - uses: gradle/actions/setup-gradle@v6.4.1
       - name: Require the dispatched version to match this ref
         env:
           PUBLIC_RELEASE_VERSION: ${{ github.event.inputs.publicReleaseVersion }}
@@ -119,7 +119,7 @@ jobs:
         run: project/gradlew -p smoke-tests clean build -PforkVersion="$PUBLIC_RELEASE_VERSION" --no-parallel --max-workers=2 --refresh-dependencies
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: public-release-test-reports
           path: |

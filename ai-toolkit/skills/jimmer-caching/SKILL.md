@@ -32,6 +32,8 @@ Trace each arrow in the application's real integration before enabling caching. 
 
 A migration must account for existing transaction listeners and warm entries as well as changing the setting. Report the reason for the replacement and how cached traffic becomes safe; a successful startup or Redis PING is insufficient. Verify two instances, an external writer, consumer restart, replay, and a load held across invalidation.
 
+Under `BINLOG_ONLY`, the writing instance evicts the object cache and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes after commit (1.2.0): rollback evicts nothing, auto-commit evicts when the `execute` scope closes, and a bulk update/delete of a cached type pre-selects its target ids once. Inverse-side association caches and writes from other services still rely on CDC; there is no configuration key for this.
+
 ## Cache kinds
 
 | Kind | Key → Value | Created by | Invalidation |
@@ -48,7 +50,7 @@ Use the installed provider's `CacheFactory`/`KCacheFactory` and `ChainCacheBuild
 
 ## Fork: root queries can read the object cache
 
-Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (1.1.x, current `1.1.14`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
+Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.0`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
 
 | Fork situation | Behavior |
 |---|---|
@@ -60,6 +62,8 @@ Upstream object caches serve ID loads and association/fetcher hydration, never o
 | `content-only` cache | Entity, ID and association reads stay SQL-backed; DTO/View content is still admitted |
 
 A DTO used for an edit form is admitted like a display DTO. A read that must see the current row uses a bare entity projection, `useObjectCache(false)` or a policy veto.
+
+`findById`/`findByIds` (entity, Fetcher or DTO view) of a type whose only filter is the built-in logical-delete filter judge visibility on the cached row (1.2.0), so a warm read issues no SQL. User, reversed, ignored or sharding filters, `forUpdate` and `content-only` types keep the SQL visibility check; a cached payload without the logical-deleted column falls back to a visible-id query for the whole call. In Quarkus such a read also holds no pooled connection.
 
 ## Multi-view caches — user filters
 
@@ -78,7 +82,7 @@ Cost model: multi-view multiplies entries per key by the number of distinct filt
 - Object cache serves id-based loads and fetcher joins; queries by arbitrary predicates still hit the DB — the cache accelerates shape assembly, not WHERE clauses. In the fork, admitted root queries also take content from it, but WHERE/membership still run in SQL.
 - Before v0.12.4, ID-only references built while deserializing a cached graph inside an active draft context (`produce`, save, interceptors) could retain that context's drafts, so reshaping or reusing the cached object later failed (#1274). Upgrade instead of copying cached objects defensively.
 - v0.12.4 parses `SINGLE_TABLE` binlog rows into the concrete subtype from the discriminator and ignores sibling-subtype columns (#1516); a missing/unmapped discriminator or an unknown column is an error. On older versions polymorphic CDC events could not be deserialized correctly.
-- With `BINLOG_ONLY`, out-of-band SQL can be covered by CDC; cache presence alone does not imply a row-aware DML plan. Inspect `QueryReason` rather than reviving deprecated transaction triggers.
+- With `BINLOG_ONLY`, out-of-band SQL still needs CDC; your own bulk update/delete of a cached type pre-selects ids once (see the invalidation path). Inspect `QueryReason` rather than reviving deprecated transaction triggers.
 - Redis tier: helper binders (`RedisValueBinder`, tracking variants) handle serialization via the provided `ObjectMapper` — entity types must stay Jackson-serializable.
 
 ## Sources
