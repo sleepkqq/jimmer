@@ -9,7 +9,8 @@ Work from `project/` for Gradle. Read `AGENTS.md` first (plus any module `AGENTS
 `project/jimmer-ksp`, `project/jimmer-ddl-compiler`); it holds the durable SQL invariants.
 Load `jimmer-dev-cache-internals` before touching caches, `EntitiesImpl` or loaders. When a
 change establishes a durable invariant, record it in `AGENTS.md` or the matching skill, and
-user-visible behaviour in `FORK.md`; leave `ai-toolkit/` (consumer skills) alone unless asked.
+user-visible behaviour in `FORK.md` and in the matching consumer skill under `ai-toolkit/`,
+which always tracks the fork's current state.
 No commit, push, tag or release without explicit owner authorization.
 
 ## 1. Reproduce before fixing

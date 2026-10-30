@@ -29,7 +29,7 @@ Release history, migration notes and compatibility live in [FORK.md](FORK.md).
 | `project/jimmer-client*`, `jimmer-spring-boot-starter`, `jimmer-ddl-compiler`, `jimmer-bom` | Client/OpenAPI generators, Spring integration, DDL generation, BOM. |
 | `project/jimmer-quarkus/{runtime,deployment,integration-tests}` | Fork-owned Quarkus extension (Java/Kotlin target 25). |
 | `project/jimmer-sql-test/*` | Shared test entities and DTOs (APT, KSP) and JDBC test support. |
-| `ai-toolkit/` | Skills for library **consumers**; not instructions for working on this repo. |
+| `ai-toolkit/` | Skills for library **consumers**, always matching the fork's current state (no separate version); not instructions for working on this repo. |
 | `.claude/skills/jimmer-dev-*` | Skills for working **on** this repo: change workflow, tests, review, cache internals, upstream sync, release. |
 
 Core modules compile with `sourceCompatibility = 1.8`: no `var`, records, `List.of`,

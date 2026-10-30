@@ -51,8 +51,10 @@ Published artifacts `scripts/verify-publication.py` will demand at that version:
 | `project/jimmer-quarkus/README.md` | one row in the `<!-- versions:start -->` compatibility table (Extension, Quarkus, Jimmer, Kotlin, JDK). It is behind today — it still lists `1.1.4` and `1.1.2` — so add the row rather than assuming it self-updates. |
 | `README.md` | the `## sleepkqq fork` section. It is stale at `1.1.6`: version, the upstream `dev` commit it is based on, the immutable-tag sentence and the three dependency snippets all name it. |
 
-`ai-toolkit/skills/**` also quotes the current fork release; the consumer toolkit is versioned
-separately — flag it, do not rewrite it as part of the ORM release unless the owner asks.
+`ai-toolkit/` has no version of its own: it always describes the fork's current state and ships
+with every release. Move its "current release" statements and snippets to the new version, document
+every user-visible change in the matching consumer skill, correct advice the change contradicts,
+and add a refresh entry to `ai-toolkit/docs/skill-refresh.md`, in the same release.
 
 Place a new `###` release section directly under `## Migrate a consumer`, newest first (`1.1.10`
 currently sits at the top), and keep `### Coordinates` as the last consumer-side section.
