@@ -478,7 +478,7 @@ cd project                              # from the repository root
 ./gradlew :jimmer-quarkus:integration-tests:test # Docker required: Postgres + Redis
 ```
 
-JDK 21, Gradle 9.7.1. Native-image commands above are also run from `project/`.
+JDK 25, Gradle 9.8.2. The extension targets Java 25; core modules still target Java 8. Native-image commands above are also run from `project/`.
 
 ## CI / Release
 

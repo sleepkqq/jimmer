@@ -1,14 +1,15 @@
 [versions]
-addzero-ddlgenerator = "2026.09.24"
+addzero-ddlgenerator = "2026.09.27"
 addzero-ddlgenerator-archived = "2026.07.15.2"
-addzero-lsi = "2026.09.24"
+addzero-ddlgenerator-core = "2026.10.06"
+addzero-lsi = "2026.09.25"
 addzero-tool-database-model = "2026.08.26"
-antlr = "4.13.0"
-buildconfig = "5.3.5"
+antlr = "4.13.2"
+buildconfig = "6.1.2"
 caffeine = "2.9.1"
 easyexcel = "4.0.3"
 redisson = "3.32.0"
-h2 = "2.4.240"
+h2 = "2.5.252"
 intellijAnnotations = "12.0"
 jackson2 = "2.15.2"
 jackson3 = "3.0.3"
@@ -16,18 +17,18 @@ jacksonAnnotations = "2.21"
 jakartaValidation = "3.0.2"
 javapoet = "1.13.0"
 javaxValidation = "2.0.1.Final"
-jetbrainsAnnotations = "24.0.0"
-jspecify = "1.0.0"
-kafka = "0.10.0.0"
-kotlinpoet = "2.2.0"
+jetbrainsAnnotations = "26.1.0"
+jspecify = "1.0.1"
+kafka = "3.9.2"
+kotlinpoet = "2.4.0"
 ksp = "2.3.12"
 kspTest = "0.14.0"
-lombok = "1.18.38"
-mapstruct = "1.5.3.Final"
-mysql = "8.0.29"
-postgresql = "42.3.6"
-sqlite = "3.47.0.0"
-sqlserver = "12.4.2.jre11"
+lombok = "1.18.48"
+mapstruct = "1.6.3"
+mysql = "8.0.33"
+postgresql = "42.7.14"
+sqlite = "3.54.1.0"
+sqlserver = "13.6.1.jre11"
 slf4j = "1.7.36"
 spring = "5.3.20"
 springBoot = "2.7.0"
@@ -35,15 +36,15 @@ springGraphql = "1.0.0"
 springdoc = "1.7.0"
 hibernateValitation = "8.0.5.Final"
 quarkus = "3.15.0"
-swaggerUi = "5.31.0"
-scalar = "0.5.47"
+swaggerUi = "5.34.1"
+scalar = "0.6.86"
 
 [libraries]
 
 addzero-lsi-core = { group = "site.addzero", name = "lsi-core", version.ref = "addzero-lsi" }
 addzero-lsi-ksp = { group = "site.addzero", name = "lsi-ksp", version.ref = "addzero-lsi" }
 addzero-lsi-apt = { group = "site.addzero", name = "lsi-apt", version.ref = "addzero-lsi" }
-addzero-ddlgenerator-core = { group = "site.addzero", name = "ddlgenerator-core", version.ref = "addzero-ddlgenerator" }
+addzero-ddlgenerator-core = { group = "site.addzero", name = "ddlgenerator-core", version.ref = "addzero-ddlgenerator-core" }
 addzero-ddlgenerator-lsi-adaptor = { group = "site.addzero", name = "ddlgenerator-lsi-adaptor", version.ref = "addzero-ddlgenerator" }
 addzero-ddlgenerator-dialect-mysql = { group = "site.addzero", name = "ddlgenerator-dialect-mysql", version.ref = "addzero-ddlgenerator" }
 addzero-ddlgenerator-dialect-postgresql = { group = "site.addzero", name = "ddlgenerator-dialect-postgresql", version.ref = "addzero-ddlgenerator" }

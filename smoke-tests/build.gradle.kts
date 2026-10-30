@@ -1,5 +1,5 @@
 plugins {
-    kotlin("jvm") version "2.4.20"
+    kotlin("jvm") version "2.4.21"
     id("com.google.devtools.ksp") version "2.3.12"
     alias(quarkusLibs.plugins.quarkus)
 }
@@ -8,10 +8,10 @@ val forkVersion = providers.gradleProperty("forkVersion").get()
 val fixture = file("../project/jimmer-quarkus/integration-tests/src")
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 }
-kotlin.compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+kotlin.compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_25)
 
 sourceSets {
     main {

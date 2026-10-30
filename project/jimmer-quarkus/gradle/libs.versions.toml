@@ -1,5 +1,5 @@
 [versions]
-quarkus = "3.39.2"
+quarkus = "3.40.1.1"
 testcontainers = "2.0.5"
 java-uuid-generator = "5.2.0"
 

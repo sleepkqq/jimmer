@@ -2,7 +2,7 @@
 
 ## Layout and provenance
 
-- `project/` remains the upstream Gradle build (JDK 21, Gradle 9.7.1).
+- `project/` remains the upstream Gradle build (JDK 25, Gradle 9.8.2); core modules target Java 8, the Quarkus extension Java 25.
 - `project/jimmer-quarkus/{runtime,deployment,integration-tests}` contains the extension.
 - Extension history was imported with `git subtree add` **without squashing**, from
   `sleepkqq/quarkus-jimmer-extension` after release `1.14.1`.
@@ -19,7 +19,7 @@
 - Release `1.0.4` preserves nullable JSON types in update-returning `VALUES` sources.
   The renderer prefers column metadata and falls back to `Dialect.getJsonSqlType()`
   (`jsonb` for PostgreSQL), since the JDBC `PGobject` class alone is not a SQL type name.
-- Kotlin 2.4.20, KSP 2.3.12 and compiler-testing 0.14.0 are aligned across the build.
+- Kotlin 2.4.21, KSP 2.3.12 and compiler-testing 0.14.0 are aligned across the build.
 - All published modules, including the Quarkus runtime/deployment pair and BOM, share
   `com.github.sleepkqq.jimmer` and the version in `project/gradle.properties`.
 - The repository remains a GitHub fork of `babyfish-ct/jimmer`; upstream history and
