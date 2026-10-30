@@ -1,7 +1,7 @@
 [versions]
 addzero-ddlgenerator = "2026.09.27"
-addzero-ddlgenerator-archived = "2026.07.15.2"
 addzero-ddlgenerator-core = "2026.10.06"
+addzero-ddlgenerator-archived = "2026.07.15.2"
 addzero-lsi = "2026.09.25"
 addzero-tool-database-model = "2026.08.26"
 antlr = "4.13.2"
