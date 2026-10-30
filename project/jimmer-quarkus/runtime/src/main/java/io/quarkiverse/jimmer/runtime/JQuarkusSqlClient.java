@@ -21,6 +21,8 @@ import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.cache.CacheAbandonedCallback;
 import org.babyfish.jimmer.sql.cache.CacheFactory;
 import org.babyfish.jimmer.sql.cache.CacheOperator;
+import org.babyfish.jimmer.sql.cache.Caches;
+import org.babyfish.jimmer.sql.cache.CachesImpl;
 import org.babyfish.jimmer.sql.di.*;
 import org.babyfish.jimmer.sql.dialect.DefaultDialect;
 import org.babyfish.jimmer.sql.dialect.Dialect;
@@ -93,6 +95,14 @@ class JQuarkusSqlClient extends JLazyInitializationSqlClient implements SqlClien
 
     @Override
     protected void afterCreate(JSqlClientImplementor sqlClient) {
+        ConnectionManager connectionManager = sqlClient.getConnectionManager();
+        if (connectionManager instanceof QuarkusConnectionManager
+                && sqlClient.getTriggerType() == TriggerType.BINLOG_ONLY) {
+            Caches caches = sqlClient.getCaches();
+            if (!CachesImpl.isEmpty(caches)) {
+                ((QuarkusConnectionManager) connectionManager).setCaches(caches);
+            }
+        }
         initialized = true;
     }
 

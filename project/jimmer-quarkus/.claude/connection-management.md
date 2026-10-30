@@ -26,7 +26,8 @@
 7. Вне транзакции (`isTransactionActive() == false`) — try-with-resources над прокси: коннект
    берётся при первом JDBC-вызове и закрывается при выходе из scope.
 
-Следствие: read, полностью обслуженный object cache (`findById`/`findByIds` без фильтров),
+Следствие: read, полностью обслуженный object cache (`findById`/`findByIds` без фильтров или
+только со встроенным logical delete),
 не делает `getConnection()` и не enlists соединение в JTA-транзакции.
 
 ## ConnectionScope open() (jimmer 0.11.0, selection streaming)
@@ -36,6 +37,31 @@
 - Активная TX → тот же TX-прокси, что и в `execute()` (закроет synchronization на commit/rollback).
 - Без TX → свежий `LazyConnection`-прокси; `scope.close()` закрывает прокси, т.е. возвращает
   target в пул только если он был acquired. Streaming без JDBC коннект не берёт.
+
+## Post-commit eviction для `BINLOG_ONLY`
+
+`TriggerType.BINLOG_ONLY` не запускает transaction triggers, поэтому собственные записи клиента
+иначе оставляли бы устаревший object/property cache до прихода binlog-события. Ядро сообщает
+изменённые ключи через SPI `org.babyfish.jimmer.sql.runtime.MutationKeyListener`: вызов происходит
+после выполнения statement, одним батчем на statement, и только если `triggerType == BINLOG_ONLY`
+и текущий connection manager реализует SPI. Ключи собираются (а у bulk update/delete появляется
+предварительный `select id`) только для типов, у которых в иерархии есть object cache или
+property cache — клиент без таких кэшей выполняет прежний SQL.
+
+`QuarkusConnectionManager` реализует этот SPI; кэши приходят из `JQuarkusSqlClient.afterCreate`
+(`setCaches`) только для `BINLOG_ONLY`-клиента с непустыми кэшами — без кэшей менеджер ключи не копит.
+
+| Scope записи | Куда попадают ключи | Когда eviction |
+|---|---|---|
+| Активная JTA-транзакция | TSR-ресурс под собственным `mutationKeysKey` (отдельно от `connectionKey`) | одна interposed synchronization: `afterCompletion(STATUS_COMMITTED)` |
+| auto-commit `execute()` вне TX | ThreadLocal-батч скоупа | после закрытия соединения скоупа (statement уже durable) |
+| statement вне обоих scope (streaming update-returning: stream закрывается позже) | одноразовый immediate-батч | сразу после statement |
+| пользовательский `con` | — | не evict-ится, соединение не наше |
+
+Eviction — `getObjectCache(type).deleteAll(ids)` и `getPropertyCache(prop).deleteAll(sourceIds)`.
+Rollback ничего не удаляет. `RuntimeException` от кэша ловится на каждую запись и логируется
+`warn`: сломанный кэш не отменяет уже закоммиченную транзакцию. Multi-datasource безопасен:
+у каждого менеджера свой ключ и свои кэши.
 
 ## Ключ кеширования: `private final Object connectionKey`
 
@@ -54,13 +80,15 @@
 
 | Сценарий | Поведение |
 |---|---|
-| Read полностью из object cache (без фильтров) | **0 acquire** — коннект не нужен |
+| Read полностью из object cache (без фильтров или только со встроенным logical delete) | **0 acquire** — коннект не нужен |
 | Несколько repo-вызовов в `@Transactional` | Один коннект на всю транзакцию → минимум acquire |
 | Несколько repo-вызовов **без** `@Transactional` | Отдельный acquire/release на **каждый** вызов, но только при первом JDBC-вызове (cache-hit → 0) |
 | REQUIRES_NEW вложенная TX | Свой коннект, изолирован от outer TX |
 
 **Рекомендация**: оборачивать серии read-запросов в `@Transactional` (или `readOnly=true`) чтобы
 использовать один коннект вместо N acquire на N вызовов. Особенно важно при высокой нагрузке.
+Компромисс: object-cache гидратация запросов работает только при доказанно неактивной транзакции,
+поэтому чтения внутри `@Transactional` идут целиком в SQL и не наполняют общий кэш.
 Транзакции без JDBC-вызовов (cache-served reads) пул не трогают вовсе.
 
 **Мониторинг пула**: Quarkus Micrometer экспортирует `agroal.pool.*` метрики — использовать для

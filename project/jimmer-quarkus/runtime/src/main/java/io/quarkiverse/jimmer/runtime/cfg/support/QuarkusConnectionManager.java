@@ -1,15 +1,28 @@
 package io.quarkiverse.jimmer.runtime.cfg.support;
 
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import javax.sql.DataSource;
 
+import org.babyfish.jimmer.meta.ImmutableProp;
+import org.babyfish.jimmer.meta.ImmutableType;
+import org.babyfish.jimmer.sql.cache.Cache;
+import org.babyfish.jimmer.sql.cache.Caches;
+import org.babyfish.jimmer.sql.runtime.MutationKeyListener;
 import org.babyfish.jimmer.sql.transaction.Propagation;
 import org.babyfish.jimmer.sql.transaction.TxConnectionManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.quarkus.arc.Arc;
 import io.quarkus.narayana.jta.QuarkusTransaction;
@@ -21,9 +34,13 @@ import jakarta.transaction.Transaction;
 import jakarta.transaction.TransactionManager;
 import jakarta.transaction.TransactionSynchronizationRegistry;
 
-public class QuarkusConnectionManager implements DataSourceAwareConnectionManager, TxConnectionManager {
+public class QuarkusConnectionManager implements DataSourceAwareConnectionManager, TxConnectionManager, MutationKeyListener {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(QuarkusConnectionManager.class);
 
     private final Object connectionKey = new Object();
+
+    private final Object mutationKeysKey = new Object();
 
     /**
      * Connection acquired by the current thread's {@link #execute(Connection, Function)}
@@ -32,6 +49,19 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
      * connection lifecycle.
      */
     private final ThreadLocal<Connection> managedExecutionConnection = new ThreadLocal<>();
+
+    /**
+     * Evictions accumulated by the current thread's non-transactional managed
+     * {@link #execute(Connection, Function)} scope. Auto-commit makes every statement durable
+     * before the scope ends, so they are flushed once the scope's connection is closed.
+     */
+    private final ThreadLocal<MutationBatch> autoCommitMutationBatch = new ThreadLocal<>();
+
+    /**
+     * Caches of the client that owns this manager; {@code null} while the client has no caches
+     * or does not use {@code BINLOG_ONLY}, in which case no mutation key is accumulated.
+     */
+    private volatile Caches caches;
 
     private final DataSource dataSource;
     private final TransactionManager transactionManager;
@@ -47,6 +77,127 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
     @Override
     public DataSource getDataSource() {
         return dataSource;
+    }
+
+    /**
+     * Called by the Quarkus client once its caches exist. A {@code BINLOG_ONLY} client fires no
+     * transaction triggers, so this manager reports mutated keys and evicts them after commit.
+     */
+    public void setCaches(@Nullable Caches caches) {
+        this.caches = caches;
+    }
+
+    @Override
+    public void entitiesMutated(Connection con, ImmutableType type, Collection<?> ids) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        MutationBatch batch = mutationBatch(con);
+        if (batch == null) {
+            return;
+        }
+        batch.entityIds.computeIfAbsent(type, it -> new LinkedHashSet<>()).addAll(ids);
+        evictIfImmediate(batch);
+    }
+
+    @Override
+    public void associationsMutated(Connection con, ImmutableProp prop, Collection<?> sourceIds) {
+        if (sourceIds.isEmpty()) {
+            return;
+        }
+        MutationBatch batch = mutationBatch(con);
+        if (batch == null) {
+            return;
+        }
+        batch.propIds.computeIfAbsent(prop, it -> new LinkedHashSet<>()).addAll(sourceIds);
+        evictIfImmediate(batch);
+    }
+
+    /**
+     * Selects the batch a mutation belongs to:
+     * <ul>
+     *     <li>an active JTA transaction uses its {@link TransactionSynchronizationRegistry} resource,
+     *     so eviction runs once, from {@code afterCompletion};</li>
+     *     <li>the thread's auto-commit managed {@code execute} scope uses its own batch;</li>
+     *     <li>statements executed outside both (streamed update-returning closes its stream after
+     *     the executing scope) are already durable, so they get an immediately evicted batch.</li>
+     * </ul>
+     * A user-supplied connection is never ours and is ignored.
+     */
+    @Nullable
+    private MutationBatch mutationBatch(Connection con) {
+        if (caches == null || con == null || !isManagedConnection(con)) {
+            return null;
+        }
+        if (isTransactionActive()) {
+            return transactionalMutationBatch();
+        }
+        MutationBatch batch = autoCommitMutationBatch.get();
+        return batch != null ? batch : new MutationBatch(true);
+    }
+
+    private static boolean isManagedConnection(Connection con) {
+        return Proxy.isProxyClass(con.getClass()) &&
+                Proxy.getInvocationHandler(con) instanceof LazyConnection;
+    }
+
+    private MutationBatch transactionalMutationBatch() {
+        Object resource = tsr.getResource(mutationKeysKey);
+        if (resource instanceof MutationBatch) {
+            return (MutationBatch) resource;
+        }
+        MutationBatch batch = new MutationBatch(false);
+        try {
+            tsr.putResource(mutationKeysKey, batch);
+            tsr.registerInterposedSynchronization(new Synchronization() {
+                @Override
+                public void beforeCompletion() {
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == Status.STATUS_COMMITTED) {
+                        evict(batch);
+                    }
+                }
+            });
+        } catch (RuntimeException ex) {
+            LOGGER.warn("Cannot register post-commit cache eviction for the current transaction", ex);
+        }
+        return batch;
+    }
+
+    private void evictIfImmediate(MutationBatch batch) {
+        if (batch.immediate) {
+            evict(batch);
+        }
+    }
+
+    private void evict(MutationBatch batch) {
+        Caches caches = this.caches;
+        if (caches == null || batch.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<ImmutableType, Set<Object>> entry : batch.entityIds.entrySet()) {
+            try {
+                Cache<Object, Object> cache = caches.getObjectCache(entry.getKey());
+                if (cache != null) {
+                    cache.deleteAll(entry.getValue());
+                }
+            } catch (RuntimeException ex) {
+                LOGGER.warn("Failed to evict object cache of \"{}\" after commit", entry.getKey(), ex);
+            }
+        }
+        for (Map.Entry<ImmutableProp, Set<Object>> entry : batch.propIds.entrySet()) {
+            try {
+                Cache<Object, Object> cache = caches.getPropertyCache(entry.getKey());
+                if (cache != null) {
+                    cache.deleteAll(entry.getValue());
+                }
+            } catch (RuntimeException ex) {
+                LOGGER.warn("Failed to evict property cache of \"{}\" after commit", entry.getKey(), ex);
+            }
+        }
     }
 
     @Override
@@ -65,7 +216,20 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
         }
 
         try (Connection lazyConnection = new LazyConnection(dataSource).proxy()) {
-            return executeWithTrackedConnection(lazyConnection, block);
+            MutationBatch batch = new MutationBatch(false);
+            MutationBatch previous = autoCommitMutationBatch.get();
+            autoCommitMutationBatch.set(batch);
+            try {
+                return executeWithTrackedConnection(lazyConnection, block);
+            } finally {
+                if (previous != null) {
+                    autoCommitMutationBatch.set(previous);
+                } else {
+                    autoCommitMutationBatch.remove();
+                }
+                // The connection is closed here, so every auto-committed statement is durable.
+                evict(batch);
+            }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
@@ -198,6 +362,23 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
                 throw new UnsupportedOperationException("Quarkus does not support NEVER");
             default:
                 return QuarkusTransaction.joiningExisting();
+        }
+    }
+
+    private static final class MutationBatch {
+
+        private final boolean immediate;
+
+        private final Map<ImmutableType, Set<Object>> entityIds = new LinkedHashMap<>();
+
+        private final Map<ImmutableProp, Set<Object>> propIds = new LinkedHashMap<>();
+
+        private MutationBatch(boolean immediate) {
+            this.immediate = immediate;
+        }
+
+        private boolean isEmpty() {
+            return entityIds.isEmpty() && propIds.isEmpty();
         }
     }
 }

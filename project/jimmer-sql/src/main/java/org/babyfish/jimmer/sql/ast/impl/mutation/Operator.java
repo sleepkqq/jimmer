@@ -333,6 +333,7 @@ class Operator {
         if (returning != null) {
             int rowCount = rowCount(returning.executeInsert(batch.entities()));
             completeInsertedFetcherFields(batch);
+            fireMutationKeys(ctx.path.getType(), batch.entities(), null);
             MutationTrigger trigger = fireTrigger ? ctx.trigger : null;
             if (trigger != null) {
                 for (DraftSpi draft : batch.entities()) {
@@ -422,6 +423,7 @@ class Operator {
 
         int rowCount = execute(builder, batch, false, false);
         completeInsertedFetcherFields(batch);
+        fireMutationKeys(ctx.path.getType(), batch.entities(), null);
         // Fire the trigger after `execute` so the draft already reflects its final,
         // post-execution state (generated id, version, ...) before being captured.
         MutationTrigger trigger = fireTrigger ? ctx.trigger : null;
@@ -873,6 +875,25 @@ class Operator {
                 output.add(id);
             }
         }
+    }
+
+    private void fireMutationKeys(ImmutableType type, Iterable<DraftSpi> drafts, @Nullable int[] rowCounts) {
+        PropId idPropId = type.getIdProp().getId();
+        Set<Object> ids = new LinkedHashSet<>();
+        int index = 0;
+        for (DraftSpi draft : drafts) {
+            boolean accepted = rowCounts == null ||
+                    (index < rowCounts.length && rowCounts[index] != 0);
+            index++;
+            if (!accepted) {
+                continue;
+            }
+            Object id = draft.__get(idPropId);
+            if (id != null) {
+                ids.add(id);
+            }
+        }
+        MutationKeys.fireEntitiesMutated(ctx.options.getSqlClient(), ctx.con, type, ids);
     }
 
     private Map<Object, ImmutableSpi> findTypeChangeOldRows(
@@ -1437,6 +1458,7 @@ class Operator {
                 trigger.modifyEntityTable(pair[0], pair[1]);
             }
         }
+        fireMutationKeys(ctx.path.getType(), entities, rowCounts);
         AffectedRows.add(ctx.affectedRowCountMap, tableType, rowCount(rowCounts));
         return rowCounts;
     }
@@ -1973,6 +1995,7 @@ class Operator {
             if (!returning.returningProps.contains(batch.shape().getType().getVersionProp())) {
                 unloadUnchangedVersion(batch.entities(), updatedGetters);
             }
+            fireMutationKeys(ctx.path.getType(), batch.entities(), rowCounts);
             AffectedRows.add(ctx.affectedRowCountMap, tableType, rowCount(rowCounts));
             return rowCounts;
         }
@@ -2044,6 +2067,7 @@ class Operator {
                 versionGetter != null || discriminatorGuardProp != null)) {
             unloadRejectedGeneratedIds(batch, rowCounts);
         }
+        fireMutationKeys(ctx.path.getType(), batch.entities(), rowCounts);
         AffectedRows.add(ctx.affectedRowCountMap, tableType, rowCount(rowCounts));
         return rowCounts;
     }

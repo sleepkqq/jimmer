@@ -458,8 +458,24 @@ public class MutableUpdateImpl
             return executeWithTrigger(builder, con);
         }
 
+        if (MutationKeys.listenerOf(getSqlClient(), getType()) != null) {
+            return executeWithMutationKeys(builder, con);
+        }
+
         renderTo(builder);
         return executeUpdateSql(builder, con);
+    }
+
+    private int executeWithMutationKeys(SqlBuilder builder, Connection con) {
+        Map<Object, ImmutableSpi> rowMap = selectTargetRows(builder, con);
+        if (rowMap.isEmpty()) {
+            return 0;
+        }
+        builder = new SqlBuilder(new AstContext(getSqlClient()));
+        renderTo(builder, rowMap.keySet());
+        int rowCount = executeUpdateSql(builder, con);
+        fireMutationKeys(con, rowMap.keySet());
+        return rowCount;
     }
 
     private <R> List<R> executeReturningImpl(
@@ -492,6 +508,10 @@ public class MutableUpdateImpl
             return executeReturningWithTrigger(builder, con, selections, tupleCreator, jdbcOptions);
         }
 
+        if (MutationKeys.listenerOf(getSqlClient(), getType()) != null) {
+            return executeReturningWithMutationKeys(builder, con, selections, tupleCreator, jdbcOptions);
+        }
+
         renderReturningTo(builder, null, selections);
         return executeReturningSql(builder, con, selections, tupleCreator, jdbcOptions);
     }
@@ -522,6 +542,10 @@ public class MutableUpdateImpl
             return streamReturningWithTrigger(builder, con, selections, tupleCreator, jdbcOptions);
         }
 
+        if (MutationKeys.listenerOf(getSqlClient(), getType()) != null) {
+            return streamReturningWithMutationKeys(builder, con, selections, tupleCreator, jdbcOptions);
+        }
+
         renderReturningTo(builder, null, selections);
         return streamReturningSql(builder, con, selections, tupleCreator, jdbcOptions, null);
     }
@@ -533,7 +557,7 @@ public class MutableUpdateImpl
             TupleCreator<R> tupleCreator,
             JdbcOptions jdbcOptions
     ) {
-        Map<Object, ImmutableSpi> oldRowMap = selectRowsForTrigger(builder, con);
+        Map<Object, ImmutableSpi> oldRowMap = selectTargetRows(builder, con);
         if (oldRowMap.isEmpty()) {
             return Collections.emptyList();
         }
@@ -545,6 +569,58 @@ public class MutableUpdateImpl
             submitTrigger(con, oldRowMap);
         }
         return rows;
+    }
+
+    private <R> List<R> executeReturningWithMutationKeys(
+            SqlBuilder builder,
+            Connection con,
+            List<Selection<?>> selections,
+            TupleCreator<R> tupleCreator,
+            JdbcOptions jdbcOptions
+    ) {
+        Map<Object, ImmutableSpi> rowMap = selectTargetRows(builder, con);
+        if (rowMap.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        builder = new SqlBuilder(new AstContext(getSqlClient()));
+        renderReturningTo(builder, rowMap.keySet(), selections);
+        List<R> rows = executeReturningSql(builder, con, selections, tupleCreator, jdbcOptions);
+        fireMutationKeys(con, rowMap.keySet());
+        return rows;
+    }
+
+    private <R> Stream<R> streamReturningWithMutationKeys(
+            SqlBuilder builder,
+            Connection con,
+            List<Selection<?>> selections,
+            TupleCreator<R> tupleCreator,
+            JdbcOptions jdbcOptions
+    ) {
+        Map<Object, ImmutableSpi> rowMap = selectTargetRows(builder, con);
+        if (rowMap.isEmpty()) {
+            return Stream.empty();
+        }
+
+        builder = new SqlBuilder(new AstContext(getSqlClient()));
+        renderReturningTo(builder, rowMap.keySet(), selections);
+        return streamReturningSql(
+                builder,
+                con,
+                selections,
+                tupleCreator,
+                jdbcOptions,
+                () -> fireMutationKeys(con, rowMap.keySet())
+        );
+    }
+
+    private void fireMutationKeys(Connection con, Collection<?> ids) {
+        MutationKeys.fireEntitiesMutated(
+                getSqlClient(),
+                con,
+                getTableLikeImplementor().getImmutableType(),
+                ids
+        );
     }
 
     private <R> Stream<R> streamReturningWithTrigger(
@@ -560,7 +636,7 @@ public class MutableUpdateImpl
             if (getSqlClient().isTargetTransferable()) {
                 Executor.validateMutationConnection(actualCon);
             }
-            Map<Object, ImmutableSpi> oldRowMap = selectRowsForTrigger(builder, actualCon);
+            Map<Object, ImmutableSpi> oldRowMap = selectTargetRows(builder, actualCon);
             if (oldRowMap.isEmpty()) {
                 scope.close();
                 return Stream.empty();
@@ -699,7 +775,7 @@ public class MutableUpdateImpl
 
     private int executeWithTrigger(SqlBuilder builder, Connection con) {
 
-        Map<Object, ImmutableSpi> oldRowMap = selectRowsForTrigger(builder, con);
+        Map<Object, ImmutableSpi> oldRowMap = selectTargetRows(builder, con);
         if (oldRowMap.isEmpty()) {
             return 0;
         }
@@ -715,7 +791,7 @@ public class MutableUpdateImpl
         return affectRowCount;
     }
 
-    private Map<Object, ImmutableSpi> selectRowsForTrigger(SqlBuilder builder, Connection con) {
+    private Map<Object, ImmutableSpi> selectTargetRows(SqlBuilder builder, Connection con) {
         renderAsSelect(builder, null);
         List<ImmutableSpi> rows = selectRows(builder, con);
         if (rows.isEmpty()) {
