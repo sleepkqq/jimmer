@@ -64,8 +64,8 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
             return executeWithTrackedConnection(transactionalConnection(), block);
         }
 
-        try (Connection newConnection = dataSource.getConnection()) {
-            return executeWithTrackedConnection(newConnection, block);
+        try (Connection lazyConnection = new LazyConnection(dataSource).proxy()) {
+            return executeWithTrackedConnection(lazyConnection, block);
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
@@ -96,19 +96,14 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
             return ConnectionScope.userConnection(transactionalConnection());
         }
 
-        Connection newConnection;
-        try {
-            newConnection = dataSource.getConnection();
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
+        Connection lazyConnection = new LazyConnection(dataSource).proxy();
         return new ConnectionScope() {
 
             private boolean closed;
 
             @Override
             public Connection connection() {
-                return newConnection;
+                return lazyConnection;
             }
 
             @Override
@@ -118,7 +113,7 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
                 }
                 closed = true;
                 try {
-                    newConnection.close();
+                    lazyConnection.close();
                 } catch (SQLException e) {
                     throw new RuntimeException(e);
                 }
@@ -131,12 +126,7 @@ public class QuarkusConnectionManager implements DataSourceAwareConnectionManage
         if (txConn != null) {
             return txConn;
         }
-        Connection conn;
-        try {
-            conn = dataSource.getConnection();
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
+        Connection conn = new LazyConnection(dataSource).proxy();
         tsr.putResource(connectionKey, conn);
         tsr.registerInterposedSynchronization(new Synchronization() {
             @Override
