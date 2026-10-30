@@ -1,6 +1,6 @@
 # Quarkus cache lifecycle — unified fork
 
-Applies to `com.github.sleepkqq.jimmer:quarkus-jimmer` (checked at `1.2.1`), whose implementation is in `sleepkqq/jimmer/project/jimmer-quarkus`. These are extension capabilities, not upstream Spring settings.
+Applies to `com.github.sleepkqq.jimmer:quarkus-jimmer` (checked at `1.2.2`), whose implementation is in `sleepkqq/jimmer/project/jimmer-quarkus`. These are extension capabilities, not upstream Spring settings.
 
 ## Declarative setup
 
@@ -31,7 +31,7 @@ Root queries selecting a DTO/View of a cached entity are admitted automatically;
 - `entities[].content-only: true` keeps entity/ID/association reads SQL-backed while DTO/View content stays admissible. There is no per-field list (`content-fields` was removed in 1.1.12).
 - An optional CDI `org.babyfish.jimmer.sql.cache.CacheAdmissionPolicy` bean (typically `@RequestScoped`) is consulted by the built-in factories for the query-level and per-row verdicts. With no active request scope its answer is "deny", so background jobs read fresh SQL.
 - `QuarkusConnectionManager` proves "outside a transaction" only for its own managed connection with JTA status `NO_TRANSACTION` and auto-commit on. Reads inside `@Transactional` are never admitted.
-- The extension acquires a pooled connection only at the first real JDBC call (1.2.1). A read fully served by the object cache, including a `findById`/`findByIds` whose type has only the built-in logical-delete filter, takes no connection and enlists nothing, inside or outside `@Transactional`. Pool-exhaustion errors surface at the first statement rather than at the `execute` entry, and wrapping reads in a transaction does not save connections for cache-served reads.
+- The extension acquires a pooled connection only at the first real JDBC call (1.2.2). A read fully served by the object cache, including a `findById`/`findByIds` whose type has only the built-in logical-delete filter, takes no connection and enlists nothing, inside or outside `@Transactional`. Pool-exhaustion errors surface at the first statement rather than at the `execute` entry, and wrapping reads in a transaction does not save connections for cache-served reads.
 - With `BINLOG_ONLY` and caches, the writing instance evicts the object cache and owning-side association cache entries of its own writes after commit (rollback: nothing; auto-commit: after the `execute` scope). Bulk update/delete of a cached type pre-selects ids once. Inverse-side association caches and writes from other services still rely on CDC; no configuration key exists.
 - The built-in local and Redis `CacheFactory` producers are `@DefaultBean`. An application `CacheFactory` bean replaces them **entirely**: it loses declarative entries, guard wiring, content-only and the policy bean unless it implements/wraps them itself (`GuardedCacheFactory` delegates `isObjectCacheContentOnly`/`isObjectCacheAdmissible`).
 - Declarative association caches whose target is affected by a filter are created multi-view (parameterized) from native filter metadata, including `LOCAL_ONLY` (since 1.0.6). `local-max-size: 0` disables the L1 tier of a `FULL` entry.
