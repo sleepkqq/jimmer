@@ -675,8 +675,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insert(Object)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> insert(E entity) {
@@ -684,8 +684,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insert(Object, AssociatedSaveMode)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> insert(E entity, AssociatedSaveMode associatedSaveMode) {
@@ -693,8 +693,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insert(Input)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> insert(Input<E> input) {
@@ -702,8 +702,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insert(Input, AssociatedSaveMode)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> insert(Input<E> input, AssociatedSaveMode associatedSaveMode) {
@@ -711,8 +711,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insertIfAbsent(Object)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_IF_ABSENT}.
      */
     @Deprecated
     default SimpleSaveResult<E> insertIfAbsent(E entity) {
@@ -720,8 +720,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insertIfAbsent(Object, AssociatedSaveMode)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_IF_ABSENT}.
      */
     @Deprecated
     default SimpleSaveResult<E> insertIfAbsent(E entity, AssociatedSaveMode associatedSaveMode) {
@@ -729,8 +729,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insertIfAbsent(Input)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_IF_ABSENT}.
      */
     @Deprecated
     default SimpleSaveResult<E> insertIfAbsent(Input<E> input) {
@@ -738,8 +738,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#insertIfAbsent(Input, AssociatedSaveMode)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#INSERT_IF_ABSENT}.
      */
     @Deprecated
     default SimpleSaveResult<E> insertIfAbsent(Input<E> input, AssociatedSaveMode associatedSaveMode) {
@@ -747,8 +747,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#update(Object)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPDATE_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> update(E entity) {
@@ -756,8 +756,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#update(Object, AssociatedSaveMode)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPDATE_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> update(E entity, AssociatedSaveMode associatedSaveMode) {
@@ -765,8 +765,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#update(Input)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPDATE_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> update(Input<E> input) {
@@ -774,8 +774,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#update(Input, AssociatedSaveMode)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPDATE_ONLY}.
      */
     @Deprecated
     default SimpleSaveResult<E> update(Input<E> input, AssociatedSaveMode associatedSaveMode) {
@@ -783,8 +783,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#merge(Object)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPSERT}.
      */
     @Deprecated
     default SimpleSaveResult<E> merge(E entity) {
@@ -792,8 +792,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#merge(Object)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Object, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPSERT}.
      */
     @Deprecated
     default SimpleSaveResult<E> merge(E entity, AssociatedSaveMode associatedSaveMode) {
@@ -801,8 +801,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#merge(Input)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPSERT}.
      */
     @Deprecated
     default SimpleSaveResult<E> merge(Input<E> input) {
@@ -810,8 +810,8 @@ public interface JavaRepository<E, ID> {
     }
 
     /**
-     * Shortcut for {@link org.babyfish.jimmer.sql.JSqlClient#merge(Input)},
-     * please view that method to know more
+     * Shortcut for {@link #save(Input, SaveMode, AssociatedSaveMode)}
+     * with {@link SaveMode#UPSERT}.
      */
     @Deprecated
     default SimpleSaveResult<E> merge(Input<E> input, AssociatedSaveMode associatedSaveMode) {

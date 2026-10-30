@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory;
 import io.quarkiverse.jimmer.runtime.cfg.JimmerCacheConfig;
 
 /**
- * {@link CacheFactory} for applications without {@code quarkus-redis-client}: only
+ * {@link org.babyfish.jimmer.sql.cache.CacheFactory} for applications without {@code quarkus-redis-client}: only
  * {@code LOCAL_ONLY} entries are legal (per-instance Caffeine, consistency by {@code local-ttl}).
  * Anything else fails the start — there is no Redis to back it and no pub/sub channel to
  * invalidate across instances. Free of Redis imports by design.
