@@ -155,6 +155,9 @@ JitPack resolves Maven Central through `https://maven-central.storage.googleapis
 which lags repo1 by days. Before tagging, check that every dependency version bumped since the
 last release has its POM on that mirror; `1.2.0` failed on `swagger-ui` and `scalar-core`
 released the same day, and `1.2.1` pinned the previous versions.
+`jitpack.yml` names `jdk: openjdk17` so JitPack uses its current image: without it `1.2.1`
+landed on the legacy JDK 8 image, whose stale SDKMan cache could not install JDK 25. JitPack
+rebuilds need the owner's JitPack token; without it a failed tag is replaced by the next patch.
 
 Do not move or delete a published tag. `1.1.3` failed before compilation on an external Maven
 Central HTTP 429, the tag stayed immutable, and `1.1.4` carried the fix. A transiently failed
