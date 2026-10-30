@@ -65,7 +65,7 @@ Every extra SELECT in the SQL log is tagged with a `QueryReason`. Treat unexpect
 
 ## Deletes under triggers/cache
 
-Legacy transaction triggers can force select-before-delete (`CANNOT_DELETE_DIRECTLY`); both `TRANSACTION_ONLY` and `BOTH` are deprecated. Cache presence is not the cause of every row-aware delete, but under `BINLOG_ONLY` a bulk update/delete of a type with a cache now pre-selects its target ids once (1.2.0) so the writing instance can evict its own entries after commit. Writes from other services are covered only **if CDC delivers the required events**. Choose native bounded deletion only after checking associations, logical deletion, filters, parameter binding and CDC coverage; it is not a generic escape from ORM semantics.
+Legacy transaction triggers can force select-before-delete (`CANNOT_DELETE_DIRECTLY`); both `TRANSACTION_ONLY` and `BOTH` are deprecated. Cache presence is not the cause of every row-aware delete, but under `BINLOG_ONLY` a bulk update/delete of a type with a cache now pre-selects its target ids once (1.2.1) so the writing instance can evict its own entries after commit. Writes from other services are covered only **if CDC delivers the required events**. Choose native bounded deletion only after checking associations, logical deletion, filters, parameter binding and CDC coverage; it is not a generic escape from ORM semantics.
 
 ## Pagination
 

@@ -151,6 +151,11 @@ JitPack succeeds — a tag alone does not prove the artifacts exist.
 
 ## 7. Failure handling
 
+JitPack resolves Maven Central through `https://maven-central.storage.googleapis.com/maven2/`,
+which lags repo1 by days. Before tagging, check that every dependency version bumped since the
+last release has its POM on that mirror; `1.2.0` failed on `swagger-ui` and `scalar-core`
+released the same day, and `1.2.1` pinned the previous versions.
+
 Do not move or delete a published tag. `1.1.3` failed before compilation on an external Maven
 Central HTTP 429, the tag stayed immutable, and `1.1.4` carried the fix. A transiently failed
 JitPack build (POM fetch timeout) is retried without touching source or tag; a real defect gets
