@@ -878,6 +878,9 @@ class Operator {
     }
 
     private void fireMutationKeys(ImmutableType type, Iterable<DraftSpi> drafts, @Nullable int[] rowCounts) {
+        if (MutationKeys.listenerOf(ctx.options.getSqlClient(), type) == null) {
+            return;
+        }
         PropId idPropId = type.getIdProp().getId();
         Set<Object> ids = new LinkedHashSet<>();
         int index = 0;
@@ -885,7 +888,8 @@ class Operator {
             boolean accepted = rowCounts == null ||
                     (index < rowCounts.length && rowCounts[index] != 0);
             index++;
-            if (!accepted) {
+            // A batch without returned generated keys leaves the id unloaded; CDC covers that row.
+            if (!accepted || !draft.__isLoaded(idPropId)) {
                 continue;
             }
             Object id = draft.__get(idPropId);
