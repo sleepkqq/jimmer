@@ -27,6 +27,31 @@
 
 ## Migrate a consumer
 
+### Connection-free cache hits and own-write eviction in 1.2.0
+
+No configuration changes; behaviour follows from the existing cache and trigger settings.
+
+- The Quarkus connection manager acquires a pooled connection only at the first real JDBC
+  call. A read fully served by the object cache, inside or outside a JTA transaction, takes no
+  connection and enlists nothing. Pool-exhaustion errors now surface from the first statement
+  instead of the `execute` entry.
+- `findById`/`findByIds` (entity, fetcher or DTO view) of a type whose only filter is the
+  built-in logical-delete filter judge visibility on the cached row; a warm read issues no SQL.
+  User, reversed, ignored or sharding filters, locking reads and content-only types keep the
+  SQL visibility check.
+- `BINLOG_ONLY` clients evict the object and owning-side association cache entries of their own
+  inserts, updates, upserts, deletes and middle-table changes after commit (rollback evicts
+  nothing), so the writing instance reads its own committed writes without waiting for CDC.
+  Bulk update/delete of a cached type pre-selects target ids once; types without caches keep
+  their previous SQL. Inverse-side association caches still rely on CDC.
+- Automatic DTO/View admission that cannot be applied falls back to the ordinary cached path
+  instead of a cache-disabled execution. `CacheTypeMismatchException` moved to an internal
+  package.
+
+The release also targets Java 25 for the Quarkus extension (core modules stay on Java 8) and
+moves to Quarkus 3.40.1.1, Kotlin 2.4.21 and Gradle 9.8.2. Release 1.2.0 includes these
+changes; 1.1.14 does not.
+
 ### Non-nullable key-group preference in 1.1.10
 
 When multiple key groups are loaded, matching prefers a group without nullable
@@ -355,14 +380,14 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.1.14`, replace
+For version `1.2.0`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.1.14`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.1.14`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.0`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.0`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
-compatibility is tested with Kotlin 2.4.20 and KSP 2.3.12. Verify the tagged artifacts and
+compatibility is tested with Kotlin 2.4.21 and KSP 2.3.12. Verify the tagged artifacts and
 the public-only consumer against anonymous JitPack before publishing the GitHub release.
 A tag alone does not establish artifact availability.
 
