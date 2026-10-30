@@ -1,8 +1,11 @@
 package org.babyfish.jimmer.sql.ast.impl;
 
+import org.babyfish.jimmer.ImmutableObjects;
 import org.babyfish.jimmer.Input;
 import org.babyfish.jimmer.View;
+import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
+import org.babyfish.jimmer.meta.LogicalDeletedInfo;
 import org.babyfish.jimmer.meta.PropId;
 import org.babyfish.jimmer.meta.TypedProp;
 import org.babyfish.jimmer.runtime.ImmutableSpi;
@@ -24,6 +27,7 @@ import org.babyfish.jimmer.sql.ast.mutation.SimpleEntitySaveCommand;
 import org.babyfish.jimmer.sql.ast.query.ConfigurableRootQuery;
 import org.babyfish.jimmer.sql.ast.query.Example;
 import org.babyfish.jimmer.sql.ast.query.Order;
+import org.babyfish.jimmer.sql.ast.table.Props;
 import org.babyfish.jimmer.sql.ast.table.Table;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheEnvironment;
@@ -32,6 +36,8 @@ import org.babyfish.jimmer.sql.exception.EmptyResultException;
 import org.babyfish.jimmer.sql.fetcher.DtoMetadata;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.impl.Shapes;
+import org.babyfish.jimmer.sql.filter.Filter;
+import org.babyfish.jimmer.sql.filter.impl.FilterManager;
 import org.babyfish.jimmer.sql.runtime.Converters;
 import org.babyfish.jimmer.sql.runtime.ExecutionPurpose;
 import org.babyfish.jimmer.sql.runtime.JSqlClientImplementor;
@@ -456,24 +462,23 @@ public class EntitiesImpl implements Entities {
             // connection. An internal caller without a seed (a navigated FAKE-FK/filtered
             // child) has no such proof, so force the fresh per-id SQL visibility read that
             // also establishes target existence instead of trusting the ids as visible.
+            // The built-in logical-delete filter needs no such read: the cached row stores
+            // its own column, so the row itself establishes visibility.
+            boolean judgeLogicalDelete = seed == null && !internal && isLogicalDeleteFilterOnly(immutableType);
             Collection<Object> visibleIds = seed != null ?
                     expectedTypes.keySet() :
-                    visibleCachedIds(immutableType, distinctIds, con, internal);
-            if (visibleIds.isEmpty()) {
-                return Collections.emptyList();
-            }
-            Map<Object, E> cachedMap = cache.getAll(
+                    judgeLogicalDelete ?
+                            distinctIds :
+                            visibleCachedIds(immutableType, distinctIds, con, internal);
+            Map<Object, E> cachedMap = getCachedMap(
+                    cache,
+                    immutableType,
+                    distinctIds,
                     visibleIds,
-                    new CacheEnvironment<>(
-                            sqlClient,
-                            con,
-                            CacheLoader.objectLoader(
-                                    sqlClient,
-                                    con,
-                                    (Class<E>) owner.getJavaClass()
-                            ),
-                            true
-                    )
+                    con,
+                    internal,
+                    judgeLogicalDelete,
+                    (Class<E>) owner.getJavaClass()
             );
             // Enforce the fresh concrete type per id before any shape/DTO
             // conversion, so a stale polymorphic payload is declined rather
@@ -580,23 +585,21 @@ public class EntitiesImpl implements Entities {
                 sqlClient.getCaches().isObjectCacheContentOnly(immutableType) ?
                 null : sqlClient.getCaches().getObjectCache(immutableType);
         if (cache != null) {
-            Collection<Object> visibleIds = visibleCachedIds(immutableType, distinctIds, con);
-            if (visibleIds.isEmpty()) {
-                return Collections.emptyList();
-            }
-            Collection<E> cachedEntities = cache.getAll(
+            boolean judgeLogicalDelete = isLogicalDeleteFilterOnly(immutableType);
+            Collection<Object> visibleIds = judgeLogicalDelete ?
+                    distinctIds :
+                    visibleCachedIds(immutableType, distinctIds, con);
+            Map<Object, E> cachedMap = getCachedMap(
+                    cache,
+                    immutableType,
+                    distinctIds,
                     visibleIds,
-                    new CacheEnvironment<>(
-                            sqlClient,
-                            con,
-                            CacheLoader.objectLoader(
-                                    sqlClient,
-                                    con,
-                                    (Class<E>) immutableType.getJavaClass()
-                            ),
-                            true
-                    )
-            ).values();
+                    con,
+                    false,
+                    judgeLogicalDelete,
+                    (Class<E>) immutableType.getJavaClass()
+            );
+            Collection<E> cachedEntities = cachedMap.values();
             List<E> entities = new ArrayList<>(cachedEntities.size());
             for (E entity : cachedEntities) {
                 if (entity != null) {
@@ -639,6 +642,88 @@ public class EntitiesImpl implements Entities {
 
     private Collection<Object> visibleCachedIds(ImmutableType type, Set<Object> ids, Connection con) {
         return visibleCachedIds(type, ids, con, false);
+    }
+
+    /**
+     * The built-in logical-delete filter is a comparison on the entity's own column and the
+     * object cache stores that column, so a cached row answers it without a visible-id query.
+     * A user filter, a reversed or ignored logical-deletion behavior, a sharding filter or a
+     * database-authoritative read shape (locking, internal filtered child, ignored root user
+     * filters) keeps the database authoritative for visibility.
+     */
+    private boolean isLogicalDeleteFilterOnly(ImmutableType type) {
+        if (forUpdate || rootUserFiltersIgnored || purpose != ExecutionPurpose.QUERY) {
+            return false;
+        }
+        Filter<Props> filter = sqlClient.getFilters().getFilter(type);
+        return filter != null && !FilterManager.hasUserFilter(filter);
+    }
+
+    /**
+     * Reads cached rows for ids whose visibility is already known. With the built-in
+     * logical-delete filter, the rows themselves are judged; if a payload lacks the
+     * logical-deleted column, the whole call falls back to the database visibility query.
+     */
+    private <E> Map<Object, E> getCachedMap(
+            Cache<Object, E> cache,
+            ImmutableType type,
+            Set<Object> distinctIds,
+            Collection<Object> visibleIds,
+            Connection con,
+            boolean forceVisibilityRead,
+            boolean judgeLogicalDelete,
+            Class<E> javaClass
+    ) {
+        if (visibleIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        CacheEnvironment<Object, E> environment = new CacheEnvironment<>(
+                sqlClient,
+                con,
+                CacheLoader.objectLoader(sqlClient, con, javaClass),
+                true
+        );
+        if (!judgeLogicalDelete) {
+            return cache.getAll(visibleIds, environment);
+        }
+        Map<Object, E> cachedMap = getAllJudgingLogicalDelete(cache, visibleIds, environment, type);
+        if (cachedMap != null) {
+            return cachedMap;
+        }
+        Collection<Object> dbVisibleIds = visibleCachedIds(type, distinctIds, con, forceVisibilityRead);
+        return dbVisibleIds.isEmpty() ?
+                Collections.emptyMap() :
+                cache.getAll(dbVisibleIds, environment);
+    }
+
+    /**
+     * Reads cached rows and judges the built-in logical-delete filter on each stored row.
+     * Returns {@code null} when a payload does not carry the logical-deleted column: the
+     * caller must keep the database authoritative for the whole call instead of guessing.
+     */
+    private static <E> Map<Object, E> getAllJudgingLogicalDelete(
+            Cache<Object, E> cache,
+            Collection<Object> ids,
+            CacheEnvironment<Object, E> environment,
+            ImmutableType type
+    ) {
+        Map<Object, E> cachedMap = cache.getAll(ids, environment);
+        LogicalDeletedInfo info = type.getLogicalDeletedInfo();
+        ImmutableProp prop = info.getProp();
+        Map<Object, E> visibleMap = new LinkedHashMap<>((cachedMap.size() * 4 + 2) / 3);
+        for (Map.Entry<Object, E> e : cachedMap.entrySet()) {
+            E entity = e.getValue();
+            if (entity == null) {
+                continue;
+            }
+            if (!ImmutableObjects.isLoaded(entity, prop)) {
+                return null;
+            }
+            if (!info.isDeleted(ImmutableObjects.get(entity, prop))) {
+                visibleMap.put(e.getKey(), entity);
+            }
+        }
+        return visibleMap;
     }
 
     private Collection<Object> visibleCachedIds(ImmutableType type, Set<Object> ids, Connection con, boolean force) {
