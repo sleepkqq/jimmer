@@ -42,8 +42,9 @@ No configuration changes; behaviour follows from the existing cache and trigger 
 - `BINLOG_ONLY` clients evict the object and owning-side association cache entries of their own
   inserts, updates, upserts, deletes and middle-table changes after commit (rollback evicts
   nothing), so the writing instance reads its own committed writes without waiting for CDC.
-  Bulk update/delete of a cached type pre-selects target ids once; types without caches keep
-  their previous SQL. Inverse-side association caches, and saved rows whose ids the database
+  A bulk update of a cached type reads its ids through `UPDATE ... RETURNING` where the dialect
+  supports it (otherwise one id pre-select); a bulk delete keeps its direct statement and database
+  constraint errors after one id pre-select. Types without caches keep their previous SQL. Inverse-side association caches, and saved rows whose ids the database
   does not return (for example MySQL batch upserts by key), still rely on CDC.
 - Automatic DTO/View admission that cannot be applied falls back to the ordinary cached path
   instead of a cache-disabled execution. `CacheTypeMismatchException` moved to an internal

@@ -184,16 +184,37 @@ public class MutableDeleteImpl
 
         TableImplementor<?> table = getTableLikeImplementor();
         DeleteExecution execution = prepareExecution(sqlClient, table);
-        if (execution.directRenderMode != DirectRenderMode.NONE) {
-            return executeDirectly(
-                    con,
-                    execution.astContext,
-                    execution.logicalDeleted,
-                    execution.directRenderMode,
-                    execution.joinedTypeBranchTableRequired
-            );
+        if (execution.directRenderMode == DirectRenderMode.NONE) {
+            return executeByDeleter(con, sqlClient, table, execution.binLogOnly);
         }
-        return executeByDeleter(con, sqlClient, table, execution.binLogOnly);
+        ImmutableType type = table.getImmutableType();
+        if (MutationKeys.listenerOf(sqlClient, type) == null) {
+            return executeDirectly(con, execution);
+        }
+        List<Object> ids = selectIds(con, table);
+        if (ids.isEmpty()) {
+            return 0;
+        }
+        int rowCount = executeDirectly(con, execution);
+        MutationKeys.fireEntitiesMutated(sqlClient, con, type, ids);
+        return rowCount;
+    }
+
+    private int executeDirectly(Connection con, DeleteExecution execution) {
+        return executeDirectly(
+                con,
+                execution.astContext,
+                execution.logicalDeleted,
+                execution.directRenderMode,
+                execution.joinedTypeBranchTableRequired
+        );
+    }
+
+    private List<Object> selectIds(Connection con, TableImplementor<?> table) {
+        return deleteQuery
+                .select(table.get(table.getImmutableType().getIdProp()))
+                .distinct()
+                .execute(con);
     }
 
     private DeleteExecution prepareExecution(
@@ -211,7 +232,6 @@ public class MutableDeleteImpl
 
         boolean binLogOnly = sqlClient.getTriggerType() == TriggerType.BINLOG_ONLY;
         boolean directlyEligible = binLogOnly &&
-                MutationKeys.listenerOf(sqlClient, getType()) == null &&
                 isDirectlyDeletableByDissociation(logicalDeleted) &&
                 isDirectlyDeletableByInheritance(logicalDeleted);
         DirectRenderMode directRenderMode = directlyEligible ?
@@ -275,10 +295,7 @@ public class MutableDeleteImpl
         List<Object> ids = null;
         Collection<ImmutableSpi> rows = null;
         if (binLogOnly) {
-            ids = deleteQuery
-                    .select(table.get(table.getImmutableType().getIdProp()))
-                    .distinct()
-                    .execute(con);
+            ids = selectIds(con, table);
             if (ids.isEmpty()) {
                 return 0;
             }

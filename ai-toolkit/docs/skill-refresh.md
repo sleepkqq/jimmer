@@ -26,7 +26,7 @@ Consumer-visible changes documented and, where contradicted, corrected:
   "every ID read rechecks visibility with SQL" wording.
 - `BINLOG_ONLY` clients evict their own object and owning-side association
   cache entries after commit (rollback: nothing; auto-commit: after the
-  `execute` scope); bulk update/delete of a cached type pre-selects ids once.
+  `execute` scope); bulk update of a cached type reads ids through `UPDATE ... RETURNING`; bulk delete adds one id select before its direct `DELETE` (1.2.3).
   Inverse-side association caches and other services' writes still need CDC; no
   configuration key exists. Corrected "own writes stay stale until CDC".
 - Automatic DTO/View admission that cannot be applied now continues on the

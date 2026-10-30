@@ -32,7 +32,7 @@ Trace each arrow in the application's real integration before enabling caching. 
 
 A migration must account for existing transaction listeners and warm entries as well as changing the setting. Report the reason for the replacement and how cached traffic becomes safe; a successful startup or Redis PING is insufficient. Verify two instances, an external writer, consumer restart, replay, and a load held across invalidation.
 
-Under `BINLOG_ONLY`, the writing instance evicts the object cache and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes after commit (1.2.2): rollback evicts nothing, auto-commit evicts when the `execute` scope closes, and a bulk update/delete of a cached type pre-selects its target ids once. Inverse-side association caches and writes from other services still rely on CDC; there is no configuration key for this.
+Under `BINLOG_ONLY`, the writing instance evicts the object cache and owning-side association cache entries of its own inserts, updates, upserts, deletes and middle-table changes after commit (1.2.2): rollback evicts nothing, auto-commit evicts when the `execute` scope closes, and a bulk update of a cached type returns its ids from `UPDATE ... RETURNING` where the dialect supports it (otherwise one id pre-select), and a bulk delete adds one id select before its unchanged direct `DELETE`. Inverse-side association caches and writes from other services still rely on CDC; there is no configuration key for this.
 
 ## Cache kinds
 
@@ -82,7 +82,7 @@ Cost model: multi-view multiplies entries per key by the number of distinct filt
 - Object cache serves id-based loads and fetcher joins; queries by arbitrary predicates still hit the DB — the cache accelerates shape assembly, not WHERE clauses. In the fork, admitted root queries also take content from it, but WHERE/membership still run in SQL.
 - Before v0.12.4, ID-only references built while deserializing a cached graph inside an active draft context (`produce`, save, interceptors) could retain that context's drafts, so reshaping or reusing the cached object later failed (#1274). Upgrade instead of copying cached objects defensively.
 - v0.12.4 parses `SINGLE_TABLE` binlog rows into the concrete subtype from the discriminator and ignores sibling-subtype columns (#1516); a missing/unmapped discriminator or an unknown column is an error. On older versions polymorphic CDC events could not be deserialized correctly.
-- With `BINLOG_ONLY`, out-of-band SQL still needs CDC; your own bulk update/delete of a cached type pre-selects ids once (see the invalidation path). Inspect `QueryReason` rather than reviving deprecated transaction triggers.
+- With `BINLOG_ONLY`, out-of-band SQL still needs CDC; your own bulk update of a cached type reads ids through `UPDATE ... RETURNING` and a bulk delete adds one id select (see the invalidation path). Inspect `QueryReason` rather than reviving deprecated transaction triggers.
 - Redis tier: helper binders (`RedisValueBinder`, tracking variants) handle serialization via the provided `ObjectMapper` — entity types must stay Jackson-serializable.
 
 ## Sources
