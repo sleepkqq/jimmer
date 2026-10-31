@@ -1,6 +1,24 @@
 # Skill refresh evidence
 
-## 2026-10-31 refresh for 1.2.6 (current)
+## 2026-10-31 refresh for 1.2.7 (current)
+
+Tracks `sleepkqq/jimmer` **1.2.7**, on the same upstream `dev` base as 1.2.6
+(`5ed2a810b`).
+
+Consumer-visible changes documented and, where contradicted, corrected:
+
+- Kotlin specification properties are always `var`, and multi-value specification
+  properties are `List` in APT and KSP, so a spec can be a Quarkus REST query object.
+  Added "Specifications as REST query objects" to `jimmer-dto` and the query-endpoint
+  section to `jimmer-quarkus`.
+- `JSpecificationExtension` / `KSpecificationExtension` apply predicates for user-defined
+  specification properties. Documented in `jimmer-dto` (SKILL and GUIDE).
+
+Versions and snippets updated to `1.2.7`. Claims were re-checked against both DTO
+generators, `PredicateApplier` and the RESTEasy Reactive 3.40.1.1 parameter-container
+and converter sources. No LLM evaluation was run.
+
+## 2026-10-31 refresh for 1.2.6
 
 Tracks `sleepkqq/jimmer` **1.2.6**, on the same upstream `dev` base as 1.2.5
 (`5ed2a810b`).

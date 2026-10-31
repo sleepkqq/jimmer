@@ -500,10 +500,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.2.6`, replace
+For version `1.2.7`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.6`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.6`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.7`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.7`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
