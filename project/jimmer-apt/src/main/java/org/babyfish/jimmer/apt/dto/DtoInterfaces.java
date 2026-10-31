@@ -24,6 +24,9 @@ import java.util.Set;
 
 public class DtoInterfaces {
 
+    static final String JSPECIFICATION_EXTENSION_TYPE_NAME =
+            "org.babyfish.jimmer.sql.ast.query.specification.JSpecificationExtension";
+
     public static Set<String> abstractMethodNames(Context ctx, DtoType<ImmutableType, ImmutableProp> dtoType) {
         if (dtoType.getSuperInterfaces().isEmpty()) {
             return Collections.emptySet();
@@ -47,13 +50,55 @@ public class DtoInterfaces {
         return methodNames;
     }
 
+    /**
+     * Returns the super interface of {@code dtoType} that reaches the specification
+     * extension SPI, or {@code null} when the generated type does not implement it.
+     */
+    public static TypeRef specificationExtensionSuperInterface(
+            Context ctx,
+            DtoType<ImmutableType, ImmutableProp> dtoType
+    ) {
+        Set<String> handledTypeNames = new HashSet<>();
+        for (TypeRef typeRef : dtoType.getSuperInterfaces()) {
+            TypeElement typeElement = ctx.getElements().getTypeElement(typeRef.getTypeName());
+            if (typeElement != null && isSpecificationExtension(ctx, typeElement, handledTypeNames)) {
+                return typeRef;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSpecificationExtension(
+            Context ctx,
+            TypeElement typeElement,
+            Set<String> handledTypeNames
+    ) {
+        String qualifiedName = typeElement.getQualifiedName().toString();
+        if (JSPECIFICATION_EXTENSION_TYPE_NAME.equals(qualifiedName)) {
+            return true;
+        }
+        if (!handledTypeNames.add(qualifiedName)) {
+            return false;
+        }
+        for (TypeMirror typeMirror : typeElement.getInterfaces()) {
+            TypeElement superElement = (TypeElement) ctx.getTypes().asElement(typeMirror);
+            if (superElement != null && isSpecificationExtension(ctx, superElement, handledTypeNames)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void collectMembers(TypeElement typeElement, Context ctx, Set<String> handledTypeNames, Set<String> methodNames) {
         String qualifiedName = typeElement.getQualifiedName().toString();
+        if (JSPECIFICATION_EXTENSION_TYPE_NAME.equals(qualifiedName)) {
+            return;
+        }
         if (!handledTypeNames.add(qualifiedName)) {
             return;
         }
         for (ExecutableElement executableElement : ElementFilter.methodsIn(typeElement.getEnclosedElements())) {
-            if (executableElement.getModifiers().contains(Modifier.STATIC)) {
+            if (!executableElement.getModifiers().contains(Modifier.ABSTRACT)) {
                 continue;
             }
             if (!executableElement.getTypeParameters().isEmpty()) {

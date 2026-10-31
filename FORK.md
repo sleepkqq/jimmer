@@ -27,6 +27,66 @@
 
 ## Migrate a consumer
 
+### Mutable specification properties in 1.2.7
+
+A generated `specification` DTO is a request-bound query object: the caller fills it after
+deserialization and the server may overwrite a predicate before executing it. Kotlin specs
+therefore always generate `var` properties, including nested `TargetOf_*` blocks, even when
+`jimmer.dto.mutable=false` or the spec is annotated `@KotlinDto(immutability = IMMUTABLE)`.
+Views and inputs keep the existing mutable/immutable behaviour, and the primary constructor
+keeps its defaults, so an all-defaults spec still has a no-arg constructor. Java specs were
+already mutable; nothing changes there.
+
+Consumers that relied on `val` spec properties, or on a spec generated from a `val`-only
+interface, must drop that immutability assumption: assigning `spec.name = ...` now compiles.
+No configuration change is required.
+
+Multi-value specification properties (`valueIn`, `valueNotIn`, `associatedIdIn`,
+`associatedIdNotIn`) are now generated as `List<T>` instead of `Collection<T>` by both APT and
+KSP, because request binders such as Quarkus REST bind repeated query parameters only into
+`List`/`Set` types. Reading them as a `Collection` still compiles; code that assigns or passes a
+`Set` or another non-list collection must convert it with `toList()` / `new ArrayList<>(...)`.
+
+Release 1.2.7 includes these generation changes; 1.2.6 does not.
+
+### Specification extension hooks in 1.2.7
+
+A spec can implement one of the new SPIs to append a predicate without editing its `.dto`
+file:
+
+```java
+public interface CheapBookSpecification extends JSpecificationExtension<Book, BookTable> {
+
+    Boolean getCheap();
+
+    void setCheap(Boolean cheap);
+
+    @Override
+    default void applyExtension(SpecificationArgs<Book, BookTable> args) {
+        if (Boolean.TRUE.equals(getCheap())) {
+            args.where(args.getTable().price().lt(new BigDecimal("50")));
+        }
+    }
+}
+```
+
+`KSpecificationExtension<E>` (`fun applyExtension(args: KSpecificationArgs<E>)`) is the Kotlin
+counterpart. The generated `applyTo` calls the hook exactly once, after every generated
+predicate and with the arguments back at the specification's root table, so extension
+predicates are combined with `and` against the whole generated filter and still compose inside
+`and`/`or`/`not` of several specifications. A super interface of the DTO must
+provide a **non-abstract** method body -- `default` in Java, a body in Kotlin -- because the
+processors ignore abstract non-property methods in DTO super interfaces; a concrete class
+implements the hook normally. A `specification` whose base type is not an entity (an
+`@Embeddable`) cannot implement the SPI; generation fails with `DtoAstException` naming that
+type. APT and KSP generate the same call.
+
+The hook receives the specification arguments only, so sorting, pagination and authorization
+stay outside the spec: pass that state through the query that uses the spec, or filter it in a
+Jimmer global filter.
+
+The extension SPI is new in 1.2.7; 1.2.6 does not include it.
+
 ### Reachable caches in content-only and admitted reads in 1.2.6
 
 A `content-only` association loader and the retained read of automatic content admission used
@@ -440,10 +500,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.2.6`, replace
+For version `1.2.7`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.6`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.6`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.7`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.7`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;

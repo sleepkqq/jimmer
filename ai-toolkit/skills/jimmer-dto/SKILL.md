@@ -44,6 +44,46 @@ For owned children, removing members must also agree with `@OnDissociate` on the
 
 Deserialize omission, null and a real value through the application's JSON stack and check `toEntity()` loaded state; include `[]` for lists. Then verify the intended database effect with the chosen save mode. Making a non-null field optional for omission does not authorize clearing it to null.
 
+## Specifications as REST query objects
+
+A `specification` is the request-bound filter object of a REST query: bind it from query
+parameters, then hand it to `JSpecification`/`KSpecification`. Treat it as untrusted input; the
+spec supplies predicates, not sorting, pagination or authorization.
+
+- Generated specification props are always mutable, in Kotlin too (`var`), including nested
+  `TargetOf_*` blocks and under `@KotlinDto(immutability = IMMUTABLE)` or
+  `jimmer.dto.mutable=false`. Assigning a server-side predicate to a bound spec is expected;
+  views and inputs keep their configured mutability.
+- Sorting, limit/offset and access scoping belong to the query that consumes the spec
+  (`.orderBy(...)`, `.limit(...)`, Jimmer global filters), never to the spec DTO itself.
+- User-defined props (`cheap: Boolean?`) are carried but never applied by the generated
+  `applyTo`. Apply them in a super interface that the `.dto` declares with `implements` and
+  that extends the extension SPI:
+
+```
+specification BookSpecification implements CheapBookPredicates {
+    like/i(name)
+    cheap: Boolean?
+}
+```
+
+```kotlin
+interface CheapBookPredicates : KSpecificationExtension<Book> {
+    val cheap: Boolean?
+
+    override fun applyExtension(args: KSpecificationArgs<Book>) {
+        if (cheap == true) args.where(args.table.price lt BigDecimal(50))
+    }
+}
+```
+
+Java uses `JSpecificationExtension<E, T>` with a `default void applyExtension(SpecificationArgs<E, T> args)`.
+The generated `applyTo` calls it once, after every generated predicate, with the arguments back
+at the root table, so the extension is `and`-combined with the whole generated filter. A DTO super interface
+needs a body for the method (`default` in Java, a body in Kotlin); abstract non-property methods
+in a DTO super interface are ignored. A specification over an `@Embeddable` type cannot
+implement the SPI -- generation fails with `DtoAstException` naming it.
+
 ## DTO compiler changes since 0.12.2
 
 | Written | Result |

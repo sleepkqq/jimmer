@@ -1,7 +1,8 @@
 import java.time.LocalDateTime
+import org.babyfish.jimmer.kt.dto.{KotlinDto, KotlinDtoImmutability}
 import testpkg.annotations.{Job, Task, Priority, Shallow, Deep }
 import testpkg.configurations.AuthorFilter
-import testpkg.{Named, TagProvider}
+import testpkg.{CheapBookSpecification, Named, TagProvider}
 import org.babyfish.jimmer.sql.kt.model.classic.author.dto.{ReusableAuthorInput, ReusableAuthorSpecification, ReusableAuthorView}
 import org.babyfish.jimmer.sql.kt.model.classic.store.dto.{ReusableBookStoreInput, ReusableBookStoreSpecification, ReusableBookStoreView}
 
@@ -229,6 +230,12 @@ specification BookSpecification4 {
     flat(authors) {
         like/i(firstName, lastName) as authorName
     }
+}
+
+@KotlinDto(immutability = KotlinDtoImmutability.IMMUTABLE)
+specification BookSpecificationWithExtension implements testpkg.CheapBookSpecification {
+    like/i(name)
+    cheap: Boolean?
 }
 
 BookDeepView {

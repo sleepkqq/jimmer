@@ -272,6 +272,11 @@ specification BookSpecification7 {
     }
 }
 
+specification BookSpecificationWithExtension implements testpkg.CheapBookSpecification {
+    like/i(name)
+    cheap: Boolean?
+}
+
 BookDeepView {
     authors {
         gender
