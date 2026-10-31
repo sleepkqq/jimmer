@@ -13,7 +13,7 @@
 ## Runtime (`JimmerRuntimeConfig` / `JimmerDataSourceRuntimeConfig`)
 
 - `quarkus.jimmer.transaction-cache-operator-fixed-delay` (default: "5s")
-- `quarkus.jimmer.database-validation.mode` (default: NONE)
+- `quarkus.jimmer.database-validation-mode` (default: NONE)
 - `quarkus.jimmer.<datasource>.default-schema`
 - `quarkus.jimmer.<datasource>.dialect`
 - `quarkus.jimmer.<datasource>.default-batch-size`

@@ -16,7 +16,7 @@ metadata:
 
 - New trigger configurations use `BINLOG_ONLY`; `TRANSACTION_ONLY` and `BOTH` are deprecated. CDC must actually deliver changes before event-driven caching is safe.
 - Quarkus constraint defaults: `constraint-violation-translatable=false`, `sql-state-exception-translator=true`. Do not import Spring's default into this module.
-- Quarkus reads only `database-validation-mode`; the deprecated nested `database-validation.mode` is accepted but ignored at runtime (the fork README table is stale on this).
+- Quarkus reads only `database-validation-mode`. The nested `database-validation.mode` group is removed in 1.2.5 because it was parsed but never applied; Quarkus now reports it as an unrecognized key. Up to 1.2.4 it silently left validation at `NONE`.
 - Only datasource-scoped keys accept a datasource name. `language`, cache configuration and validation are not blindly replicated under each datasource.
 - `quarkus.jimmer.cache.guard.enabled` requires one application-owned `CacheReadiness`; it does not install CDC.
 - Fork caches: `entities[].content-only` is the only admission-related key; `content-fields` was removed in 1.1.12, and declaring an entity cache already admits hint-free DTO/View root queries.

@@ -105,7 +105,7 @@ quarkus:
 
 ### Key registry
 
-Read `jimmer-config` for the relevant key and its scope: only datasource-scoped options accept `quarkus.jimmer.<datasource-name>.<key>`. Dialect is derived from datasource metadata. Validation is read only from `quarkus.jimmer.database-validation-mode` (`JimmerRuntimeConfig.databaseValidationMode()`); the deprecated nested `database-validation.mode` group still parses but `JQuarkusSqlClient` never reads it, so it is silently ignored. The module README's config table (checked at 1.2.4) still lists the nested key; source wins.
+Read `jimmer-config` for the relevant key and its scope: only datasource-scoped options accept `quarkus.jimmer.<datasource-name>.<key>`. Dialect is derived from datasource metadata. Validation is read only from `quarkus.jimmer.database-validation-mode` (`JimmerRuntimeConfig.databaseValidationMode()`). The nested `database-validation.mode` group was parsed but never read up to 1.2.4, so it silently left validation off; 1.2.5 removes it and Quarkus reports it as an unrecognized key.
 
 The fork defaults to `constraint-violation-translatable=false` and `sql-state-exception-translator=true`: SQLState maps to `JimmerDataAccessException` subtypes. Enabling typed constraint investigation changes the error/performance contract; see `jimmer-debug`.
 
