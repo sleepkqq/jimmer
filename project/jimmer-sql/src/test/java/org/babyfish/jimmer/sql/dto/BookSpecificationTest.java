@@ -1,14 +1,17 @@
 package org.babyfish.jimmer.sql.dto;
 
+import org.babyfish.jimmer.sql.ast.query.specification.JSpecification;
 import org.babyfish.jimmer.sql.common.AbstractQueryTest;
 import org.babyfish.jimmer.sql.common.Constants;
 import org.babyfish.jimmer.sql.model.*;
 import org.babyfish.jimmer.sql.model.dto.*;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.UUID;
 
 public class BookSpecificationTest extends AbstractQueryTest {
@@ -51,6 +54,24 @@ public class BookSpecificationTest extends AbstractQueryTest {
                     );
                 }
         );
+    }
+
+    @Test
+    public void testMultiValuePropertiesAreLists() {
+        // Query-parameter binders such as Quarkus REST bind repeated parameters only into List/Set types.
+        BookSpecification2 specification = new BookSpecification2();
+        specification.setIds(Arrays.asList(Constants.learningGraphQLId1, Constants.learningGraphQLId2));
+        specification.setStoreIds(Collections.singletonList(Constants.oreillyId));
+        specification.setAuthorIds(Collections.singletonList(Constants.alexId));
+        List<UUID> ids = specification.getIds();
+        List<UUID> storeIds = specification.getStoreIds();
+        List<UUID> authorIds = specification.getAuthorIds();
+        Assertions.assertEquals(
+                Arrays.asList(Constants.learningGraphQLId1, Constants.learningGraphQLId2),
+                ids
+        );
+        Assertions.assertEquals(Collections.singletonList(Constants.oreillyId), storeIds);
+        Assertions.assertEquals(Collections.singletonList(Constants.alexId), authorIds);
     }
 
     @Test
@@ -689,6 +710,73 @@ public class BookSpecificationTest extends AbstractQueryTest {
                             "%alex%",
                             "%alex%"
                     );
+                }
+        );
+    }
+
+    @Test
+    public void testSpecificationExtensionWithoutGeneratedPredicate() {
+        BookSpecificationWithExtension specification = new BookSpecificationWithExtension();
+        specification.setCheap(true);
+        executeAndExpect(
+                getSqlClient()
+                        .createQuery(table)
+                        .where(specification)
+                        .select(table),
+                ctx -> {
+                    ctx.sql(
+                            "select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID " +
+                                    "from BOOK tb_1_ " +
+                                    "where tb_1_.PRICE < ?"
+                    ).variables(new BigDecimal("50"));
+                }
+        );
+    }
+
+    @Test
+    public void testSpecificationExtensionWithGeneratedPredicate() {
+        BookSpecificationWithExtension specification = new BookSpecificationWithExtension();
+        specification.setName("GraphQL");
+        specification.setCheap(true);
+        executeAndExpect(
+                getSqlClient()
+                        .createQuery(table)
+                        .where(specification)
+                        .select(table),
+                ctx -> {
+                    ctx.sql(
+                            "select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID " +
+                                    "from BOOK tb_1_ " +
+                                    "where " +
+                                    "--->tb_1_.NAME ilike ? " +
+                                    "and " +
+                                    "--->tb_1_.PRICE < ?"
+                    ).variables("%graphql%", new BigDecimal("50"));
+                }
+        );
+    }
+
+    @Test
+    public void testSpecificationExtensionInOr() {
+        BookSpecificationWithExtension cheap = new BookSpecificationWithExtension();
+        cheap.setCheap(true);
+        BookSpecificationWithExtension named = new BookSpecificationWithExtension();
+        named.setName("GraphQL");
+        JSpecification<Book, ?> specification = JSpecification.or(cheap, named);
+        executeAndExpect(
+                getSqlClient()
+                        .createQuery(table)
+                        .where(specification)
+                        .select(table),
+                ctx -> {
+                    ctx.sql(
+                            "select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID " +
+                                    "from BOOK tb_1_ " +
+                                    "where " +
+                                    "--->tb_1_.PRICE < ? " +
+                                    "or " +
+                                    "--->tb_1_.NAME ilike ?"
+                    ).variables(new BigDecimal("50"), "%graphql%");
                 }
         );
     }

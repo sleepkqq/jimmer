@@ -86,6 +86,26 @@ public class DomainObjectService {
 }
 ```
 
+### Query endpoints and specifications
+
+A DTO `specification` can be the REST query object itself. Annotate each bound property in the
+`.dto` with an explicitly named `@org.jboss.resteasy.reactive.RestQuery("cityId")` (or
+`@jakarta.ws.rs.QueryParam`); Quarkus REST then treats the generated class as a parameter
+container, so a resource method takes it directly (`fun search(@BeanParam spec: EventSpec)`) and
+SmallRye OpenAPI documents each property as a query parameter. Use `as` aliases to keep public
+parameter names stable. This needs mutable fields: generated spec properties are always `var`
+in Kotlin (Java specs have setters). User-defined properties without the annotation are not
+bound; set server-side state such as a request time zone with an assignment before executing.
+Name parameters explicitly: a `ParamConverterProvider` only sees annotation values, not field
+names. Custom predicates for user-defined properties belong in a `KSpecificationExtension` /
+`JSpecificationExtension` super interface; the generated `applyTo` calls it once after the
+generated predicates. An invalid typed query value is a 404 under JAX-RS rules unless the
+application registers a converter that throws a `WebApplicationException`.
+
+Sorting, limit/offset and access scoping stay in the query that consumes the spec
+(`orderBy`, `limit`, Jimmer global filters) -- do not encode them in the specification or its
+endpoint parameters, and do not treat a spec field as an authorization boundary.
+
 ## Config
 
 ```yaml

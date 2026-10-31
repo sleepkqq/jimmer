@@ -1,5 +1,6 @@
 package org.babyfish.jimmer.sql.kt.dto
 
+import org.babyfish.jimmer.sql.kt.ast.query.specification.KSpecification
 import org.babyfish.jimmer.sql.kt.common.AbstractQueryTest
 import org.babyfish.jimmer.sql.kt.model.classic.author.Gender
 import org.babyfish.jimmer.sql.kt.model.classic.author.dto.ReusableAuthorSpecification
@@ -8,6 +9,7 @@ import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookSpecification
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookSpecification2
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookSpecification3
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookSpecification4
+import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookSpecificationWithExtension
 import org.babyfish.jimmer.sql.kt.model.classic.book.dto.BookWithReusableAssociationsSpecification
 import org.babyfish.jimmer.sql.kt.model.classic.book.id
 import org.babyfish.jimmer.sql.kt.model.classic.store.BookStore
@@ -65,6 +67,29 @@ class BookSpecificationTest : AbstractQueryTest() {
                 """select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID from BOOK tb_1_"""
             )
         }
+    }
+
+    @Test
+    fun testMultiValuePropertiesAreLists() {
+        // Query-parameter binders such as Quarkus REST bind repeated parameters only into List/Set types.
+        val specification = BookSpecification2(
+            ids = listOf(1L, 2L),
+            storeIds = listOf(3L),
+            excludedStoreIds = listOf(4L),
+            authorIds = listOf(5L),
+            excludedAuthorIds = listOf(6L)
+        )
+        val lists: List<List<Long>?> = listOf(
+            specification.ids,
+            specification.storeIds,
+            specification.excludedStoreIds,
+            specification.authorIds,
+            specification.excludedAuthorIds
+        )
+        kotlin.test.assertEquals(
+            listOf(listOf(1L, 2L), listOf(3L), listOf(4L), listOf(5L), listOf(6L)),
+            lists
+        )
     }
 
     @Test
@@ -415,6 +440,68 @@ class BookSpecificationTest : AbstractQueryTest() {
                 "%alex%",
                 "%alex%"
             )
+        }
+    }
+
+    @Test
+    fun testSpecificationExtensionWithoutGeneratedPredicate() {
+        val specification = BookSpecificationWithExtension(cheap = true)
+        executeAndExpect(
+            sqlClient.createQuery(Book::class) {
+                where(specification)
+                select(table)
+            }
+        ) {
+            sql(
+                """select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID 
+                    |from BOOK tb_1_ 
+                    |where tb_1_.PRICE < ?""".trimMargin()
+            ).variables(BigDecimal(50))
+        }
+    }
+
+    @Test
+    fun testSpecificationExtensionWithGeneratedPredicate() {
+        val specification = BookSpecificationWithExtension()
+        specification.name = "GraphQL"
+        specification.cheap = true
+        executeAndExpect(
+            sqlClient.createQuery(Book::class) {
+                where(specification)
+                select(table)
+            }
+        ) {
+            sql(
+                """select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID 
+                    |from BOOK tb_1_ 
+                    |where 
+                    |--->lower(tb_1_.NAME) like ? 
+                    |and 
+                    |--->tb_1_.PRICE < ?""".trimMargin()
+            ).variables("%graphql%", BigDecimal(50))
+        }
+    }
+
+    @Test
+    fun testSpecificationExtensionInOr() {
+        val specification = KSpecification.or(
+            BookSpecificationWithExtension(cheap = true),
+            BookSpecificationWithExtension(name = "GraphQL")
+        )
+        executeAndExpect(
+            sqlClient.createQuery(Book::class) {
+                where(specification)
+                select(table)
+            }
+        ) {
+            sql(
+                """select tb_1_.ID, tb_1_.NAME, tb_1_.EDITION, tb_1_.PRICE, tb_1_.STORE_ID 
+                    |from BOOK tb_1_ 
+                    |where 
+                    |--->tb_1_.PRICE < ? 
+                    |or 
+                    |--->lower(tb_1_.NAME) like ?""".trimMargin()
+            ).variables(BigDecimal(50), "%graphql%")
         }
     }
 }

@@ -40,7 +40,7 @@ import kotlin.math.min
 class DtoGenerator private constructor(
     val ctx: Context,
     private val docMetadata: DocMetadata,
-    private val mutable: Boolean,
+    mutable: Boolean,
     val dtoType: DtoType<ImmutableType, ImmutableProp>,
     private val codeGenerator: CodeGenerator?,
     private val parent: DtoGenerator?,
@@ -50,6 +50,17 @@ class DtoGenerator private constructor(
     private val polymorphicBranchKind: DtoPolymorphicBranch.Kind? = null,
 ) {
     private val root: DtoGenerator = parent?.root ?: this
+
+    // A specification is a query object: assigning its properties is the API, so it
+    // stays mutable even when DTO immutability is requested.
+    private val mutable: Boolean = mutable || dtoType.modifiers.contains(DtoModifier.SPECIFICATION)
+
+    private val specificationExtensionTypeRef: TypeRef? =
+        if (dtoType.modifiers.contains(DtoModifier.SPECIFICATION)) {
+            specificationExtensionSuperInterface(ctx, dtoType)
+        } else {
+            null
+        }
 
     private val document: Document = Document()
 
@@ -1719,6 +1730,21 @@ class DtoGenerator private constructor(
     }
 
     private fun addApplyTo() {
+        val extensionTypeRef = specificationExtensionTypeRef
+        if (extensionTypeRef != null && !isImpl) {
+            throw DtoAstException(
+                dtoType.dtoFile,
+                extensionTypeRef.line,
+                extensionTypeRef.col,
+                "The specification \"" +
+                    dtoType.name +
+                    "\" cannot implement \"" +
+                    K_SPECIFICATION_EXTENSION_CLASS_NAME +
+                    "\" because its base type \"" +
+                    dtoType.baseType.className.canonicalName +
+                    "\" is embeddable"
+            )
+        }
         typeBuilder.addFunction(
             FunSpec
                 .builder("applyTo")
@@ -1773,6 +1799,9 @@ class DtoGenerator private constructor(
                         }
                     }
                     addStackOperations(stack, emptyList())
+                    if (extensionTypeRef != null) {
+                        addStatement("applyExtension(args)")
+                    }
                 }
                 .build()
         )
@@ -2223,7 +2252,7 @@ class DtoGenerator private constructor(
                         return BOOLEAN.copy(nullable = prop.isNullable)
 
                     "valueIn", "valueNotIn" ->
-                        return COLLECTION.parameterizedBy(
+                        return LIST.parameterizedBy(
                             metadata?.targetTypeName ?: propElementName.toList(baseProp.isList)
                         ).copy(nullable = prop.isNullable)
 
@@ -2231,7 +2260,7 @@ class DtoGenerator private constructor(
                         return baseProp.targetType!!.idProp!!.clientClassName.copy(nullable = prop.isNullable)
 
                     "associatedIdIn", "associatedIdNotIn" ->
-                        return COLLECTION.parameterizedBy(baseProp.targetType!!.idProp!!.clientClassName)
+                        return LIST.parameterizedBy(baseProp.targetType!!.idProp!!.clientClassName)
                             .copy(nullable = prop.isNullable)
                 }
             }

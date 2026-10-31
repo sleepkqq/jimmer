@@ -8,6 +8,7 @@ import com.google.devtools.ksp.symbol.ClassKind
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import org.babyfish.jimmer.dto.compiler.DtoAstException
 import org.babyfish.jimmer.dto.compiler.DtoType
+import org.babyfish.jimmer.dto.compiler.TypeRef
 import org.babyfish.jimmer.ksp.Context
 import org.babyfish.jimmer.ksp.MetaException
 import org.babyfish.jimmer.ksp.client.ClientProcessor.Companion.realDeclaration
@@ -15,6 +16,9 @@ import org.babyfish.jimmer.ksp.immutable.meta.ImmutableProp
 import org.babyfish.jimmer.ksp.immutable.meta.ImmutableType
 import org.babyfish.jimmer.ksp.name
 import org.babyfish.jimmer.ksp.util.fastResolve
+
+internal const val K_SPECIFICATION_EXTENSION_CLASS_NAME =
+    "org.babyfish.jimmer.sql.kt.ast.query.specification.KSpecificationExtension"
 
 fun abstractPropNames(ctx: Context, dtoType: DtoType<ImmutableType, ImmutableProp>): Set<String> {
     if (dtoType.superInterfaces.isEmpty()) {
@@ -38,6 +42,44 @@ fun abstractPropNames(ctx: Context, dtoType: DtoType<ImmutableType, ImmutablePro
     return propNames
 }
 
+/**
+ * Returns the super interface of [dtoType] that reaches the specification extension
+ * SPI, or `null` when the generated type does not implement it.
+ */
+fun specificationExtensionSuperInterface(
+    ctx: Context,
+    dtoType: DtoType<ImmutableType, ImmutableProp>
+): TypeRef? {
+    val handledTypeNames = mutableSetOf<String>()
+    for (typeRef in dtoType.superInterfaces) {
+        val declaration = ctx.resolver.getClassDeclarationByName(typeRef.typeName) ?: continue
+        if (isSpecificationExtension(declaration, handledTypeNames)) {
+            return typeRef
+        }
+    }
+    return null
+}
+
+private fun isSpecificationExtension(
+    declaration: KSClassDeclaration,
+    handledTypeNames: MutableSet<String>
+): Boolean {
+    val qualifiedName = declaration.qualifiedName?.asString() ?: return false
+    if (qualifiedName == K_SPECIFICATION_EXTENSION_CLASS_NAME) {
+        return true
+    }
+    if (!handledTypeNames.add(qualifiedName)) {
+        return false
+    }
+    for (superType in declaration.superTypes) {
+        val superDeclaration = superType.fastResolve().declaration as? KSClassDeclaration ?: continue
+        if (isSpecificationExtension(superDeclaration, handledTypeNames)) {
+            return true
+        }
+    }
+    return false
+}
+
 private fun collectMembers(
     declaration: KSClassDeclaration,
     ctx: Context,
@@ -45,6 +87,9 @@ private fun collectMembers(
     propNames: MutableSet<String>
 ) {
     val qualifiedName = declaration.qualifiedName!!.asString()
+    if (qualifiedName == K_SPECIFICATION_EXTENSION_CLASS_NAME) {
+        return
+    }
     if (!handledTypeNames.add(qualifiedName)) {
         return
     }

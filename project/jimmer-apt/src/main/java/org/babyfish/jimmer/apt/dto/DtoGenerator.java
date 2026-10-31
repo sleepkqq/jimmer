@@ -56,6 +56,8 @@ public class DtoGenerator {
 
     private final Set<String> interfaceMethodNames;
 
+    private final TypeRef specificationExtensionTypeRef;
+
     private TypeSpec.Builder typeBuilder;
 
     public DtoGenerator(
@@ -100,6 +102,10 @@ public class DtoGenerator {
         this.polymorphicBranch = polymorphicBranch;
         this.polymorphicBranchKind = polymorphicBranchKind;
         this.interfaceMethodNames = DtoInterfaces.abstractMethodNames(ctx, dtoType);
+        this.specificationExtensionTypeRef =
+                dtoType.getModifiers().contains(DtoModifier.SPECIFICATION) ?
+                        DtoInterfaces.specificationExtensionSuperInterface(ctx, dtoType) :
+                        null;
     }
 
     public void generate() {
@@ -1937,6 +1943,20 @@ public class DtoGenerator {
     }
 
     private void addApplyTo() {
+        if (specificationExtensionTypeRef != null && !isImpl()) {
+            throw new DtoAstException(
+                    dtoType.getDtoFile(),
+                    specificationExtensionTypeRef.getLine(),
+                    specificationExtensionTypeRef.getCol(),
+                    "The specification \"" +
+                            getSimpleName() +
+                            "\" cannot implement \"" +
+                            DtoInterfaces.JSPECIFICATION_EXTENSION_TYPE_NAME +
+                            "\" because its base type \"" +
+                            dtoType.getBaseType().getQualifiedName() +
+                            "\" is embeddable"
+            );
+        }
         MethodSpec.Builder builder = MethodSpec
                 .methodBuilder("applyTo")
                 .addModifiers(Modifier.PUBLIC);
@@ -1998,6 +2018,9 @@ public class DtoGenerator {
             addPredicateOperation(builder, prop);
         }
         addStackOperations(builder, stack, Collections.emptyList());
+        if (specificationExtensionTypeRef != null) {
+            builder.addStatement("applyExtension(args)");
+        }
         typeBuilder.addMethod(builder.build());
     }
 
@@ -2251,7 +2274,7 @@ public class DtoGenerator {
                     case "valueIn":
                     case "valueNotIn":
                         return ParameterizedTypeName.get(
-                                org.babyfish.jimmer.apt.immutable.generator.Constants.COLLECTION_CLASS_NAME,
+                                org.babyfish.jimmer.apt.immutable.generator.Constants.LIST_CLASS_NAME,
                                 metadata != null ?
                                         metadata.getTargetTypeName() :
                                         toListType(
@@ -2270,7 +2293,7 @@ public class DtoGenerator {
                     case "associatedIdIn":
                     case "associatedIdNotIn":
                         return ParameterizedTypeName.get(
-                                org.babyfish.jimmer.apt.immutable.generator.Constants.COLLECTION_CLASS_NAME,
+                                org.babyfish.jimmer.apt.immutable.generator.Constants.LIST_CLASS_NAME,
                                 baseProp.getTargetType().getIdProp().getClientTypeName().box()
                         );
                 }

@@ -149,6 +149,10 @@ Only inside `specification`: `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `like`, `notLik
 - Null args are skipped at query time (dynamic predicates).
 - `like` values are passed as raw LIKE patterns: `%`/`_` typed by the caller stay wildcards. Escape them with the database's escape character when the API promises literal matching; a non-exact mode still appends its own `%` after an escaped trailing `\%` (fixed in 0.12.4, #1383).
 
+A specification is a request-bound filter object, so its generated properties are always mutable (`var` in Kotlin, including nested `TargetOf_*` blocks) regardless of `jimmer.dto.mutable` or `@KotlinDto(immutability = IMMUTABLE)`; views and inputs keep their configured mutability. Sorting, pagination and authorization stay in the consuming query, not in the spec.
+
+Custom predicates for user-defined props go in a super interface declared with `specification X implements MyPredicates { ... }`, where `MyPredicates` extends `JSpecificationExtension<E, T>` / `KSpecificationExtension<E>`. The generated `applyTo` calls `applyExtension(args)` once after all generated predicates, at the root table, so it is `and`-combined with the whole generated filter. The method needs a body (`default` in Java, a body in Kotlin); abstract non-property methods are ignored, and an `@Embeddable`-based specification cannot implement the SPI (generation fails with `DtoAstException`).
+
 ## Configurations
 
 Annotation-like options written **before** an association prop, only in output DTOs (not input/specification):
