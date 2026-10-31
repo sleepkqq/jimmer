@@ -1,6 +1,6 @@
 # Object-cache query admission — sleepkqq/jimmer fork
 
-Fork-only (`com.github.sleepkqq.jimmer:*`, contract below is release `1.2.4`). Upstream `org.babyfish.jimmer` has no `useObjectCache`, `CacheAdmissionPolicy` or content-only caches: there the object cache serves ID loads and association/fetcher hydration only.
+Fork-only (`com.github.sleepkqq.jimmer:*`, contract below is release `1.2.5`). Upstream `org.babyfish.jimmer` has no `useObjectCache`, `CacheAdmissionPolicy` or content-only caches: there the object cache serves ID loads and association/fetcher hydration only.
 
 Admission lets a root query take entity **content** from a declared object cache. It is not a query-result cache: SQL still runs and decides which rows exist.
 

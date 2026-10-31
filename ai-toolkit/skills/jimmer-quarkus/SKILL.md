@@ -27,7 +27,7 @@ dependencies {
 }
 ```
 
-Current fork release: `1.2.4` (JitPack, no credentials; a tag alone does not prove the artifacts were built). It contains every v0.12.4 code change (only the upstream version-bump commits are absent). Do not mix upstream `org.babyfish.jimmer` artifacts with the fork's runtime/processors. Match the Kotlin compiler, KSP plugin, Quarkus platform and JDK to the fork's compatibility/build metadata (1.2.4 is tested with Kotlin 2.4.21, KSP 2.3.12 and Quarkus 3.40.1.1; the Quarkus extension targets JDK 25 while core modules stay on Java 8) rather than copying fixed versions from an example. Inspect the resolved runtime **and processor** dependency graphs after migration.
+Current fork release: `1.2.5` (JitPack, no credentials; a tag alone does not prove the artifacts were built). It contains every v0.12.4 code change (only the upstream version-bump commits are absent). Do not mix upstream `org.babyfish.jimmer` artifacts with the fork's runtime/processors. Match the Kotlin compiler, KSP plugin, Quarkus platform and JDK to the fork's compatibility/build metadata (1.2.5 is tested with Kotlin 2.4.21, KSP 2.3.12 and Quarkus 3.40.1.1; the Quarkus extension targets JDK 25 while core modules stay on Java 8) rather than copying fixed versions from an example. Inspect the resolved runtime **and processor** dependency graphs after migration.
 
 ## Differences From Spring Boot
 

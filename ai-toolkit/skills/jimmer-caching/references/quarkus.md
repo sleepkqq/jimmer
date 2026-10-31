@@ -1,6 +1,6 @@
 # Quarkus cache lifecycle — unified fork
 
-Applies to `com.github.sleepkqq.jimmer:quarkus-jimmer` (checked at `1.2.4`), whose implementation is in `sleepkqq/jimmer/project/jimmer-quarkus`. These are extension capabilities, not upstream Spring settings.
+Applies to `com.github.sleepkqq.jimmer:quarkus-jimmer` (checked at `1.2.5`), whose implementation is in `sleepkqq/jimmer/project/jimmer-quarkus`. These are extension capabilities, not upstream Spring settings.
 
 ## Declarative setup
 

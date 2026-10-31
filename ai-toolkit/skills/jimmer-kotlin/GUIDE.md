@@ -22,7 +22,7 @@ Nullability via Kotlin `T?`, not annotations.
 
 ## KSP setup
 
-Use a KSP2 version compatible with the Kotlin compiler (the fork is tested with Kotlin 2.4.21 and KSP 2.3.12). Runtime and `jimmer-ksp` must come from the same release: official `org.babyfish.jimmer:*:0.12.4` or fork `com.github.sleepkqq.jimmer:*:1.2.4`, never mixed. Register `.dto` files as KSP inputs in every module that owns them, otherwise a DTO-only edit leaves the task `UP-TO-DATE` with the old DTO:
+Use a KSP2 version compatible with the Kotlin compiler (the fork is tested with Kotlin 2.4.21 and KSP 2.3.12). Runtime and `jimmer-ksp` must come from the same release: official `org.babyfish.jimmer:*:0.12.4` or fork `com.github.sleepkqq.jimmer:*:1.2.5`, never mixed. Register `.dto` files as KSP inputs in every module that owns them, otherwise a DTO-only edit leaves the task `UP-TO-DATE` with the old DTO:
 
 ```kotlin
 import com.google.devtools.ksp.gradle.KspAATask
