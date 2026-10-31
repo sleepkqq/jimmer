@@ -48,7 +48,7 @@ Deserialize omission, null and a real value through the application's JSON stack
 
 | Written | Result |
 |---|---|
-| `!where(...)`/`!batch(...)`/any `!config` before `id(assoc)` or `flat(assoc)` | error: configuration cannot apply to properties produced by `id`/`flat` (#1482); configure a real association block instead |
+| `!where(...)`/`!batch(...)`/any `!config` before `id(assoc)`, or any config except `!fetchType` before `flat(assoc)` | error: configuration cannot apply to properties produced by `id`/`flat` (#1482); configure a real association block instead. Fork 1.2.6+ accepts `!fetchType(...)` on `flat(assoc)` to join-fetch the flattened reference |
 | User prop `name: Int` whose name equals a macro-produced alias (`#allScalars`, `as(...)` group) | error: duplicated property alias (#1056). An explicit entity prop (`name?`) still overrides the macro copy |
 | `contact -> ContactInfoInput` on an `@Embeddable` prop | now legal (#1168); kind must match (input → input DTO) and the DTO must target the embeddable type |
 | `@Anno(1, 2)`, `@Anno([])`, `value = [...]` | legal (#1499): several positional values become the `value` array; mixing `[...]` with extra positional values is rejected |

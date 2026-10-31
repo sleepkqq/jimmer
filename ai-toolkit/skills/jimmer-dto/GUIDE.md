@@ -172,7 +172,7 @@ Configurations on `id(assoc)` or `flat(assoc)` are rejected (0.12.4): use a real
 | `!orderBy(name asc, createdAt desc)` | sort associated rows |
 | `!filter(FilterClass)` | custom `FieldFilter`, replacing declarative association where/order settings |
 | `!recursion(StrategyClass)` | custom recursion strategy for `*` props |
-| `!fetchType(SELECT \| JOIN_IF_NO_CACHE \| JOIN_ALWAYS \| AUTO)` | reference association fetch strategy |
+| `!fetchType(SELECT \| JOIN_IF_NO_CACHE \| JOIN_ALWAYS \| AUTO)` | reference association fetch strategy; in fork 1.2.6+ also the only configuration accepted on `flat(assoc)` |
 | `!limit(n[, offset])` | limit associated collection |
 | `!batch(n)` | batch size for this association load |
 | `!depth(n)` | recursion depth limit for `*` props |

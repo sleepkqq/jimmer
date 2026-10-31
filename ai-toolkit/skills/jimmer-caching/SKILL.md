@@ -50,7 +50,7 @@ Use the installed provider's `CacheFactory`/`KCacheFactory` and `ChainCacheBuild
 
 ## Fork: root queries can read the object cache
 
-Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.5`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
+Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.6`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
 
 | Fork situation | Behavior |
 |---|---|
