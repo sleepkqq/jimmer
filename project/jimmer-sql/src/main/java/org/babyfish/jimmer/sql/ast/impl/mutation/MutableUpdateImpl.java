@@ -13,6 +13,7 @@ import org.babyfish.jimmer.sql.ast.impl.query.TableUsageCollector;
 import org.babyfish.jimmer.sql.ast.impl.query.TableUsages;
 import org.babyfish.jimmer.sql.ast.impl.table.*;
 import org.babyfish.jimmer.sql.ast.impl.util.JdbcOptionValidator;
+import org.babyfish.jimmer.sql.ast.impl.util.SelectionRows;
 import org.babyfish.jimmer.sql.ast.mutation.MutableUpdate;
 import org.babyfish.jimmer.sql.ast.table.Table;
 import org.babyfish.jimmer.sql.ast.table.TableEx;
@@ -594,6 +595,11 @@ public class MutableUpdateImpl
         return rows;
     }
 
+    /**
+     * Appends the id to the caller's RETURNING list, so reporting keys adds no statement.
+     * Each row is read as its column values and rebuilt with the caller's tuple creator.
+     */
+    @SuppressWarnings("unchecked")
     private <R> List<R> executeReturningWithMutationKeys(
             SqlBuilder builder,
             Connection con,
@@ -601,18 +607,24 @@ public class MutableUpdateImpl
             TupleCreator<R> tupleCreator,
             JdbcOptions jdbcOptions
     ) {
-        Map<Object, ImmutableSpi> rowMap = selectTargetRows(builder, con);
-        if (rowMap.isEmpty()) {
-            return Collections.emptyList();
+        int size = selections.size();
+        TableImplementor<?> table = getTableLikeImplementor();
+        List<Selection<?>> keyedSelections = new ArrayList<>(size + 1);
+        keyedSelections.addAll(selections);
+        keyedSelections.add(table.get(table.getImmutableType().getIdProp()));
+        renderReturningTo(builder, null, keyedSelections);
+        List<Object[]> keyedRows = executeReturningSql(builder, con, keyedSelections, args -> args, jdbcOptions);
+        List<R> rows = new ArrayList<>(keyedRows.size());
+        List<Object> ids = new ArrayList<>(keyedRows.size());
+        for (Object[] keyedRow : keyedRows) {
+            rows.add((R) SelectionRows.create(tupleCreator, Arrays.copyOf(keyedRow, size)));
+            ids.add(keyedRow[size]);
         }
-
-        builder = new SqlBuilder(new AstContext(getSqlClient()));
-        renderReturningTo(builder, rowMap.keySet(), selections);
-        List<R> rows = executeReturningSql(builder, con, selections, tupleCreator, jdbcOptions);
-        fireMutationKeys(con, rowMap.keySet());
+        fireMutationKeys(con, ids);
         return rows;
     }
 
+    // A stream may be closed before its last row is read, so its keys are selected up front.
     private <R> Stream<R> streamReturningWithMutationKeys(
             SqlBuilder builder,
             Connection con,
