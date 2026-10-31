@@ -1088,7 +1088,13 @@ class DtoGenerator private constructor(
             return
         }
         val targetDtoType = prop.getTargetType()!!
-        add("%L {\n", prop.baseProp.name)
+        if (prop.config == null) {
+            add("%L {\n", prop.baseProp.name)
+        } else {
+            add("%L(", prop.baseProp.name)
+            addConfigLambda(prop)
+            add(") {\n")
+        }
         indent()
         for (childProp in targetDtoType.dtoProps) {
             addHiddenFetcherField(childProp, owner)

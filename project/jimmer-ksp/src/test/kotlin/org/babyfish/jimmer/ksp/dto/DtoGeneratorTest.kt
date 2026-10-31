@@ -122,6 +122,47 @@ class DtoGeneratorTest : AbstractTest() {
     }
 
     @Test
+    @OptIn(ExperimentalCompilerApi::class)
+    fun `flat view carries the fetch type configuration into the hidden fetcher`() {
+        val compilation = prepare(
+            """
+                package org.example
+
+                import org.babyfish.jimmer.sql.*
+
+                @Entity
+                interface Node {
+                    @Id
+                    val id: Long
+                    val name: String
+                    @ManyToOne
+                    val parent: Node?
+                }
+            """.trimIndent(),
+            """
+                export org.example.Node
+
+                NodeView {
+                    id
+                    !fetchType(JOIN_ALWAYS)
+                    flat(parent) {
+                        name as parentName
+                    }
+                }
+            """.trimIndent()
+        )
+
+        val result = compilation.compile()
+        assertEquals(KotlinCompilation.ExitCode.OK, result.exitCode, result.messages)
+
+        val nodeViewFile = compilation.kspSourcesDir.resolve("kotlin/org/example/dto/NodeView.kt")
+        assertTrue(nodeViewFile.exists())
+        val nodeView = nodeViewFile.readText()
+        assertContains(nodeView, "parent(")
+        assertContains(nodeView, "fetchType(ReferenceFetchType.JOIN_ALWAYS)")
+    }
+
+    @Test
     fun `immutable dto properties are not shadowed by parameters or local variables`() {
         checkShadowing(false)
     }

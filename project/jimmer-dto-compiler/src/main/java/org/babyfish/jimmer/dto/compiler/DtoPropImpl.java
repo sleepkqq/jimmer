@@ -24,6 +24,14 @@ class DtoPropImpl<T extends BaseType, P extends BaseProp> implements DtoProp<T, 
     @Nullable
     private final PropConfig<P> config;
 
+    /**
+     * Configuration of the {@code flat} function whose head this property flattens.
+     * It is not {@link #config} because a flattened property also carries the
+     * configuration of its deepest source property.
+     */
+    @Nullable
+    private final PropConfig<P> flatConfig;
+
     private final int aliasLine;
 
     private final int aliasCol;
@@ -82,6 +90,7 @@ class DtoPropImpl<T extends BaseType, P extends BaseProp> implements DtoProp<T, 
         this.aliasLine = aliasLine;
         this.aliasCol = aliasCol;
         this.config = config;
+        this.flatConfig = null;
         this.target = target;
         this.enumType = enumType;
         this.mandatory = mandatory;
@@ -114,6 +123,7 @@ class DtoPropImpl<T extends BaseType, P extends BaseProp> implements DtoProp<T, 
         this.aliasLine = next.getAliasLine();
         this.aliasCol = next.getAliasColumn();
         this.config = next.getConfig();
+        this.flatConfig = head.getConfig();
         this.annotations = next.getAnnotations();
         this.doc = next.getDoc();
         this.target = next.getTarget();
@@ -155,7 +165,8 @@ class DtoPropImpl<T extends BaseType, P extends BaseProp> implements DtoProp<T, 
         this.alias = getBaseProp().getName();
         this.aliasLine = original.getAliasLine();
         this.aliasCol = original.getAliasColumn();
-        this.config = original.getConfig();
+        this.config = associationConfig(original);
+        this.flatConfig = null;
         this.target = targetType;
         this.enumType = null;
         this.mandatory = original.getMandatory();
@@ -181,6 +192,7 @@ class DtoPropImpl<T extends BaseType, P extends BaseProp> implements DtoProp<T, 
         this.aliasLine = original.getAliasLine();
         this.aliasCol = original.getAliasColumn();
         this.config = original.getConfig();
+        this.flatConfig = null;
         if (original.getTargetType() == null) {
             this.target = null;
         } else {
@@ -194,6 +206,21 @@ class DtoPropImpl<T extends BaseType, P extends BaseProp> implements DtoProp<T, 
         this.basePath = getBaseProp().getName();
         this.likeOptions = original.getLikeOptions();
         this.tail = this;
+    }
+
+    /**
+     * Configuration of the association represented by a hidden flat property: a flattened
+     * property takes it from the {@code flat} head that produced it, a plain property
+     * from itself.
+     */
+    @SuppressWarnings("unchecked")
+    private static <T extends BaseType, P extends BaseProp> PropConfig<P> associationConfig(
+            DtoProp<T, P> prop
+    ) {
+        if (prop.getNextProp() == null) {
+            return prop.getConfig();
+        }
+        return ((DtoPropImpl<T, P>) prop).flatConfig;
     }
 
     @Override

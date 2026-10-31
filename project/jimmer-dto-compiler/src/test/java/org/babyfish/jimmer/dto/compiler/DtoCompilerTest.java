@@ -1490,7 +1490,7 @@ public class DtoCompilerTest {
     }
 
     @Test
-    public void testConfigOnIdAndFlatFunctionsIsRejected() {
+    public void testConfigOnIdFunctionIsRejected() {
         List<String> configs = Arrays.asList(
                 "!where(name = '')",
                 "!orderBy(name)",
@@ -1501,20 +1501,96 @@ public class DtoCompilerTest {
                 "!batch(10)",
                 "!depth(2)"
         );
-        for (String prop : Arrays.asList("id(parent)", "id(childNodes) as childIds", "flat(parent) { name as parentName }")) {
-            String function = prop.substring(0, prop.indexOf('('));
+        for (String prop : Arrays.asList("id(parent)", "id(childNodes) as childIds")) {
             for (String config : configs) {
                 String code = "TreeNodeView {\n    " + config + " " + prop + "\n}";
                 DtoAstException ex = Assertions.assertThrows(DtoAstException.class, () -> MyDtoCompiler.treeNode(code), code);
                 Assertions.assertEquals(
-                        "file:/User/test/TreeNode.dto:2 : Configuration cannot be applied to properties produced by the \"" +
-                                function + "\" function\n" +
+                        "file:/User/test/TreeNode.dto:2 : Configuration cannot be applied to properties produced by the \"id\" function\n" +
                                 "    " + config + " " + prop + "\n" +
                                 "    ^",
                         ex.getMessage()
                 );
             }
         }
+    }
+
+    @Test
+    public void testConfigOtherThanFetchTypeOnFlatFunctionIsRejected() {
+        List<String> configs = Arrays.asList(
+                "!where(name = '')",
+                "!orderBy(name)",
+                "!filter(org.example.NodeFilter)",
+                "!recursion(org.example.NodeRecursion)",
+                "!limit(2)",
+                "!batch(10)",
+                "!depth(2)"
+        );
+        String prop = "flat(parent) { name as parentName }";
+        for (String config : configs) {
+            String code = "TreeNodeView {\n    " + config + " " + prop + "\n}";
+            DtoAstException ex = Assertions.assertThrows(DtoAstException.class, () -> MyDtoCompiler.treeNode(code), code);
+            Assertions.assertEquals(
+                    "file:/User/test/TreeNode.dto:2 : Configuration cannot be applied to properties produced by the \"flat\" function, " +
+                            "except \"!fetchType\"\n" +
+                            "    " + config + " " + prop + "\n" +
+                            "    ^",
+                    ex.getMessage()
+            );
+        }
+    }
+
+    @Test
+    public void testFetchTypeOnFlatFunction() {
+        List<DtoType<BaseType, BaseProp>> dtoTypes = MyDtoCompiler.book(
+                "BookView {\n" +
+                        "    id\n" +
+                        "    !fetchType(JOIN_ALWAYS)\n" +
+                        "    flat(store) {\n" +
+                        "        name as storeName\n" +
+                        "    }\n" +
+                        "}\n"
+        );
+        assertContentEquals(
+                "[BookView {" +
+                        "--->id, " +
+                        "--->@optional store.name as storeName" +
+                        "}]",
+                dtoTypes.toString()
+        );
+        DtoType<BaseType, BaseProp> dtoType = dtoTypes.get(0);
+        DtoProp<BaseType, BaseProp> hiddenFlatProp = dtoType.getHiddenFlatProps().get(0);
+        Assertions.assertEquals("store", hiddenFlatProp.getBaseProp().getName());
+        Assertions.assertEquals("JOIN_ALWAYS", hiddenFlatProp.getConfig().getFetchType());
+        Assertions.assertEquals("storeName", hiddenFlatProp.getTargetType().getDtoProps().get(0).getName());
+    }
+
+    @Test
+    public void testFetchTypeOnNestedFlatFunction() {
+        List<DtoType<BaseType, BaseProp>> dtoTypes = MyDtoCompiler.treeNode(
+                "TreeNodeView {\n" +
+                        "    !fetchType(JOIN_ALWAYS)\n" +
+                        "    flat(parent) {\n" +
+                        "        name as parentName\n" +
+                        "        !fetchType(SELECT)\n" +
+                        "        flat(parent) {\n" +
+                        "            name as grandParentName\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "}\n"
+        );
+        DtoType<BaseType, BaseProp> dtoType = dtoTypes.get(0);
+        DtoProp<BaseType, BaseProp> outer = dtoType.getHiddenFlatProps().get(0);
+        Assertions.assertEquals("parent", outer.getBaseProp().getName());
+        Assertions.assertEquals("JOIN_ALWAYS", outer.getConfig().getFetchType());
+        DtoProp<BaseType, BaseProp> inner = outer
+                .getTargetType()
+                .getDtoProps()
+                .stream()
+                .filter(it -> "parent".equals(it.getBaseProp().getName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("There is no nested flat property"));
+        Assertions.assertEquals("SELECT", inner.getConfig().getFetchType());
     }
 
     @Test
