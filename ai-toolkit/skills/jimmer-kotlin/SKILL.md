@@ -19,7 +19,7 @@ Read the Kotlin compiler/KSP setup and one neighboring generated DSL use before 
 
 - Spring multiple datasources: `TransactionalSqlClients.kotlin()` routes to the `KSqlClient` passed to the active `JimmerTransactionManager` since 0.12.4, so build managers from `KSqlClient` when Kotlin-side configuration matters.
 
-Compile through the application's actual KSP task and test the affected null/loaded-state behavior. Do not fix missing generated code by editing generated files. After upgrading to 0.12.4 (or fork 1.2.3) regenerate every model: the code-generation version is 0.12.4, and `.dto`-only edits need the DTO task inputs from the guide.
+Compile through the application's actual KSP task and test the affected null/loaded-state behavior. Do not fix missing generated code by editing generated files. After upgrading to 0.12.4 (or fork 1.2.4) regenerate every model: the code-generation version is 0.12.4, and `.dto`-only edits need the DTO task inputs from the guide.
 
 ## Reference Routing
 

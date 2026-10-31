@@ -4,6 +4,7 @@ import org.babyfish.jimmer.meta.ImmutableProp;
 import org.babyfish.jimmer.meta.ImmutableType;
 import org.babyfish.jimmer.sql.JSqlClient;
 import org.babyfish.jimmer.sql.ast.mutation.SaveMode;
+import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.common.AbstractMutationTest;
 import org.babyfish.jimmer.sql.common.CacheImpl;
 import org.babyfish.jimmer.sql.event.TriggerType;
@@ -243,6 +244,31 @@ public class MutationKeyListenerTest extends AbstractMutationTest {
     }
 
     @Test
+    public void testUpdateReturningReadsKeysFromItsOwnStatement() {
+        List<String> withoutListener = new ArrayList<>();
+        List<Tuple2<String, Integer>> plainRows = updateReturningRows(
+                sqlClient(TriggerType.BINLOG_ONLY, testConnectionManager()),
+                withoutListener
+        );
+        RecordingConnectionManager listener = new RecordingConnectionManager();
+        List<String> withListener = new ArrayList<>();
+        List<Tuple2<String, Integer>> rows = updateReturningRows(
+                sqlClient(TriggerType.BINLOG_ONLY, listener),
+                withListener
+        );
+
+        assertEquals(1, withoutListener.size(), withoutListener.toString());
+        assertEquals(1, withListener.size(), withListener.toString());
+        assertTrue(withListener.get(0).contains("update BOOK"), withListener.get(0));
+        assertEquals(new LinkedHashSet<>(plainRows), new LinkedHashSet<>(rows));
+        assertEquals(3, rows.size());
+        assertEquals(
+                setOf(learningGraphQLId1, learningGraphQLId2, learningGraphQLId3),
+                listener.entityKeys(Book.class)
+        );
+    }
+
+    @Test
     public void testDirectBulkDeleteKeepsStatementAndDatabaseConstraint() {
         List<String> withoutListener = new ArrayList<>();
         Throwable withoutListenerError = directStoreDelete(
@@ -298,6 +324,24 @@ public class MutationKeyListenerTest extends AbstractMutationTest {
             }
         });
         return sqlList;
+    }
+
+    private List<Tuple2<String, Integer>> updateReturningRows(JSqlClient sqlClient, List<String> sqlList) {
+        List<Tuple2<String, Integer>> rows = new ArrayList<>();
+        jdbc(con -> {
+            clearExecutions();
+            rows.addAll(
+                    sqlClient.createUpdate(BookTable.$)
+                            .set(BookTable.$.price(), BigDecimal.valueOf(60))
+                            .where(BookTable.$.name().eq("Learning GraphQL"))
+                            .returning(BookTable.$.name(), BookTable.$.edition())
+                            .execute(con)
+            );
+            for (Execution execution : getExecutions()) {
+                sqlList.add(execution.getSql());
+            }
+        });
+        return rows;
     }
 
     private List<String> deleteSql(JSqlClient sqlClient) {

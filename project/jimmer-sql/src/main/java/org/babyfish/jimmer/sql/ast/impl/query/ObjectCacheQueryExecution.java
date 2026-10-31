@@ -13,17 +13,11 @@ import org.babyfish.jimmer.sql.ast.impl.EntitiesImpl;
 import org.babyfish.jimmer.sql.ast.impl.table.FetcherSelectionImpl;
 import org.babyfish.jimmer.sql.ast.impl.table.TableImplementor;
 import org.babyfish.jimmer.sql.ast.impl.table.TableProxies;
+import org.babyfish.jimmer.sql.ast.impl.util.SelectionRows;
 import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.Table;
 import org.babyfish.jimmer.sql.ast.table.spi.KTable;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple4;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple5;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple6;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple7;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple8;
-import org.babyfish.jimmer.sql.ast.tuple.Tuple9;
 import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
 import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
@@ -362,7 +356,7 @@ final class ObjectCacheQueryExecution {
                     args[i] = ((Function<Object, Object>) slot.converter).apply(value);
                 }
             }
-            results.add((R) rebuild(data.tupleCreator, args));
+            results.add((R) SelectionRows.create(data.tupleCreator, args));
         }
         return results;
     }
@@ -704,7 +698,7 @@ final class ObjectCacheQueryExecution {
                 }
                 args[i] = overlaid;
             }
-            results.add((R) rebuild(data.tupleCreator, args));
+            results.add((R) SelectionRows.create(data.tupleCreator, args));
         }
         return results;
     }
@@ -1042,37 +1036,6 @@ final class ObjectCacheQueryExecution {
             }
         }.visit(fetcher);
         return found[0];
-    }
-
-    private static Object rebuild(TupleCreator<?> tupleCreator, Object[] args) {
-        if (tupleCreator != null) {
-            return tupleCreator.createTuple(args);
-        }
-        if (args.length == 1) {
-            return args[0];
-        }
-        switch (args.length) {
-            case 2:
-                return new Tuple2<>(args[0], args[1]);
-            case 3:
-                return new Tuple3<>(args[0], args[1], args[2]);
-            case 4:
-                return new Tuple4<>(args[0], args[1], args[2], args[3]);
-            case 5:
-                return new Tuple5<>(args[0], args[1], args[2], args[3], args[4]);
-            case 6:
-                return new Tuple6<>(args[0], args[1], args[2], args[3], args[4], args[5]);
-            case 7:
-                return new Tuple7<>(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
-            case 8:
-                return new Tuple8<>(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
-            case 9:
-                return new Tuple9<>(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], args[8]);
-            default:
-                throw new IllegalArgumentException(
-                        "Object-cache hint supports between 1 and 9 selections, but there are " + args.length
-                );
-        }
     }
 
     private static final class Slot {
