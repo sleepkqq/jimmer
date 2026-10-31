@@ -27,6 +27,20 @@
 
 ## Migrate a consumer
 
+### Effective schema validation in 1.2.5
+
+- Quarkus reads schema validation only from `quarkus.jimmer.database-validation-mode`. The
+  nested `quarkus.jimmer.database-validation.mode` group was parsed but never applied, so a
+  configured `ERROR` silently stayed `NONE`. The group is removed; Quarkus now reports the old
+  key as unrecognized. Rename it to `database-validation-mode`.
+- Single-table validation treated root properties inherited from a `@MappedSuperclass` (for
+  example a shared `@Id` or `@Version`) as subtype-only and required their columns to be
+  nullable. Root properties now keep their own nullability; subtype properties must still map
+  to nullable columns.
+
+Enabling validation may surface schema drift that was hidden before; review each reported
+column rather than relaxing the mode. Release 1.2.5 includes both corrections; 1.2.4 does not.
+
 ### Connection-free cache hits and own-write eviction in 1.2.4
 
 No configuration changes; behaviour follows from the existing cache and trigger settings.
@@ -390,10 +404,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.2.4`, replace
+For version `1.2.5`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.4`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.4`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.5`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.5`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;

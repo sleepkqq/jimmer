@@ -6,7 +6,6 @@ import org.babyfish.jimmer.sql.runtime.DatabaseValidationMode;
 
 import io.quarkus.datasource.common.runtime.DataSourceUtil;
 import io.quarkus.runtime.annotations.ConfigDocMapKey;
-import io.quarkus.runtime.annotations.ConfigGroup;
 import io.quarkus.runtime.annotations.ConfigPhase;
 import io.quarkus.runtime.annotations.ConfigRoot;
 import io.smallrye.config.*;
@@ -48,33 +47,4 @@ public interface JimmerRuntimeConfig {
      */
     @WithDefault("NONE")
     DatabaseValidationMode databaseValidationMode();
-
-    /**
-     * jimmer.databaseValidation
-     */
-    @Deprecated
-    DatabaseValidation databaseValidation();
-
-    @Deprecated
-    @ConfigGroup
-    interface DatabaseValidation {
-
-        /**
-         * mode
-         */
-        @WithDefault("NONE")
-        DatabaseValidationMode mode();
-
-        /**
-         * catalog
-         */
-        @Deprecated
-        Optional<String> catalog();
-
-        /**
-         * schema
-         */
-        @Deprecated
-        Optional<String> schema();
-    }
 }

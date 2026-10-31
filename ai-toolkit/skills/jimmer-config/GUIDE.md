@@ -33,7 +33,7 @@ Quarkus scope/phase: `JimmerBuildTimeConfig` owns global `enable`, `language`, c
 
 | Key | Default | Meaning |
 |---|---|---|
-| `database-validation-mode` | `NONE` | `NONE` \| `WARNING` \| `ERROR` (Quarkus: the deprecated nested `database-validation.mode` is never read, so it has no effect; `.catalog`/`.schema` **(S)**) |
+| `database-validation-mode` | `NONE` | `NONE` \| `WARNING` \| `ERROR` (Quarkus: the nested `database-validation.mode` had no effect up to 1.2.4 and is removed in 1.2.5; `.catalog`/`.schema` **(S)**) |
 | `trigger-type` | `BINLOG_ONLY` | use with real CDC delivery; `TRANSACTION_ONLY` and `BOTH` are deprecated and should be migrated away from |
 | `transaction-cache-operator-fixed-delay` | `5s` (Q) / `5000` ms (S) | legacy transaction-trigger retry setting, not a replacement for CDC |
 

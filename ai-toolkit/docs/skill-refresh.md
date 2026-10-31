@@ -1,6 +1,25 @@
 # Skill refresh evidence
 
-## 2026-10-30 refresh (current)
+## 2026-10-31 refresh (current)
+
+Tracks `sleepkqq/jimmer` **1.2.5**, on the same upstream `dev` base as 1.2.4
+(`5ed2a810b`).
+
+Consumer-visible changes documented and, where contradicted, corrected:
+
+- Quarkus reads schema validation only from
+  `quarkus.jimmer.database-validation-mode`; the nested
+  `database-validation.mode` group, parsed but never applied, is removed and now
+  reported as an unrecognized key. Corrected the "deprecated but accepted"
+  wording in `jimmer-config` and `jimmer-quarkus`.
+- Single-table schema validation keeps the nullability of root properties
+  inherited from a `@MappedSuperclass`; only subtype properties must be nullable.
+
+Versions and snippets updated to `1.2.5`. Claims were re-checked against
+`JimmerRuntimeConfig`, `JQuarkusSqlClient` and `DatabaseValidators`. No LLM
+evaluation was run.
+
+## 2026-10-30 refresh
 
 Tracks `sleepkqq/jimmer` **1.2.4**,
 with upstream `dev` merged at `5ed2a810b` (`v0.12.4-4`, absorbing the DDL

@@ -71,8 +71,7 @@ quarkus:
       explicit-batch-enabled: false
       dumb-batch-acceptable: false
       constraint-violation-translatable: false
-    database-validation:
-      mode: NONE
+    database-validation-mode: NONE
     error-translator:
       disabled: false
       debug-info-supported: true

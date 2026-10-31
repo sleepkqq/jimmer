@@ -27,7 +27,7 @@ dependencies {
 }
 ```
 
-Current fork release: `1.2.4` (JitPack, no credentials; a tag alone does not prove the artifacts were built). It contains every v0.12.4 code change (only the upstream version-bump commits are absent). Do not mix upstream `org.babyfish.jimmer` artifacts with the fork's runtime/processors. Match the Kotlin compiler, KSP plugin, Quarkus platform and JDK to the fork's compatibility/build metadata (1.2.4 is tested with Kotlin 2.4.21, KSP 2.3.12 and Quarkus 3.40.1.1; the Quarkus extension targets JDK 25 while core modules stay on Java 8) rather than copying fixed versions from an example. Inspect the resolved runtime **and processor** dependency graphs after migration.
+Current fork release: `1.2.5` (JitPack, no credentials; a tag alone does not prove the artifacts were built). It contains every v0.12.4 code change (only the upstream version-bump commits are absent). Do not mix upstream `org.babyfish.jimmer` artifacts with the fork's runtime/processors. Match the Kotlin compiler, KSP plugin, Quarkus platform and JDK to the fork's compatibility/build metadata (1.2.5 is tested with Kotlin 2.4.21, KSP 2.3.12 and Quarkus 3.40.1.1; the Quarkus extension targets JDK 25 while core modules stay on Java 8) rather than copying fixed versions from an example. Inspect the resolved runtime **and processor** dependency graphs after migration.
 
 ## Differences From Spring Boot
 
@@ -105,7 +105,7 @@ quarkus:
 
 ### Key registry
 
-Read `jimmer-config` for the relevant key and its scope: only datasource-scoped options accept `quarkus.jimmer.<datasource-name>.<key>`. Dialect is derived from datasource metadata. Validation is read only from `quarkus.jimmer.database-validation-mode` (`JimmerRuntimeConfig.databaseValidationMode()`); the deprecated nested `database-validation.mode` group still parses but `JQuarkusSqlClient` never reads it, so it is silently ignored. The module README's config table (checked at 1.2.4) still lists the nested key; source wins.
+Read `jimmer-config` for the relevant key and its scope: only datasource-scoped options accept `quarkus.jimmer.<datasource-name>.<key>`. Dialect is derived from datasource metadata. Validation is read only from `quarkus.jimmer.database-validation-mode` (`JimmerRuntimeConfig.databaseValidationMode()`). The nested `database-validation.mode` group was parsed but never read up to 1.2.4, so it silently left validation off; 1.2.5 removes it and Quarkus reports it as an unrecognized key.
 
 The fork defaults to `constraint-violation-translatable=false` and `sql-state-exception-translator=true`: SQLState maps to `JimmerDataAccessException` subtypes. Enabling typed constraint investigation changes the error/performance contract; see `jimmer-debug`.
 

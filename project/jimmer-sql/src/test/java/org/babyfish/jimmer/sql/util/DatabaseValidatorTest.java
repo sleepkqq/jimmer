@@ -114,6 +114,23 @@ public class DatabaseValidatorTest extends AbstractTest {
     }
 
     @Test
+    public void testSingleTableRootPropsFromMappedSuperclass() throws SQLException {
+        String ddl = "create table VALIDATION_CLIENT(ID bigint not null primary key, VERSION int not null, " +
+                "CLIENT_TYPE varchar(20) not null, NAME varchar(20) not null, TAX_CODE varchar(20)";
+        Assertions.assertNull(validateH2(ddl + ")", null, ValidationClient.class, ValidationCompany.class));
+        // A subtype property shares the root table, so its column must still be nullable.
+        DatabaseValidationException ex = validateH2(
+                ddl + " not null)",
+                null,
+                ValidationClient.class,
+                ValidationCompany.class
+        );
+        Assertions.assertNotNull(ex);
+        Assertions.assertEquals(1, ex.getItems().size(), ex.getMessage());
+        assertProblem(ex, ValidationCompany.class, "taxCode", "The property is nullable");
+    }
+
+    @Test
     public void testJoinedInheritanceInH2() {
         jdbc(con -> {
             DatabaseValidationException ex = DatabaseValidators.validate(

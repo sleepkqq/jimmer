@@ -231,9 +231,11 @@ public class DatabaseValidators {
 
     private boolean isNullableInDatabase(ImmutableType type, ImmutableProp prop) {
         InheritanceInfo inheritanceInfo = type.getInheritanceInfo();
+        // Only subtype properties must be nullable in a single table. Root properties include
+        // those the root inherits from mapped superclasses, whose declaring type is not the root.
         if (inheritanceInfo != null &&
                 inheritanceInfo.getStrategy() == InheritanceType.SINGLE_TABLE &&
-                prop.toOriginal().getDeclaringType() != inheritanceInfo.getRootType()) {
+                !inheritanceInfo.getRootType().getProps().containsKey(prop.getName())) {
             return true;
         }
         return prop.isNullable() && !prop.isInputNotNull();
