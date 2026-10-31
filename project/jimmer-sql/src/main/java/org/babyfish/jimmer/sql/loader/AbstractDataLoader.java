@@ -26,7 +26,6 @@ import org.babyfish.jimmer.sql.ast.tuple.Tuple2;
 import org.babyfish.jimmer.sql.cache.Cache;
 import org.babyfish.jimmer.sql.cache.CacheAbandonedCallback;
 import org.babyfish.jimmer.sql.cache.CacheEnvironment;
-import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
 import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.exception.ExecutionException;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
@@ -155,12 +154,19 @@ public abstract class AbstractDataLoader {
                     "\"" + prop + "\" is not declared in entity"
             );
         }
+        // A content-only side keeps its own snapshots and edges SQL-fresh; other reachable
+        // types keep their own cache policy.
         Caches caches = sqlClient.getCaches();
-        isolatedFetcherContext = caches.isObjectCacheContentOnly(prop.getDeclaringType()) ||
-                prop.isAssociation(TargetLevel.ENTITY) &&
-                        caches.isObjectCacheContentOnly(prop.getTargetType());
+        List<ImmutableType> contentOnlyTypes = new ArrayList<>(2);
+        if (caches.isObjectCacheContentOnly(prop.getDeclaringType())) {
+            contentOnlyTypes.add(prop.getDeclaringType());
+        }
+        if (prop.isAssociation(TargetLevel.ENTITY) && caches.isObjectCacheContentOnly(prop.getTargetType())) {
+            contentOnlyTypes.add(prop.getTargetType());
+        }
+        isolatedFetcherContext = !contentOnlyTypes.isEmpty();
         this.sqlClient = isolatedFetcherContext ?
-                sqlClient.caches(CacheDisableConfig::disableAll) :
+                CacheIsolation.bypassing(sqlClient, contentOnlyTypes) :
                 sqlClient;
         this.con = con;
         this.path = FetchPath.of(path, prop);

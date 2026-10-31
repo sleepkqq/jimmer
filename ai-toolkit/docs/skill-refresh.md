@@ -1,6 +1,24 @@
 # Skill refresh evidence
 
-## 2026-10-31 refresh (current)
+## 2026-10-31 refresh for 1.2.6 (current)
+
+Tracks `sleepkqq/jimmer` **1.2.6**, on the same upstream `dev` base as 1.2.5
+(`5ed2a810b`).
+
+Consumer-visible changes documented and, where contradicted, corrected:
+
+- `content-only` association loaders and the retained read of automatic content
+  admission keep only the content-only/masked types SQL-fresh; other reachable types
+  use their own caches. Updated `jimmer-caching` (SKILL and
+  `object-cache-admission.md`).
+- `!fetchType(...)` is accepted on `flat(assoc)` and join-fetches the flattened
+  reference. Corrected the "any config before flat is an error" row in `jimmer-dto`.
+
+Versions and snippets updated to `1.2.6`. Claims were re-checked against
+`CacheIsolation`, `AbstractDataLoader`, `DtoPropBuilder` and both DTO generators. No LLM
+evaluation was run.
+
+## 2026-10-31 refresh
 
 Tracks `sleepkqq/jimmer` **1.2.5**, on the same upstream `dev` base as 1.2.4
 (`5ed2a810b`).

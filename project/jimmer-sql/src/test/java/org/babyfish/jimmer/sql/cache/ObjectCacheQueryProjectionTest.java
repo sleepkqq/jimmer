@@ -4877,6 +4877,47 @@ public class ObjectCacheQueryProjectionTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testNativeContentOnlyAdmissionLoadsOrdinaryCachedReferenceFromItsCache() {
+        // The retained graph keeps the admitted type and its edges fresh, but a reference
+        // target with an ordinary cache follows that cache's policy, as in any other read.
+        ImmutableType bookType = ImmutableType.get(Book.class);
+        ImmutableType storeType = ImmutableType.get(BookStore.class);
+        MapCache<Book> bookCache = new MapCache<>(bookType);
+        MapCache<BookStore> storeCache = new MapCache<>(storeType);
+        JSqlClient client = createClient(
+                it -> it == bookType ? bookCache : it == storeType ? storeCache : null,
+                bookType
+        );
+        bookCache.put(learningGraphQLId1, BookDraft.$.produce(draft -> {
+            draft.setId(learningGraphQLId1);
+            draft.setName("CACHED-BOOK");
+        }));
+        storeCache.put(oreillyId, BookStoreDraft.$.produce(draft -> {
+            draft.setId(oreillyId);
+            draft.setName("CACHED-STORE");
+            draft.setVersion(0);
+        }));
+        bookCache.clearHistory();
+        storeCache.clearHistory();
+        BookTable table = BookTable.$;
+        clearExecutions();
+        List<BookViewForTupleTest> rows = new ArrayList<>();
+        jdbc(con -> rows.addAll(client.createQuery(table)
+                .where(table.id().eq(learningGraphQLId1))
+                .select(table.fetch(BookViewForTupleTest.class))
+                .execute(con)));
+        assertEquals(1, rows.size());
+        assertEquals("CACHED-BOOK", rows.get(0).getName());
+        assertEquals(oreillyId, rows.get(0).getStore().getId());
+        assertEquals("CACHED-STORE", rows.get(0).getStore().getName());
+        assertCacheTouched(bookCache, learningGraphQLId1);
+        assertCacheTouched(storeCache, oreillyId);
+        assertEquals(1, getExecutions().size(), getExecutions().toString());
+        String sql = getExecutions().get(0).getSql();
+        assertFalse(sql.contains("BOOK_STORE"), sql);
+    }
+
+    @Test
     public void testNativeAdmissionServesJoinedDtoSlotWithoutHint() {
         // An automatic mask is rooted at the selected slot's own type, so a joined DTO
         // slot participates without the whole query being declined.

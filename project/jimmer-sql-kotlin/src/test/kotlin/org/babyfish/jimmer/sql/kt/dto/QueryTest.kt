@@ -1,10 +1,13 @@
 package org.babyfish.jimmer.sql.kt.dto
 
+import org.babyfish.jimmer.sql.kt.ast.expression.asc
 import org.babyfish.jimmer.sql.kt.ast.expression.desc
 import org.babyfish.jimmer.sql.kt.ast.expression.eq
+import org.babyfish.jimmer.sql.kt.ast.expression.valueIn
 import org.babyfish.jimmer.sql.kt.common.AbstractQueryTest
 import org.babyfish.jimmer.sql.kt.common.assertContent
 import org.babyfish.jimmer.sql.kt.model.TreeNode
+import org.babyfish.jimmer.sql.kt.model.dto.TreeNodeFlatJoinView
 import org.babyfish.jimmer.sql.kt.model.dto.TreeNodeFoldInsideFlatView
 import org.babyfish.jimmer.sql.kt.model.id
 import org.babyfish.jimmer.sql.kt.model.classic.book.Book
@@ -86,6 +89,42 @@ class QueryTest : AbstractQueryTest() {
                         |--->--->id=1, 
                         |--->--->name=Home, 
                         |--->--->parentKey=null
+                        |--->)
+                        |]""".trimMargin(),
+                    it
+                )
+            }
+        }
+    }
+
+    @Test
+    fun testFlatViewWithFetchType() {
+        executeAndExpect(
+            sqlClient.createQuery(TreeNode::class) {
+                where(table.id valueIn listOf(1L, 2L))
+                orderBy(table.id.asc())
+                select(table.fetch(TreeNodeFlatJoinView::class))
+            }
+        ) {
+            sql(
+                "select tb_1_.NODE_ID, tb_1_.NAME, tb_2_.NODE_ID, tb_2_.NAME " +
+                    "from TREE_NODE tb_1_ " +
+                    "left join TREE_NODE tb_2_ on tb_1_.PARENT_ID = tb_2_.NODE_ID " +
+                    "where tb_1_.NODE_ID in (?, ?) " +
+                    "order by tb_1_.NODE_ID asc"
+            )
+            rows {
+                assertContent(
+                    """[
+                        |--->TreeNodeFlatJoinView(
+                        |--->--->id=1, 
+                        |--->--->name=Home, 
+                        |--->--->parentName=null
+                        |--->), 
+                        |--->TreeNodeFlatJoinView(
+                        |--->--->id=2, 
+                        |--->--->name=Food, 
+                        |--->--->parentName=Home
                         |--->)
                         |]""".trimMargin(),
                     it

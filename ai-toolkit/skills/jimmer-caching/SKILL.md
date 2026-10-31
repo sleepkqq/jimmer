@@ -50,7 +50,7 @@ Use the installed provider's `CacheFactory`/`KCacheFactory` and `ChainCacheBuild
 
 ## Fork: root queries can read the object cache
 
-Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.5`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
+Upstream object caches serve ID loads and association/fetcher hydration, never ordinary root queries. The `sleepkqq/jimmer` fork (current `1.2.6`) adds **object-cache admission**: SQL selects the rows (ID skeleton, membership, order, paging, filters, FKs), the cache supplies entity content. Read [object-cache admission](references/object-cache-admission.md) before reasoning about a fork query that returns stale-looking values or unexpectedly skips columns.
 
 | Fork situation | Behavior |
 |---|---|
@@ -59,7 +59,7 @@ Upstream object caches serve ID loads and association/fetcher hydration, never o
 | `useObjectCache()` / `useObjectCache(fetcher)` / `useObjectCache(false)` | Legacy whole-entity hydration / explicit leaf whitelist / disable all admission |
 | Inside a transaction, `forUpdate`, command purpose, stream/forEach, count | Never admitted |
 | `CacheAdmissionPolicy` (via `CacheFactory.isObjectCacheAdmissible`) | Query-level or per-row veto; a vetoed row is loaded fresh, siblings stay cached |
-| `content-only` cache | Entity, ID and association reads stay SQL-backed; DTO/View content is still admitted |
+| `content-only` cache | Entity, ID and association reads of that type stay SQL-backed; DTO/View content is still admitted; reachable types keep their own caches |
 
 A DTO used for an edit form is admitted like a display DTO. A read that must see the current row uses a bare entity projection, `useObjectCache(false)` or a policy veto.
 

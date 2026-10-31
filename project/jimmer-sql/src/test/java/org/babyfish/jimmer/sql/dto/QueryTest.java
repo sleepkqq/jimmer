@@ -149,6 +149,44 @@ public class QueryTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testFlatViewWithFetchType() {
+        TreeNodeTable table = TreeNodeTable.$;
+        executeAndExpect(
+                getSqlClient()
+                        .createQuery(table)
+                        .where(table.id().in(Arrays.asList(1L, 2L)))
+                        .orderBy(table.id())
+                        .select(table.fetch(TreeNodeFlatJoinView.class)),
+                ctx -> {
+                    ctx.sql(
+                            "select tb_1_.NODE_ID, tb_1_.NAME, tb_2_.NODE_ID, tb_2_.NAME " +
+                                    "from TREE_NODE tb_1_ " +
+                                    "left join TREE_NODE tb_2_ on tb_1_.PARENT_ID = tb_2_.NODE_ID " +
+                                    "where tb_1_.NODE_ID in (?, ?) " +
+                                    "order by tb_1_.NODE_ID asc"
+                    );
+                    ctx.rows(rows -> {
+                        assertContentEquals(
+                                "[" +
+                                        "--->TreeNodeFlatJoinView(" +
+                                        "--->--->id=1, " +
+                                        "--->--->name=Home, " +
+                                        "--->--->parentName=null" +
+                                        "--->), " +
+                                        "--->TreeNodeFlatJoinView(" +
+                                        "--->--->id=2, " +
+                                        "--->--->name=Food, " +
+                                        "--->--->parentName=Home" +
+                                        "--->)" +
+                                        "]",
+                                rows
+                        );
+                    });
+                }
+        );
+    }
+
+    @Test
     public void testNullableFoldViewQuery() {
         BookTable table = BookTable.$;
         executeAndExpect(

@@ -1,6 +1,6 @@
 # Object-cache query admission — sleepkqq/jimmer fork
 
-Fork-only (`com.github.sleepkqq.jimmer:*`, contract below is release `1.2.5`). Upstream `org.babyfish.jimmer` has no `useObjectCache`, `CacheAdmissionPolicy` or content-only caches: there the object cache serves ID loads and association/fetcher hydration only.
+Fork-only (`com.github.sleepkqq.jimmer:*`, contract below is release `1.2.6`). Upstream `org.babyfish.jimmer` has no `useObjectCache`, `CacheAdmissionPolicy` or content-only caches: there the object cache serves ID loads and association/fetcher hydration only.
 
 Admission lets a root query take entity **content** from a declared object cache. It is not a query-result cache: SQL still runs and decides which rows exist.
 
@@ -36,7 +36,7 @@ Fallback: a missing, negative or incompatible cached value (wrong concrete type,
 
 ## Content-only caches
 
-`CacheFactory.isObjectCacheContentOnly(type)` (Quarkus: `content-only: true`) keeps the cache for content admission only: bare entity reads, ID reads and association loading stay SQL-backed, converted DTO/View slots are still admitted. Per-field lists (`content-fields`) existed only in 1.1.7–1.1.11 and are removed from 1.1.12; delete the key when upgrading.
+`CacheFactory.isObjectCacheContentOnly(type)` (Quarkus: `content-only: true`) keeps the cache for content admission only: bare entity reads, ID reads and association loading of that type stay SQL-backed, converted DTO/View slots are still admitted. Only the content-only type itself is fresh: a reference reached from it (a `Book.store` → `BookStore` with an ordinary cache) is still served from the target's own cache, including inside an admitted DTO read, so caching the root never makes its cached children cost extra SQL. Per-field lists (`content-fields`) existed only in 1.1.7–1.1.11 and are removed from 1.1.12; delete the key when upgrading.
 
 ## Application admission policy
 

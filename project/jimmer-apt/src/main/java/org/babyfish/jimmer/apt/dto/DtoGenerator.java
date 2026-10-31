@@ -1293,6 +1293,10 @@ public class DtoGenerator {
         for (DtoProp<ImmutableType, ImmutableProp> childProp : targetDtoType.getDtoProps()) {
             addHiddenFetcherField(childProp, cb);
         }
+        if (prop.getConfig() != null) {
+            cb.add(", \n");
+            addConfigLambda(cb, prop);
+        }
         cb.add("$<$<\n)");
     }
 

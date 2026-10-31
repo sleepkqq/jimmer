@@ -27,6 +27,39 @@
 
 ## Migrate a consumer
 
+### Reachable caches in content-only and admitted reads in 1.2.6
+
+A `content-only` association loader and the retained read of automatic content admission used
+to run on a fully cache-disabled client. Every type reached from such a row -- an ordinary
+cached reference, its geography or lookup data -- was therefore read from SQL again, so a
+content-only entity made its whole neighbourhood colder than an uncached one.
+
+Only the content-only or masked types themselves now stay SQL-fresh: their object caches, the
+property caches they declare and the property caches targeting them, across their inheritance
+line. Every other reachable type keeps its own cache policy, exactly as in an ordinary read.
+Membership, visibility, order and pagination remain SQL-authoritative, the edges of a
+content-only type are still loaded from SQL, and a cache-disabled client
+(`caches { disableAll() }`, a declined hint) stays fully disabled: derived cache-disable
+configurations only add to their base.
+
+No configuration change is required. Release 1.2.6 includes this correction; 1.2.5 does not.
+
+### Join-fetched flattened DTO associations in 1.2.6
+
+`flat(assoc) { ... }` in the DTO language accepts `!fetchType(...)`:
+
+```
+!fetchType(JOIN_ALWAYS)
+flat(store) { name as storeName }
+```
+
+The flattened to-one reference is then join-fetched exactly like a non-flat association with
+the same configuration -- a LEFT join for a nullable reference, which keeps rows without a
+target -- instead of a separate child SELECT. Every other configuration on `flat(...)` and any
+configuration on `id(...)` is still rejected; the message names the allowed one. APT and KSP
+generate the same fetcher. Release 1.2.6 includes this; 1.2.5 rejects any configuration on
+`flat(...)`.
+
 ### Effective schema validation in 1.2.5
 
 - Quarkus reads schema validation only from `quarkus.jimmer.database-validation-mode`. The
@@ -210,6 +243,9 @@ generated DTO and association reads then use fresh SQL; only explicit cached-con
 may hydrate approved leaves from that object cache. The policy follows native inheritance
 metadata and remains attached to derived clients. Its default is false, preserving legacy
 cache behavior. Custom factories expose the same policy through `CacheFactory`.
+
+> Superseded in 1.2.6: only the content-only types stay fresh; other reachable types keep their
+> own cache policy (see "Reachable caches in content-only and admitted reads in 1.2.6").
 
 Association loading isolates the entire fresh subtree from an ambient cache-enabled fetcher
 context, including deeper children. Explicit masks in merged set queries conservatively
@@ -404,10 +440,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.2.5`, replace
+For version `1.2.6`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.5`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.5`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.6`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.6`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;

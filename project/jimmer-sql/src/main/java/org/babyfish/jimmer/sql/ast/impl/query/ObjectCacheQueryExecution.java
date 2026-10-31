@@ -18,10 +18,10 @@ import org.babyfish.jimmer.sql.ast.table.BaseTable;
 import org.babyfish.jimmer.sql.ast.table.Table;
 import org.babyfish.jimmer.sql.ast.table.spi.KTable;
 import org.babyfish.jimmer.sql.ast.tuple.Tuple3;
-import org.babyfish.jimmer.sql.cache.CacheDisableConfig;
 import org.babyfish.jimmer.sql.cache.Caches;
 import org.babyfish.jimmer.sql.fetcher.Fetcher;
 import org.babyfish.jimmer.sql.fetcher.Field;
+import org.babyfish.jimmer.sql.fetcher.impl.CacheIsolation;
 import org.babyfish.jimmer.sql.fetcher.impl.FetchPath;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherImpl;
 import org.babyfish.jimmer.sql.fetcher.impl.FetcherSelection;
@@ -37,8 +37,10 @@ import org.slf4j.LoggerFactory;
 import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -400,12 +402,6 @@ final class ObjectCacheQueryExecution {
         // of its own, so a bare entity slot stays fresh either way.
         CacheContentMask rootMask = data.cachedContent != null ? CacheContentMask.of(cachedContent) : null;
 
-        // The retained graph must not read any object cache: a locally derived,
-        // cache-disabled client keeps every loader query fresh and consistent with the
-        // rendered SQL. It is also the client whose join decisions the join-preservation
-        // check must consult.
-        JSqlClientImplementor readClient = sqlClient.caches(CacheDisableConfig::disableAll);
-
         AstContext astContext = new AstContext(sqlClient);
         astContext.pushStatement(mutableQuery);
         TableImplementor<?> rootImplementor;
@@ -518,18 +514,28 @@ final class ObjectCacheQueryExecution {
             return null;
         }
 
+        // The retained graph reads every masked type, and the edges it declares, from SQL; a
+        // reachable target of another type follows its own cache policy, as in any read.
+        Set<ImmutableType> maskTypes = new LinkedHashSet<>();
+        for (MaskSlot slot : slots) {
+            if (slot.masked) {
+                slot.node.collectTypes(maskTypes);
+            }
+        }
+        JSqlClientImplementor readClient = CacheIsolation.bypassing(sqlClient, maskTypes);
+
         TypedQueryData retainedData = data.skeleton(retainedSelections, IDENTITY_TUPLE_CREATOR);
         ConfigurableRootQueryImpl<T, Object[]> retainedQuery =
                 new ConfigurableRootQueryImpl<>(retainedData, mutableQuery);
         query.prepareGlobalFiltersForObjectCache(retainedSelections);
 
-        // The retained read renders, reads and loads on the same cache-disabled derived
-        // client, so no loader query can serve a cached whole target or property edge.
+        // The retained read renders, reads and loads on the same derived client, so no loader
+        // query can serve a masked type's cached snapshot or property edge.
         Tuple3<String, List<Object>, List<Integer>> sqlResult =
                 retainedQuery.renderForObjectCache(readClient);
         // A nested field filter or converter may already have an ambient fetcher
         // context whose client is the cache-enabled caller; run the retained read in a
-        // fresh context so every post-fetch loader uses this cache-disabled client.
+        // fresh context so every post-fetch loader uses this derived client.
         List<Object[]> seeds = FetcherUtil.withoutFetcherContext(() -> Selectors.select(
                 readClient,
                 con,

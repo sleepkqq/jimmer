@@ -33,3 +33,12 @@ TreeNodeFoldInsideFlatView {
         }
     }
 }
+
+TreeNodeFlatJoinView {
+    id
+    name
+    !fetchType(JOIN_ALWAYS)
+    flat(parent) {
+        name as parentName
+    }
+}
