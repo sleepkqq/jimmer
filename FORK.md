@@ -27,7 +27,7 @@
 
 ## Migrate a consumer
 
-### Connection-free cache hits and own-write eviction in 1.2.3
+### Connection-free cache hits and own-write eviction in 1.2.4
 
 No configuration changes; behaviour follows from the existing cache and trigger settings.
 
@@ -43,7 +43,8 @@ No configuration changes; behaviour follows from the existing cache and trigger 
   inserts, updates, upserts, deletes and middle-table changes after commit (rollback evicts
   nothing), so the writing instance reads its own committed writes without waiting for CDC.
   A bulk update of a cached type reads its ids through `UPDATE ... RETURNING` where the dialect
-  supports it (otherwise one id pre-select); a bulk delete keeps its direct statement and database
+  supports it (otherwise one id pre-select), and an update-returning statement adds the id to its
+  own `RETURNING` list; a bulk delete keeps its direct statement and database
   constraint errors after one id pre-select. Types without caches keep their previous SQL. Inverse-side association caches, and saved rows whose ids the database
   does not return (for example MySQL batch upserts by key), still rely on CDC.
 - Automatic DTO/View admission that cannot be applied falls back to the ordinary cached path
@@ -51,14 +52,15 @@ No configuration changes; behaviour follows from the existing cache and trigger 
   package.
 
 The release also targets Java 25 for the Quarkus extension (core modules stay on Java 8) and
-moves to Quarkus 3.40.1.1, Kotlin 2.4.21 and Gradle 9.8.2. Release 1.2.3 includes these
+moves to Quarkus 3.40.1.1, Kotlin 2.4.21 and Gradle 9.8.2. Release 1.2.4 includes these
 changes; 1.1.14 does not.
 The `1.2.0` and `1.2.1` tags carry the same behaviour but have no JitPack build: two of the
 1.2.0 dependency versions were not yet on JitPack's Maven Central mirror, and 1.2.1 landed on
 JitPack's legacy image, which could not install JDK 25. 1.2.2 built, but with a key listener its
 bulk deletes left the direct `DELETE` (turning database constraint errors into
 `CannotDissociateTarget`) and its bulk updates added a full-row `SELECT`; 1.2.3 corrects both.
-Use 1.2.3.
+1.2.3 still pre-selected full rows before a listed update-returning statement; 1.2.4 reads its
+keys from the same statement. Use 1.2.4.
 
 ### Non-nullable key-group preference in 1.1.10
 
@@ -388,10 +390,10 @@ Release 1.0.5 includes this correction; 1.0.4 does not.
 
 ### Coordinates
 
-For version `1.2.3`, replace
+For version `1.2.4`, replace
 `com.github.sleepkqq.quarkus-jimmer-extension:quarkus-jimmer:1.14.1` with
-`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.3`. Replace every direct
-`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.3`, including
+`com.github.sleepkqq.jimmer:quarkus-jimmer:1.2.4`. Replace every direct
+`org.babyfish.jimmer:*` dependency with `com.github.sleepkqq.jimmer:*:1.2.4`, including
 `jimmer-apt`, `jimmer-ksp` and `jimmer-bom`. Keep Maven Central and add
 `https://jitpack.io`; no credentials or tokens are required. Packages and configuration
 keys are unchanged. Kotlin consumers use the KSP plugin compatible with their compiler;
