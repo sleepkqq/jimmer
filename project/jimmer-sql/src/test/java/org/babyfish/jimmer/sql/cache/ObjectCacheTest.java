@@ -690,7 +690,9 @@ public class ObjectCacheTest extends AbstractQueryTest {
     }
 
     @Test
-    public void testContentOnlyAssociationSubtreeDoesNotReuseAmbientCacheContext() {
+    public void testContentOnlyAssociationSubtreeKeepsOtherTypesOnTheirOwnCachePolicy() {
+        // Content-only keeps its own type's snapshots and edges SQL-fresh, even when they are
+        // cached; a reachable type with an ordinary cache keeps serving it, as in any read.
         sqlClient = newClient(NON_TX_MANAGER, true);
         Cache<Object, Author> authorCache = sqlClient.getCaches().getObjectCache(ImmutableType.get(Author.class));
         nontransactional(con -> authorCache.getAll(
@@ -699,8 +701,28 @@ public class ObjectCacheTest extends AbstractQueryTest {
                         sammerId,
                         AuthorDraft.$.produce(draft -> {
                             draft.setId(sammerId);
-                            draft.setFirstName("STALE");
+                            draft.setFirstName("CACHED");
                         })
+                ), false)
+        ));
+        Cache<Object, BookStore> storeCache = sqlClient.getCaches().getObjectCache(ImmutableType.get(BookStore.class));
+        nontransactional(con -> storeCache.getAll(
+                Collections.<Object>singletonList(manningId),
+                new CacheEnvironment<>(sqlClient, con, keys -> Collections.singletonMap(
+                        manningId,
+                        BookStoreDraft.$.produce(draft -> {
+                            draft.setId(manningId);
+                            draft.setName("STALE");
+                            draft.setVersion(0);
+                        })
+                ), false)
+        ));
+        Cache<Object, List<Object>> booksCache = sqlClient.getCaches().getPropertyCache(BookStoreProps.BOOKS);
+        nontransactional(con -> booksCache.getAll(
+                Collections.<Object>singletonList(manningId),
+                new CacheEnvironment<>(sqlClient, con, keys -> Collections.singletonMap(
+                        manningId,
+                        Collections.emptyList()
                 ), false)
         ));
         BookStoreFetcher storeFetcher = BookStoreFetcher.$.name().books(
@@ -718,14 +740,13 @@ public class ObjectCacheTest extends AbstractQueryTest {
                 )))
                 .execute(con).get(0).store()));
         for (BookStore store : stores) {
+            Assertions.assertEquals("MANNING", store.name());
             Assertions.assertFalse(store.books().isEmpty());
             for (Book book : store.books()) {
                 Assertions.assertFalse(book.authors().isEmpty());
-                Assertions.assertEquals("Samer", book.authors().get(0).firstName());
+                Assertions.assertEquals("CACHED", book.authors().get(0).firstName());
             }
         }
-        nontransactional(con -> Assertions.assertEquals("STALE", sqlClient.getEntities().forConnection(con)
-                .findById(AuthorFetcher.$.firstName(), sammerId).firstName()));
     }
 
     @Test

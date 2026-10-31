@@ -186,6 +186,19 @@ final class CacheContentMask {
         );
     }
 
+    /** Adds the entity type of this node, its navigated children and its type branches. */
+    void collectTypes(Set<ImmutableType> types) {
+        if (!embedded) {
+            types.add(type);
+        }
+        for (CacheContentMask child : children.values()) {
+            child.collectTypes(types);
+        }
+        for (CacheContentMask branch : typeBranches.values()) {
+            branch.collectTypes(types);
+        }
+    }
+
     /**
      * A copy with all navigated children and branches dropped, keeping only this node's
      * own leaves (for a bare entity-table selection whose partial form cannot express

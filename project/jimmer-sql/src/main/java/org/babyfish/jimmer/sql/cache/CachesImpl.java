@@ -97,9 +97,11 @@ public class CachesImpl implements Caches {
         propCacheMap = base.propCacheMap;
         operator = base.operator;
         abandonedCallback = base.abandonedCallback;
-        disableAll = cfg.isDisableAll();
-        disabledTypes = cfg.getDisabledTypes();
-        disabledProps = cfg.getDisabledProps();
+        // A derivation only disables more: a narrower one must never re-enable a cache
+        // that its base client already bypasses.
+        disableAll = base.disableAll || cfg.isDisableAll();
+        disabledTypes = union(base.disabledTypes, cfg.getDisabledTypes());
+        disabledProps = union(base.disabledProps, cfg.getDisabledProps());
         objectCacheContentOnlyTypes = base.objectCacheContentOnlyTypes;
         admissionPolicy = base.admissionPolicy;
     }
@@ -169,6 +171,15 @@ public class CachesImpl implements Caches {
     @Override
     public boolean isAffectedBy(DatabaseEvent e) {
         return (e.getConnection() != null) == triggers.isTransaction();
+    }
+
+    private static <T> Set<T> union(Set<T> base, Set<T> added) {
+        if (base.isEmpty()) {
+            return added;
+        }
+        Set<T> merged = new HashSet<>(base);
+        merged.addAll(added);
+        return merged;
     }
 
     @SuppressWarnings("unchecked")
